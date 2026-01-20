@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-avax-red: #e84142;
+  --color-avax-black: #000000;
+  --color-avax-white: #ffffff;
+  --color-avax-gray: #1a1a1a;
+}
+
+body {
+  @apply bg-black text-white min-h-screen font-sans;
+}
+
+button {
+  @apply transition-all duration-200;
+}
