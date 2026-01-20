@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// Note: Requires forge-std which is not currently available.
-
 import "forge-std/Test.sol";
 import "../src/AMPSettlement.sol";
 import "../src/AMPTypes.sol";

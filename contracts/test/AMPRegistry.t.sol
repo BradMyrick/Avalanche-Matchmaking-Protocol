@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// Note: Requires forge-std which is not currently available in this environment.
-// These tests are provided as a template for use once Foundry is fully set up.
-
 import "forge-std/Test.sol";
 import "../src/AMPRegistry.sol";
 import "../src/AMPTypes.sol";
