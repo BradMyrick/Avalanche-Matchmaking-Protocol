@@ -1,9 +1,9 @@
 pub mod match_capnp {
     include!(concat!(env!("OUT_DIR"), "/match_capnp.rs"));
 }
-mod verifier_impl;
+mod mm_impl;
 
-use crate::verifier_impl::VerifierImpl;
+use crate::mm_impl::MMImpl;
 use capnp_rpc::{
     RpcSystem, rpc_twoparty_capnp, rpc_twoparty_capnp::Side, twoparty,
 };

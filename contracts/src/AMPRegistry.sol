@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.33;
 
 import "./AMPTypes.sol";
 
@@ -8,19 +8,52 @@ import "./AMPTypes.sol";
  * @notice Handles registration of games and creation/joining of match instances.
  */
 contract AMPRegistry {
-    address public owner;
+    address private system;
+    address payable owner;
     uint256 public nextGameId;
     uint256 public nextMatchId;
+
+    uint256 public feeBalance;
+
+    bool private locked;
+
+    modifier nonReentrant() {
+        require(!locked, "No reentrancy");
+        locked = true;
+        _;
+        locked = false;
+    }
+
 
     mapping(uint256 => AMPTypes.Game) public games;
     mapping(uint256 => AMPTypes.Match) public matches;
 
-    event GameRegistered(uint256 indexed gameId, address admin, AMPTypes.SettlementMode mode);
-    event MatchCreated(uint256 indexed matchId, uint256 indexed gameId, address playerA, uint256 stakeAmount);
+    event GameRegistered(
+        uint256 indexed gameId,
+        address admin,
+        AMPTypes.SettlementMode mode
+    );
+    event MatchCreated(
+        uint256 indexed matchId,
+        uint256 indexed gameId,
+        address playerA,
+        uint256 stakeAmount
+    );
     event MatchJoined(uint256 indexed matchId, address playerB);
+    event FeesWithdrawn(uint256 amount, address wallet);
+
+    modifier onlySystem() {
+        require(msg.sender == system);
+        _;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner);
+        _;
+    }
 
     constructor() {
-        owner = msg.sender;
+        owner = payable(msg.sender);
     }
 
     /**
@@ -39,7 +72,11 @@ contract AMPRegistry {
         // TODO: implement permission model if needed. Currently open to any caller.
         gameId = nextGameId++;
         games[gameId] = AMPTypes.Game({
-            admin: msg.sender, mode: mode, verifiers: verifiers, minStake: minStake, stakeToken: stakeToken
+            admin: msg.sender,
+            mode: mode,
+            verifiers: verifiers,
+            minStake: minStake,
+            stakeToken: stakeToken
         });
 
         emit GameRegistered(gameId, msg.sender, mode);
@@ -48,7 +85,10 @@ contract AMPRegistry {
     /**
      * @notice Updates the list of authorized verifiers for a game.
      */
-    function updateGameVerifiers(uint256 gameId, address[] calldata verifiers) external {
+    function updateGameVerifiers(
+        uint256 gameId,
+        address[] calldata verifiers
+    ) external {
         // TODO: restrict to game admin (games[gameId].admin).
         games[gameId].verifiers = verifiers;
     }
@@ -56,7 +96,9 @@ contract AMPRegistry {
     /**
      * @notice Creates a new match for a registered game.
      */
-    function createMatch(uint256 gameId) external payable returns (uint256 matchId) {
+    function createMatch(
+        uint256 gameId
+    ) external payable returns (uint256 matchId) {
         AMPTypes.Game storage game = games[gameId];
         require(msg.value >= game.minStake, "Stake too low");
         // TODO: implement ERC20 safeTransferFrom if game.stakeToken != address(0).
@@ -88,5 +130,17 @@ contract AMPRegistry {
         m.state = AMPTypes.MatchState.READY;
 
         emit MatchJoined(matchId, msg.sender);
+    }
+
+    /**
+     * @notice Pays out collected fees
+     */
+    function withdrawFees() external onlyOwner nonReentrant {
+        require(feeBalance > 0, "No fees to withdraw");
+        (bool success,) = owner.call{value: feeBalance}("");
+        require(success, "Transfer Failed");
+
+        emit FeesWithdrawn(feeBalance, owner);
+        feeBalance = 0;
     }
 }
