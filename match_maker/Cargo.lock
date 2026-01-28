@@ -3,6 +3,21 @@
 version = 4
 
 [[package]]
+name = "AMP-Server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "capnp",
+ "capnp-rpc",
+ "capnpc",
+ "ethers-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10,6 +25,12 @@ checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "anyhow"
+version = "1.0.100"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "arrayvec"
@@ -1348,6 +1369,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-util"
+version = "0.7.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-io",
+ "futures-sink",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "toml_datetime"
 version = "0.7.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1412,19 +1447,6 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
-
-[[package]]
-name = "verifier"
-version = "0.1.0"
-dependencies = [
- "capnp",
- "capnp-rpc",
- "capnpc",
- "ethers-core",
- "serde",
- "serde_json",
- "tokio",
-]
 
 [[package]]
 name = "version_check"

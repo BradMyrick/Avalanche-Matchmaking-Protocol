@@ -1,10 +1,9 @@
-use crate::match_capnp::{game_connector, match_maker};
+use crate::match_capnp::match_maker;
 use capnp::capability::Promise;
 use capnp_rpc::pry;
 use ethers_core::utils::keccak256;
 
 pub struct MMImpl;
-pub struct GameConnector;
 
 impl match_maker::Server for MMImpl {
     fn verify_async_replay(
@@ -29,8 +28,6 @@ impl match_maker::Server for MMImpl {
         Promise::ok(())
     }
 }
-
-impl game_connector::Server for GameConnector {}
 
 // TODO: load private key from env and implement EIP-712 signing.
 pub fn sign_result(

@@ -1,51 +1,48 @@
 pub mod match_capnp {
     include!(concat!(env!("OUT_DIR"), "/match_capnp.rs"));
 }
+mod gc_impl;
 mod mm_impl;
-
-use crate::mm_impl::MMImpl;
-use capnp_rpc::{
-    RpcSystem, rpc_twoparty_capnp, rpc_twoparty_capnp::Side, twoparty,
+use anyhow::{Result, bail};
+use capnp_rpc::{RpcSystem, rpc_twoparty_capnp::Side, twoparty};
+use std::{fs, path::Path};
+use tokio::net::UnixListener;
+use tokio::sync::mpsc;
+use tokio_util::compat::{
+    FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt,
+    TokioAsyncWriteCompatExt,
 };
-use std::net::ToSocketAddrs;
-use tokio::net::TcpListener;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "127.0.0.1:4000".to_socket_addrs()?.next().unwrap();
-    let listener = TcpListener::bind(&addr).await?;
+async fn main() -> Result<()> {
+    let p = Path::new("/run/amp/amp.sock");
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let listener = UnixListener::bind(&p)?;
 
-    println!("AMP Verifier Service starting on {}", addr);
+            println!("AMP Verifier Service starting on {p:?}");
 
-    // TODO: Properly integrate generated capnp code.
-    // This is a placeholder for the RPC server loop.
-    /*
-    loop {
-        let (stream, _) = listener.accept().await?;
-        stream.set_nodelay(true)?;
-        let (reader, writer) = tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
+            loop {
+                let (stream, _) = listener.accept().await?;
 
-        let network = twoparty::VatNetwork::new(
-            reader,
-            writer,
-            Side::Server,
-            Default::default(),
-        );
+                let (reader, writer) = tokio::io::split(stream);
 
-        let service = match_capnp::verifier::Client::new(VerifierImpl).into_client();
-        let mut rpc_system = RpcSystem::new(Box::new(network), Some(service.client));
+                let network = twoparty::VatNetwork::new(
+                    reader.compat(),
+                    writer.compat_write(),
+                    Side::Server,
+                    Default::default(),
+                );
 
-        tokio::spawn(async move {
-            rpc_system.await.unwrap();
-        });
-    }
-    */
+                let client: match_capnp::game_connector::Client =
+                    capnp_rpc::new_client(gc_impl::GameConnectorImpl::new());
 
-    println!(
-        "Server loop reached (placeholder). Logs: Waiting for connections..."
-    );
-
-    // Keep process alive for the demo
-    tokio::signal::ctrl_c().await?;
-    Ok(())
+                let rpc_system = RpcSystem::new(
+                    Box::new(network),
+                    Some(client.clone().client),
+                );
+                tokio::task::spawn_local(rpc_system);
+            }
+        })
+        .await
 }
