@@ -8,7 +8,7 @@ AMP (Avalanche or Async Matchmaking Protocol) is a shared on‑chain matchmaking
 
 ## What is AMP?
 
-Most Web3 games rebuild matchmaking, escrow, and payouts from scratch, then trust a custom backend to settle matches. AMP turns that into a reusable, chain‑level **protocol**: a set of contracts, verifiers, and SDKs that many games can plug into.[web:47][web:59]
+Most Web3 games rebuild matchmaking, escrow, and payouts from scratch, then trust a custom backend to settle matches. AMP turns that into a reusable, chain‑level **protocol**: a set of contracts, verifiers, and SDKs that many games can plug into.
 
 - **Shared infra primitive:** One protocol, many games; each game registers a `gameId` and config, then uses AMP for match lifecycle and settlement.
 - **Off‑chain gameplay, on‑chain settlement:** Engines (Unity, Unreal, JS, Rust, etc.) simulate matches off‑chain and emit deterministic replays or event logs. AMP only sees hashes + signatures on Avalanche.
