@@ -3,46 +3,60 @@ pub mod match_capnp {
 }
 mod gc_impl;
 mod mm_impl;
-use anyhow::{Result, bail};
+use anyhow::Result;
 use capnp_rpc::{RpcSystem, rpc_twoparty_capnp::Side, twoparty};
-use std::{fs, path::Path};
-use tokio::net::UnixListener;
-use tokio::sync::mpsc;
-use tokio_util::compat::{
-    FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt,
-    TokioAsyncWriteCompatExt,
-};
+use std::env;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+use tokio::task::LocalSet;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let p = Path::new("/run/amp/amp.sock");
-    tokio::task::LocalSet::new()
+    let addr = env::var("AMP_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+
+    println!("AMP Matchmaker Service starting on {}", addr);
+
+    let local = LocalSet::new();
+    local
         .run_until(async move {
-            let listener = UnixListener::bind(&p)?;
-
-            println!("AMP Verifier Service starting on {p:?}");
-
             loop {
-                let (stream, _) = listener.accept().await?;
-
-                let (reader, writer) = tokio::io::split(stream);
-
-                let network = twoparty::VatNetwork::new(
-                    reader.compat(),
-                    writer.compat_write(),
-                    Side::Server,
-                    Default::default(),
-                );
-
-                let client: match_capnp::game_connector::Client =
-                    capnp_rpc::new_client(gc_impl::GameConnectorImpl::new());
-
-                let rpc_system = RpcSystem::new(
-                    Box::new(network),
-                    Some(client.clone().client),
-                );
-                tokio::task::spawn_local(rpc_system);
+                let accept_res: Result<
+                    (tokio::net::TcpStream, std::net::SocketAddr),
+                    std::io::Error,
+                > = listener.accept().await;
+                match accept_res {
+                    Ok((stream, _)) => {
+                        let _ = stream.set_nodelay(true);
+                        tokio::task::spawn_local(async move {
+                            let rpc_res: Result<()> = async {
+                                let (reader, writer) = tokio::io::split(stream);
+                                let network = twoparty::VatNetwork::new(
+                                    reader.compat(),
+                                    writer.compat_write(),
+                                    Side::Server,
+                                    Default::default(),
+                                );
+                                let client: match_capnp::game_connector::Client =
+                                    capnp_rpc::new_client(gc_impl::GameConnectorImpl::new());
+                                let rpc_system =
+                                    RpcSystem::new(Box::new(network), Some(client.clone().client));
+                                rpc_system.await?;
+                                Ok(())
+                            }
+                            .await;
+                            if let Err(e) = rpc_res {
+                                eprintln!("RPC System error: {:?}", e);
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("Accept error: {:?}", e);
+                    }
+                }
             }
         })
-        .await
+        .await;
+
+    Ok(())
 }

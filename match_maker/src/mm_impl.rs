@@ -13,8 +13,9 @@ impl match_maker::Server for MMImpl {
     ) -> Promise<(), capnp::Error> {
         let transcript = pry!(pry!(params.get()).get_transcript());
         let hash = pry!(transcript.get_hash());
+        println!("Verifying transcript with hash: {:?}", hash);
 
-        let mut results_builder = results.get();
+        let _results_builder = results.get();
 
         Promise::ok(())
     }
@@ -30,11 +31,7 @@ impl match_maker::Server for MMImpl {
 }
 
 // TODO: load private key from env and implement EIP-712 signing.
-pub fn sign_result(
-    match_id: u64,
-    outcome: &str,
-    result_hash: [u8; 32],
-) -> Vec<u8> {
+pub fn sign_result(_match_id: u64, _outcome: &str, _result_hash: [u8; 32]) -> Vec<u8> {
     // TODO: build EIP-712 or simple prefixed hash.
     // TODO: sign and return fields matching Solidity struct.
 
