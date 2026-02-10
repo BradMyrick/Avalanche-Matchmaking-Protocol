@@ -1,6 +1,12 @@
 pub mod match_capnp {
     include!(concat!(env!("OUT_DIR"), "/match_capnp.rs"));
 }
+pub mod game_types_capnp {
+    include!(concat!(env!("OUT_DIR"), "/game_types_capnp.rs"));
+}
+pub mod service_capnp {
+    include!(concat!(env!("OUT_DIR"), "/service_capnp.rs"));
+}
 mod gc_impl;
 mod mm_impl;
 use anyhow::Result;
@@ -37,8 +43,8 @@ async fn main() -> Result<()> {
                                     Side::Server,
                                     Default::default(),
                                 );
-                                let client: match_capnp::game_connector::Client =
-                                    capnp_rpc::new_client(gc_impl::GameConnectorImpl::new());
+                                let client: service_capnp::game_session_service::Client =
+                                    capnp_rpc::new_client(gc_impl::GameSessionServiceImpl::new());
                                 let rpc_system =
                                     RpcSystem::new(Box::new(network), Some(client.clone().client));
                                 rpc_system.await?;

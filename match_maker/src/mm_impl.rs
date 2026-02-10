@@ -1,40 +1,47 @@
-use crate::match_capnp::match_maker;
+use crate::service_capnp::match_session;
 use capnp::capability::Promise;
 use capnp_rpc::pry;
-use ethers_core::utils::keccak256;
 
-pub struct MMImpl;
+pub struct MatchSessionImpl {
+    match_id: Vec<u8>,
+    player_id: Vec<u8>,
+}
 
-impl match_maker::Server for MMImpl {
-    fn verify_async_replay(
-        &mut self,
-        params: match_maker::VerifyAsyncReplayParams,
-        mut results: match_maker::VerifyAsyncReplayResults,
-    ) -> Promise<(), capnp::Error> {
-        let transcript = pry!(pry!(params.get()).get_transcript());
-        let hash = pry!(transcript.get_hash());
-        println!("Verifying transcript with hash: {:?}", hash);
-
-        let _results_builder = results.get();
-
-        Promise::ok(())
-    }
-
-    fn verify_real_time_transcript(
-        &mut self,
-        _params: match_maker::VerifyRealTimeTranscriptParams,
-        _results: match_maker::VerifyRealTimeTranscriptResults,
-    ) -> Promise<(), capnp::Error> {
-        // TODO: implement real-time verification logic.
-        Promise::ok(())
+impl MatchSessionImpl {
+    pub fn new(match_id: &[u8], player_id: &[u8]) -> Self {
+        Self {
+            match_id: match_id.to_vec(),
+            player_id: player_id.to_vec(),
+        }
     }
 }
 
-// TODO: load private key from env and implement EIP-712 signing.
-pub fn sign_result(_match_id: u64, _outcome: &str, _result_hash: [u8; 32]) -> Vec<u8> {
-    // TODO: build EIP-712 or simple prefixed hash.
-    // TODO: sign and return fields matching Solidity struct.
+impl match_session::Server for MatchSessionImpl {
+    fn submit_outcome(
+        &mut self,
+        params: match_session::SubmitOutcomeParams,
+        mut results: match_session::SubmitOutcomeResults,
+    ) -> Promise<(), capnp::Error> {
+        let submission = pry!(pry!(params.get()).get_submission());
 
-    // For now, return dummy signature bytes.
-    vec![0u8; 69]
+        // Basic verification stub
+        let _match_id = pry!(submission.get_match_id());
+
+        println!(
+            "Received outcome submission for match {:?} from player {:?}",
+            self.match_id, self.player_id
+        );
+
+        results.get().set_accepted(true);
+        Promise::ok(())
+    }
+
+    fn subscribe_to_events(
+        &mut self,
+        _params: match_session::SubscribeToEventsParams,
+        _results: match_session::SubscribeToEventsResults,
+    ) -> Promise<(), capnp::Error> {
+        // Todo: Implement event subscription
+        Promise::ok(())
+    }
 }

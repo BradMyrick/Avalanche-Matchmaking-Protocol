@@ -1,73 +1,73 @@
-use crate::match_capnp::{game_connector, match_maker};
-use crate::mm_impl::MMImpl;
+use crate::mm_impl::MatchSessionImpl;
+use crate::service_capnp::{game_session_service, user_session};
 use capnp::capability::Promise;
 use capnp_rpc::pry;
 
-pub struct GameConnectorImpl;
+// -- Game Session Service (The Entry Point) --
+pub struct GameSessionServiceImpl;
 
-impl GameConnectorImpl {
+impl GameSessionServiceImpl {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl game_connector::Server for GameConnectorImpl {
-    fn request_game_service(
+impl game_session_service::Server for GameSessionServiceImpl {
+    fn login(
         &mut self,
-        params: game_connector::RequestGameServiceParams,
-        mut results: game_connector::RequestGameServiceResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        let params_reader = pry!(params.get());
-        let assignment_req = pry!(params_reader.get_assignment_request());
+        params: game_session_service::LoginParams,
+        mut results: game_session_service::LoginResults,
+    ) -> Promise<(), capnp::Error> {
+        let _signature = pry!(pry!(params.get()).get_signed_challenge());
+        // TODO: Validate signature
 
-        // Security: Validate player pool size and gameId
-        let player_pool = pry!(assignment_req.get_player_pool());
-        if player_pool.len() < 2 {
-            let results_builder = results.get().init_assignment();
-            let mut err = results_builder.init_err();
-            err.set_msg("Matchmaking requires at least 2 players");
-            return Promise::ok(());
-        }
+        let user_session_client = capnp_rpc::new_client(UserSessionImpl::new());
+        results.get().set_session(user_session_client);
 
-        let config = pry!(assignment_req.get_match_config());
-        let _game_id = pry!(config.get_game_id());
+        Promise::ok(())
+    }
+}
 
-        // Robustness: Generate unique Match ID (e.g., UUID or sequential for now)
+// -- User Session (Authenticated Context) --
+pub struct UserSessionImpl;
+
+impl UserSessionImpl {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl user_session::Server for UserSessionImpl {
+    fn request_match(
+        &mut self,
+        params: user_session::RequestMatchParams,
+        mut results: user_session::RequestMatchResults,
+    ) -> Promise<(), capnp::Error> {
+        let req = pry!(pry!(params.get()).get_req());
+        let _game_id = pry!(req.get_game_id());
+
+        // Stub: Immediately match with a dummy opponent
         let match_id = format!("match-{}", uuid::Uuid::new_v4().to_string());
         println!("Spawning match: {}", match_id);
 
-        let results_builder = results.get().init_assignment();
-        let mut match_assignment = results_builder.init_match();
+        let mut results_builder = results.get();
+        let mut assignment = results_builder.reborrow().init_assignment();
 
-        match_assignment.set_match_id(match_id.as_bytes());
-        match_assignment.set_ticket_id(b"ticket-123");
+        assignment.set_match_id(match_id.as_bytes());
+        // ... Populate other assignment fields stub ...
 
-        // Copy opponents from request to assignment
-        {
-            let mut opponents_builder = match_assignment
-                .reborrow()
-                .init_opponents(player_pool.len());
-            for i in 0..player_pool.len() {
-                let opponent_src = player_pool.get(i);
-                let mut opponent_dst = opponents_builder.reborrow().get(i);
-
-                opponent_dst.set_player_id(pry!(opponent_src.get_player_id()));
-                opponent_dst.set_display_name(pry!(opponent_src.get_display_name()));
-                opponent_dst.set_elo(pry!(opponent_src.get_elo()));
-                opponent_dst.set_region(pry!(opponent_src.get_region()));
-                opponent_dst.set_mode(pry!(opponent_src.get_mode()));
-
-                let src_wallet = pry!(opponent_src.get_player_wallet());
-                let mut dst_wallet = opponent_dst.init_player_wallet();
-                dst_wallet.set_payer_wallet(src_wallet.get_payer_wallet());
-                dst_wallet.set_fee_token(src_wallet.get_fee_token());
-                dst_wallet.set_auth_spend(src_wallet.get_auth_spend());
-            }
-        }
-
-        // Return the MatchMaker capability
-        match_assignment.set_settle(capnp_rpc::new_client(MMImpl));
+        let session_client =
+            capnp_rpc::new_client(MatchSessionImpl::new(match_id.as_bytes(), b"player1"));
+        results_builder.set_session(session_client);
 
         Promise::ok(())
+    }
+
+    fn reconnect(
+        &mut self,
+        _params: user_session::ReconnectParams,
+        _results: user_session::ReconnectResults,
+    ) -> Promise<(), capnp::Error> {
+        Promise::err(capnp::Error::failed("Not implemented".to_string()))
     }
 }

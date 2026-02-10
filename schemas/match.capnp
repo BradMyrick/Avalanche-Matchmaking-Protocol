@@ -1,131 +1,96 @@
-@0x8cbcd143dece677b;
+@0xa1b2c3d4e5f60001;
 
-using TimeStamp     =       UInt64;  # Nanoseconds since epoch
-using Address       =       UInt64;
-using AmpId         =       Data;
+using Rust = import "rust.capnp";
+$Rust.parentModule("match_capnp");
+
+# Core Types
+using TimeStamp     = UInt64;  # Nanoseconds since epoch
+using Address       = Data;    # 20-byte Ethereum address
+using AmpId         = Data;    # e.g., UUID or specialized ID
+using Signature     = Data;    # 65-byte EIP-712 signature
 
 enum MatchType {
-    tb @0; # turn based
-    la @1; # live action
+    turnBased   @0; 
+    realTime    @1; 
 }
 
 enum Region {
-    na  @0; # North America
-    eu  @1; # Europe
-    sa  @2; # South America
-    as  @3; # Asia
+    na  @0; 
+    eu  @1; 
+    sa  @2; 
+    as  @3; 
 }
 
 enum Elo {
-  unranked @0;
-  bronze   @1;   # ~ 0–1199
-  silver   @2;   # ~ 1200–1499
-  gold     @3;   # ~ 1500–1799
-  platinum @4;   # ~ 1800–1999
-  diamond  @5;   # ~ 2000–2199
-  master   @6;   # ~ 2200–2399
-  grandmaster @7;# ~ 2400+
+    unranked    @0;
+    bronze      @1;   # ~ 0–1199
+    silver      @2;   # ~ 1200–1499
+    gold        @3;   # ~ 1500–1799
+    platinum    @4;   # ~ 1800–1999
+    diamond     @5;   # ~ 2000–2199
+    master      @6;   # ~ 2200–2399
+    grandmaster @7;   # ~ 2400+
 }
-
-enum Outcome {
-  unknown   @0;
-  complete  @1;
-  draw      @2;
-  void      @3;  # e.g. cancelled, cheater detected, refunded
-}
-
-struct MatchConfig {
-    gameId          @0      :AmpId;
-    rulesVersion    @1      :Float32;
-    seed            @2      :UInt64;
-    mode            @3      :MatchType;
-}
-
-struct InputFrame {
-    timestamp       @0      :TimeStamp;
-    playerId        @1      :UInt8;
-    command         @2      :Text;
-}
-
-struct Event {
-    timestamp       @0      :TimeStamp;
-    frame           @1      :InputFrame;
-}   
-
-struct GameEvent {
-    events          @0      :List(Event); # a group of events in a given time period.
-    actor           @1      :Opponent;
-    target          @2      :Opponent;
-    damage          @3      :UInt16;
-}
-
-struct MatchTranscript {
-    config          @0      :MatchConfig;
-    events          @1      :List(GameEvent);
-    hash            @2      :Data;
-}
-
 
 struct PaymentInfo {
-    payerWallet     @0      :Address;
-    feeToken        @1      :Address; #erc20
-    authSpend       @2      :UInt64;
+    payerWallet     @0 :Address;
+    feeToken        @1 :Address; # usage: ERC20 address (0x0 for native AVAX?)
+    authSpend       @2 :UInt64;  # amount authorized/staked
 }
 
-struct Opponent {
-    playerId        @0      :AmpId;          # e.g. user id
-    displayName     @1      :Text;           # optional, for UI
-    playerWallet    @2      :PaymentInfo;
-    elo             @3      :Elo;
-    region          @4      :Region;
-    mode            @5      :MatchType;          # queue/mode they came from
+struct PlayerInfo {
+    playerId        @0 :AmpId;
+    displayName     @1 :Text;
+    playerWallet    @2 :Address; # The wallet that will sign verify moves
+    elo             @3 :Elo;
+    region          @4 :Region;
 }
 
-struct MatchSettlement {
-    matchId         @0      :Text;
-    ampMatchId      @1      :Text;
-    outcome         @2      :Outcome;
-    netAmount       @3      :Int64; # Net token delta for this round.
-    token           @4      :Address;
-    victor          @5      :Opponent;  
+# Match Request
+struct GameMatchRequest {
+    gameId          @0 :AmpId;     # e.g. "chess-v1"
+    rulesType       @1 :Text;      # Variant tag, e.g. "standard", "blitz"
+    stake           @2 :PaymentInfo;
+    playerInfo      @3 :PlayerInfo;
+    optionalConfig  @4 :Data;      # Game-specific config blob (serialized Cap'n Proto or JSON)
 }
 
-struct Error {
-    msg             @0      :Text;
-}
-
-struct AssignmentRequest {
-    registrationId    @0    :AmpId; #ie: Activision
-    matchConfig       @1    :MatchConfig;
-    paymentInfo       @2    :PaymentInfo;
-    playerPool        @3    :List(Opponent); #static for now
-}
-
+# Match Assignment
 struct MatchAssignment {
-    ticketId        @0 :AmpId;
-    matchId         @1 :AmpId;     #on-chain AMP match id (bytes32/uint256 hex).
-    opponents       @2 :List(Opponent);
-    settle          @3 :MatchMaker; # capability to call matchmaker 
+    matchId         @0 :AmpId;     # The authoritative Match ID (e.g. on-chain UUID)
+    opponents       @1 :List(PlayerInfo);
+    gameConfig      @2 :Data;      # Snapshot of agreed configuration
+    assignedVerifier @3 :Address;  # The public key/address of the Verifier node
+    
+    # Capability for the match session will be defined in service.capnp
+    # session         @4 :MatchSession; 
 }
 
-struct AssignmentResult {
-    union {
-        match   @0      :MatchAssignment;
-        err     @1      :Error;
-    }
+# Outcome
+enum OutcomeType {
+    unknown     @0;
+    win         @1;
+    draw        @2;
+    void        @3; # Cancelled/Refunded
 }
 
-interface MatchMaker {
-    # Verifies a match transcript asynchronously.
-    verifyAsyncReplay @0 (transcript :MatchTranscript) -> (outcome: MatchSettlement);
-
-    # Verifies a real-time transcript.
-    # Currently a placeholder for RT_HASH_AGREE mode.
-    verifyRealTimeTranscript @1 (transcript :MatchTranscript) -> (winner :Text, outcomeCode :Text, resultHash :Data);
+struct Outcome {
+    type            @0 :OutcomeType;
+    scores          @1 :List(UInt64); # e.g. [1, 0] or points
+    victor          @2 :UInt8;        # Index in `opponents` list, meaningful if type is `win`
+    metadata        @3 :Data;         # Arbitrary game-end data (stats, etc)
 }
 
+struct OutcomeSubmission {
+    matchId         @0 :AmpId;
+    outcome         @1 :Outcome;
+    replayHash      @2 :Data;         # Hash of the full replay/transcript
+    signature       @3 :Signature;    # Signature of (matchId, outcome, replayHash) by the submitter
+}
 
-interface GameConnector {
-    # Requests a new game service. will respond with assignemnt, or error. 
-    requestGameService @0 (assignment_request:AssignmentRequest ) -> (assignment :AssignmentResult);
+# Verifier Logic Types
+struct MatchTranscript {
+    matchId         @0 :AmpId;
+    events          @1 :List(Data);   # Serialized GameEvents (opaque to generic layer)
+    finalStateHash  @2 :Data;
 }
