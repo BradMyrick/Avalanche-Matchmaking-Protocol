@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
+    "generate:capnp": "mkdir -p src/schemas && capnpc -I ../../schemas --src-prefix=../../schemas -o ./node_modules/.bin/capnpc-ts:src/schemas ../../schemas/match.capnp ../../schemas/game_types.capnp ../../schemas/service.capnp",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -12,6 +13,8 @@
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^25.0.9",
+    "capnp-ts": "^0.7.0",
+    "capnpc-ts": "^0.7.0",
     "ethers": "^6.16.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
