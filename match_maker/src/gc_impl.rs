@@ -54,10 +54,13 @@ impl user_session::Server for UserSessionImpl {
         let mut assignment = results_builder.reborrow().init_assignment();
 
         assignment.set_match_id(match_id.as_bytes());
-        // ... Populate other assignment fields stub ...
+        // ...TODO Populate other assignment fields stub ...
 
-        let session_client =
-            capnp_rpc::new_client(MatchSessionImpl::new(match_id.as_bytes(), b"player1"));
+        let session_client = capnp_rpc::new_client(MatchSessionImpl::new(
+            match_id.as_bytes(),
+            // TODO: Pass in player name
+            b"player1",
+        ));
         results_builder.set_session(session_client);
 
         Promise::ok(())

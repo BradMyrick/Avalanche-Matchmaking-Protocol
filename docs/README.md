@@ -4,9 +4,9 @@ AMP (Avalanche Matchmaking & Settlement Protocol) is a **general‑purpose on‑
 
 Any game that can produce a deterministic proof of what happened—a replay, an event transcript, or an oracle result—can use AMP to:
 
-- Discover and match players  
-- Escrow stakes and rewards  
-- Verify outcomes via off‑chain verifiers  
+- Discover and match players
+- Escrow stakes and rewards
+- Verify outcomes via off‑chain verifiers
 - Settle payouts and publish results on Avalanche C‑Chain
 
 Gameplay stays where it belongs (your engine, your servers). AMP standardizes the **game ↔ chain** boundary so you don’t have to rebuild matchmaking, escrow, and settlement for every title.
@@ -21,20 +21,20 @@ Most Web3 and on‑chain games reinvent the same stack: custom lobbies, bespoke 
 
 At a high level:
 
-- **Generic core, specific adapters**  
-  - AMP defines a small, game‑agnostic core: `GameId`, `MatchId`, `PlayerId` (wallet), `Stake`, `TranscriptHash`, `Outcome`, and `Verifier`.  
+- **Generic core, specific adapters**
+  - AMP defines a small, game‑agnostic core: `GameId`, `MatchId`, `PlayerId` (wallet), `Stake`, `TranscriptHash`, `Outcome`, and `Verifier`.
   - Each game (or game type) registers a config and plugs in a verifier adapter that knows how to interpret its replays or transcripts.
 
-- **Cap’n Proto schemas as the “language of games”**  
-  - Game clients speak typed Cap’n Proto messages to the AMP Rust service.  
+- **Cap’n Proto schemas as the “language of games”**
+  - Game clients speak typed Cap’n Proto messages to the AMP Rust service.
   - The service handles matchmaking, verifies transcripts/replays, and performs on‑chain actions on Avalanche.
 
-- **Off‑chain simulation, on‑chain truth**  
-  - Matches run off‑chain (Unity, Unreal, Godot, Rust, JS, mobile, etc.).  
+- **Off‑chain simulation, on‑chain truth**
+  - Matches run off‑chain (Unity, Unreal, Godot, Rust, JS, mobile, etc.).
   - AMP receives only hashes, transcripts, and signed outcomes, and enforces the economic truth on C‑Chain.
 
-- **Built for Avalanche first**  
-  - Contracts and tooling target Avalanche C‑Chain (Fuji → mainnet) for fast, cheap settlement.  
+- **Built for Avalanche first**
+  - Contracts and tooling target Avalanche C‑Chain (Fuji → mainnet) for fast, cheap settlement.
   - The architecture leaves room to move heavy traffic to an AMP‑centric gaming subnet later.
 
 Think of AMP as **“one infra layer for match lifecycle + value flow across any game that can prove its outcomes.”**
@@ -49,21 +49,21 @@ AMP consists of **on‑chain smart contracts**, a **Rust matchmaking + verificat
 
 Located in `/contracts`.
 
-- **AMPRegistry**  
+- **AMPRegistry**
   - Registers games with a minimal, generic config:
-    - `gameId`, `rulesType` (e.g., TURN_BASED, REALTIME, ORACLE), `settlementMode`, verifier keys, stake token(s), and basic limits.  
-  - Creates and joins matches with escrowed stakes (AVAX or ERC‑20).  
+    - `gameId`, `rulesType` (e.g., TURN_BASED, REALTIME, ORACLE), `settlementMode`, verifier keys, stake token(s), and basic limits.
+  - Creates and joins matches with escrowed stakes (AVAX or ERC‑20).
   - Emits:
-    - `GameRegistered(gameId, rulesType, verifier)`  
-    - `MatchCreated(matchId, gameId, players, stake)`  
+    - `GameRegistered(gameId, rulesType, verifier)`
+    - `MatchCreated(matchId, gameId, players, stake)`
     - `MatchJoined(matchId, player)`
 
-- **AMPSettlement**  
-  - Receives match outcomes and verifies signatures from registered verifiers and/or players.  
-  - Supports multiple **settlement modes** (see below).  
-  - Executes payouts, fee distribution, and dispute resolution.  
+- **AMPSettlement**
+  - Receives match outcomes and verifies signatures from registered verifiers and/or players.
+  - Supports multiple **settlement modes** (see below).
+  - Executes payouts, fee distribution, and dispute resolution.
   - Emits:
-    - `MatchSettled(matchId, outcome, stakeToken, amounts)`  
+    - `MatchSettled(matchId, outcome, stakeToken, amounts)`
     - `MatchDisputed(matchId, reason)`
 
 Contracts are built and tested with Foundry and deploy first to **Avalanche Fuji**, then mainnet C‑Chain.
@@ -76,28 +76,28 @@ Located in `/match_maker`.
 
 This is the “brain” of AMP. Game clients never talk to contracts directly; they talk to this service via Cap’n Proto RPC.
 
-- **Cap’n Proto RPC interfaces** (schemas live in `/schemas`):  
+- **Cap’n Proto RPC interfaces** (schemas live in `/schemas`):
   - **GameSessionService** (high‑level entry point for clients)
-    - `requestMatch(GameMatchRequest) -> MatchAssignment`  
-    - `submitOutcome(OutcomeSubmission) -> SettlementStatus`  
+    - `requestMatch(GameMatchRequest) -> MatchAssignment`
+    - `submitOutcome(OutcomeSubmission) -> SettlementStatus`
   - **MatchSession** (capability bound to a single match)
     - Methods to stream transcripts, send final replays, query status, etc.
 
-- **Player pools & matchmaking**  
-  - Maintains queues keyed by `gameId`, `rulesType`, stake range, basic rating band, and optional region.  
+- **Player pools & matchmaking**
+  - Maintains queues keyed by `gameId`, `rulesType`, stake range, basic rating band, and optional region.
   - When compatible players are found, it:
-    - Creates an AMP match on‑chain via `AMPRegistry`.  
+    - Creates an AMP match on‑chain via `AMPRegistry`.
     - Returns a `MatchAssignment` with match details and an `Opponent` descriptor (wallet, profile, metadata).
 
-- **Verification pipeline**  
+- **Verification pipeline**
   - For each `rulesType` or game, loads a verifier module:
-    - Turn‑based: re‑simulate a `TurnBasedReplay` to compute a deterministic `Outcome`.  
-    - Real‑time: validate a `RealtimeTranscript` and its hash.  
-    - Oracle‑driven: validate an `OracleResult` signature.  
+    - Turn‑based: re‑simulate a `TurnBasedReplay` to compute a deterministic `Outcome`.
+    - Real‑time: validate a `RealtimeTranscript` and its hash.
+    - Oracle‑driven: validate an `OracleResult` signature.
   - Signs the outcome (EIP‑712) and calls `AMPSettlement` to finalize.
 
-- **Networking**  
-  - High‑performance TCP Cap’n Proto RPC (`rpc-twoparty`) with robust reconnection and error handling.  
+- **Networking**
+  - High‑performance TCP Cap’n Proto RPC (`rpc-twoparty`) with robust reconnection and error handling.
   - Capability‑oriented: each player gets a capability pointing to their current `MatchSession`, not a global singleton.
 
 MVP ships with a fully working turn‑based matchmaking flow and verifier stub.
@@ -112,22 +112,22 @@ AMP uses Cap’n Proto schemas to define both the **generic protocol surface** a
 
 Examples:
 
-- **Generic protocol types**  
-  - `GameMatchRequest`: identifies the game, player, desired stake, rules type, and optional rating band.  
-  - `MatchAssignment`: match id, opponent(s), initial configuration, and a capability to the `MatchSession`.  
-  - `OutcomeSubmission`: includes `matchId`, `Outcome`, and optional replay/transcript references.  
+- **Generic protocol types**
+  - `GameMatchRequest`: identifies the game, player, desired stake, rules type, and optional rating band.
+  - `MatchAssignment`: match id, opponent(s), initial configuration, and a capability to the `MatchSession`.
+  - `OutcomeSubmission`: includes `matchId`, `Outcome`, and optional replay/transcript references.
   - `Outcome`: generic win/lose/draw, scores, and arbitrary metadata.
 
-- **Turn‑based game type**  
-  - `TurnBasedReplay`: `initialState`, ordered `moves[]`, `rngSeed`, and metadata.  
+- **Turn‑based game type**
+  - `TurnBasedReplay`: `initialState`, ordered `moves[]`, `rngSeed`, and metadata.
   - Verifier replays this and produces an `Outcome`.
 
-- **Real‑time game type**  
-  - `RealtimeTranscript`: ordered `events[]`, `ticksPerSecond`, plus metadata.  
+- **Real‑time game type**
+  - `RealtimeTranscript`: ordered `events[]`, `ticksPerSecond`, plus metadata.
   - Clients also submit `transcriptHash` for fast agreement; full transcript is only required on dispute.
 
-- **Oracle‑driven game type**  
-  - `OracleResult`: external match id, winner(s)/scores, and oracle signature.  
+- **Oracle‑driven game type**
+  - `OracleResult`: external match id, winner(s)/scores, and oracle signature.
   - Enables integrations where the authoritative result comes from an existing backend or external system.
 
 Games can use these schemas directly or extend them with custom metadata while still conforming to the generic `Outcome` and transcript/replay patterns that AMP understands.
@@ -136,25 +136,25 @@ Games can use these schemas directly or extend them with custom metadata while s
 
 ### SDKs & Web Demo
 
-- **TypeScript SDK** (`/sdk/js`)  
+- **TypeScript SDK** (`/sdk/js`)
   A lightweight client wrapper around the Cap’n Proto RPC and AMP contracts.
 
   Core capabilities:
 
-  - `connect(walletProvider)`  
-  - `findMatch({ gameId, rulesType, stake, ratingBand? })` → `MatchAssignment` and opponent info.  
-  - `sendReplay(matchId, replay)` or `sendTranscript(matchId, transcript)` (depending on game type).  
-  - `awaitSettlement(matchId)` → final `Outcome` and payout details.  
+  - `connect(walletProvider)`
+  - `findMatch({ gameId, rulesType, stake, ratingBand? })` → `MatchAssignment` and opponent info.
+  - `sendReplay(matchId, replay)` or `sendTranscript(matchId, transcript)` (depending on game type).
+  - `awaitSettlement(matchId)` → final `Outcome` and payout details.
   - Event subscriptions for important on‑chain events (e.g., `MatchSettled`).
 
   The goal: **“integrate AMP in a day”** for any game that can generate replays or transcripts.
 
-- **Web demo** (`/web`)  
-  - Vite + React + Tailwind, Avalanche‑branded dashboard.  
+- **Web demo** (`/web`)
+  - Vite + React + Tailwind, Avalanche‑branded dashboard.
   - Demonstrates:
-    - Wallet connection to Fuji.  
-    - Creating and joining a staked duel.  
-    - Triggering an off‑chain “play → verify → settle” flow via the Rust service.  
+    - Wallet connection to Fuji.
+    - Creating and joining a staked duel.
+    - Triggering an off‑chain “play → verify → settle” flow via the Rust service.
     - Live event log of AMP contract events (`MatchCreated`, `MatchJoined`, `MatchSettled`).
 
 ***
@@ -167,21 +167,21 @@ AMP is generic over games but opinionated about how results are proven. Settleme
 
 Best for deterministic, turn‑based or discrete‑tick games.
 
-- Game records a replay: initial config + ordered inputs.  
-- Client sends the replay to the AMP service.  
-- Verifier re‑simulates to a unique `Outcome` and signs it.  
+- Game records a replay: initial config + ordered inputs.
+- Client sends the replay to the AMP service.
+- Verifier re‑simulates to a unique `Outcome` and signs it.
 - AMPSettlement verifies the signature and settles the match.
 
 ### 2. RT_HASH_AGREE
 
 Designed for low‑latency real‑time games.
 
-- Engines stream a `RealtimeTranscript` and compute a `transcriptHash`.  
+- Engines stream a `RealtimeTranscript` and compute a `transcriptHash`.
 - Fast path:
-  - All players submit matching `(transcriptHash, winner)` on‑chain.  
-  - AMP settles immediately.  
+  - All players submit matching `(transcriptHash, winner)` on‑chain.
+  - AMP settles immediately.
 - Dispute path:
-  - Mismatch or timeout triggers a full transcript review by a verifier.  
+  - Mismatch or timeout triggers a full transcript review by a verifier.
   - Verifier’s signed `Outcome` becomes final.
 
 MVP may ship with this mode in a simplified or experimental form; the contract interface is designed to support the full flow.
@@ -190,8 +190,8 @@ MVP may ship with this mode in a simplified or experimental form; the contract i
 
 For games and systems where the authoritative result comes from an external oracle.
 
-- A registered oracle service signs an `OracleResult` for a `matchId`.  
-- AMPSettlement verifies the oracle signature and performs payouts.  
+- A registered oracle service signs an `OracleResult` for a `matchId`.
+- AMPSettlement verifies the oracle signature and performs payouts.
 - Useful for hybrid Web2/Web3 games, fantasy sports, or any external event–driven game.
 
 ***
@@ -211,6 +211,8 @@ For games and systems where the authoritative result comes from an external orac
 ***
 
 ## Quickstart (Local Dev)
+> **Note:** The commands below describe the intended developer workflow.
+> The actual implementation will be added during the Avalanche Build Games 2026 hackathon.
 
 Prereqs: Foundry, Rust, Node, and `capnp` installed.
 
@@ -275,21 +277,21 @@ Your game can integrate with AMP if it can do three things:
 
 1. **Produce a deterministic proof of the match**
 
-   - Turn‑based: a replay (initial state + ordered moves + RNG seed).  
-   - Real‑time: an ordered event transcript or a transcript hash plus stored logs.  
+   - Turn‑based: a replay (initial state + ordered moves + RNG seed).
+   - Real‑time: an ordered event transcript or a transcript hash plus stored logs.
    - Oracle: an externally signed outcome.
 
 2. **Send that proof via Cap’n Proto / SDK**
 
-   - Use the provided schemas from `/schemas` for your game type.  
+   - Use the provided schemas from `/schemas` for your game type.
    - Use the AMP SDK (or generated Cap’n Proto stubs) to:
-     - Request matches and join queues.  
-     - Send replays or transcripts to the Rust service.  
+     - Request matches and join queues.
+     - Send replays or transcripts to the Rust service.
      - Receive match assignments and settlement results.
 
 3. **React to settlement**
 
-   - Listen for `MatchSettled` events on‑chain or via the SDK.  
+   - Listen for `MatchSettled` events on‑chain or via the SDK.
    - Update in‑game UI, unlock rewards, or trigger off‑chain services based on the final `Outcome`.
 
 Detailed “Integrate AMP in a Day” recipes and code examples will live in `/docs` as the MVP solidifies.
@@ -299,19 +301,20 @@ Detailed “Integrate AMP in a Day” recipes and code examples will live in `/d
 ## Roadmap
 
 **MVP**
+The initial MVP targets **turn-based `ASYNC_REPLAY` games**
 
-- [x] Matchmaking & capability core: player pools, match spawning, Cap’n Proto RPC, and example client.  
-- [ ] EIP‑712 signing: secure signing of match outcomes in the Rust service.  
-- [ ] On‑chain bridge: wire verifier outputs into `AMPSettlement` for end‑to‑end payouts.  
-- [ ] Deterministic simulation: plug in real game‑specific verifiers (e.g., card/tactics game rules, simple action game).  
+- [x] Matchmaking & capability core: player pools, match spawning, Cap’n Proto RPC, and example client.
+- [ ] EIP‑712 signing: secure signing of match outcomes in the Rust service.
+- [ ] On‑chain bridge: wire verifier outputs into `AMPSettlement` for end‑to‑end payouts.
+- [ ] Deterministic simulation: plug in real game‑specific verifiers (e.g., card/tactics game rules, simple action game).
 - [ ] Security: add TLS and authentication for the RPC surface.
 
 **Post‑MVP**
 
-- [ ] Production‑grade RT_HASH_AGREE for fast real‑time games.  
-- [ ] Rich matchmaking: ELO/Glicko ratings, queues with region/latency filters, parties.  
-- [ ] Advanced anti‑cheat: heuristics and ML‑style signals feeding into verifiers.  
-- [ ] Avalanche gaming subnet: design a path to an AMP‑centric subnet for higher throughput and ultra‑low fees.  
+- [ ] Production‑grade RT_HASH_AGREE for fast real‑time games.
+- [ ] Rich matchmaking: ELO/Glicko ratings, queues with region/latency filters, parties.
+- [ ] Advanced anti‑cheat: heuristics and ML‑style signals feeding into verifiers.
+- [ ] Avalanche gaming subnet: design a path to an AMP‑centric subnet for higher throughput and ultra‑low fees.
 - [ ] More game‑type schemas: fighting games, racing, co‑op PvE with shared rewards, etc.
 
 ***
@@ -320,12 +323,12 @@ Detailed “Integrate AMP in a Day” recipes and code examples will live in `/d
 
 AMP aims to be **generic infra** for all on‑chain and Web3‑adjacent games that can prove their outcomes. Contributions are especially welcome for:
 
-- New game‑type schemas and verifier modules.  
-- Game integrations across engines (Unity, Unreal, Godot, JS, Rust).  
+- New game‑type schemas and verifier modules.
+- Game integrations across engines (Unity, Unreal, Godot, JS, Rust).
 - SDK ergonomics, dev tools, and documentation.
 
 Before large changes, please open an issue describing:
 
-- Your game type and engine.  
-- How you plan to represent replays/transcripts.  
+- Your game type and engine.
+- How you plan to represent replays/transcripts.
 - What you need from AMP that isn’t covered by existing schemas or settlement modes.
