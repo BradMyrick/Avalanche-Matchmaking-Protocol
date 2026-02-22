@@ -1,9 +1,11 @@
 import { ethers } from "ethers";
+import { AMPRegistryABI } from "./contracts/AMPRegistryABI";
+import { AMPSettlementABI } from "./contracts/AMPSettlementABI";
 
-/**
- * Result signed by an async verifier. 
- * Matches the Solidity struct in AMPTypes.sol.
- */
+import { exec } from "child_process";
+import { promisify } from "util";
+const execAsync = promisify(exec);
+
 export interface AsyncResult {
     matchId: bigint;
     outcome: number;
@@ -11,9 +13,6 @@ export interface AsyncResult {
     signature: string;
 }
 
-/**
- * Result submitted by a player for real-time agreement.
- */
 export interface RealTimeHashResult {
     matchId: bigint;
     outcome: number;
@@ -24,67 +23,59 @@ export interface AMPClientConfig {
     provider: ethers.Provider | ethers.Signer;
     registryAddress: string;
     settlementAddress: string;
+    matchmakerUrl: string;
 }
 
-/**
- * AMPClient SDK for interacting with the AMP protocol.
- */
 export class AMPClient {
-    private registry: ethers.Contract;
-    private settlement: ethers.Contract;
+    public registry: ethers.Contract;
+    public settlement: ethers.Contract;
+    private playerAddress: string = "";
+    private config: AMPClientConfig;
 
-    constructor(private config: AMPClientConfig) {
-        // TODO: Load ABIs from compiled contract artifacts.
-        const genericAbi: string[] = [];
-        this.registry = new ethers.Contract(config.registryAddress, genericAbi, config.provider);
-        this.settlement = new ethers.Contract(config.settlementAddress, genericAbi, config.provider);
+    constructor(config: AMPClientConfig) {
+        this.config = config;
+        this.registry = new ethers.Contract(config.registryAddress, AMPRegistryABI, config.provider);
+        this.settlement = new ethers.Contract(config.settlementAddress, AMPSettlementABI, config.provider);
     }
 
-    /**
-     * Creates a new match on the AMP registry.
-     */
-    async createMatch(opts: { gameId: number; stakeAmount: bigint }): Promise<number> {
-        // TODO: call AMPRegistry.createMatch via ethers.
-        // const tx = await this.registry.createMatch(opts.gameId, { value: opts.stakeAmount });
-        // const receipt = await tx.wait();
-        // TODO: parse tx receipt, return matchId from events.
-        console.log("createMatch called with:", opts);
-        return 0; // Placeholder
+    async connectMatchmaker(playerAddress: string): Promise<void> {
+        this.playerAddress = playerAddress;
+        // Handled per-request by the Rust CLI
     }
 
-    /**
-     * Joins an existing OPEN match.
-     */
-    async joinMatch(matchId: number, stakeAmount: bigint): Promise<void> {
-        // TODO: call AMPRegistry.joinMatch.
-        // await this.registry.joinMatch(matchId, { value: stakeAmount });
-        console.log("joinMatch called for match:", matchId);
+    async requestMatch(gameId: string): Promise<{ match_id: string, opponent_id: string }> {
+        const cmd = `cargo run -q --manifest-path ../../mm-client/Cargo.toml -- request-match ${this.config.matchmakerUrl} ${gameId} ${this.playerAddress}`;
+        const { stdout } = await execAsync(cmd);
+        return { match_id: stdout.trim(), opponent_id: "" };
     }
 
-    /**
-     * Submits a signed result from an async verifier to the settlement contract.
-     */
-    async submitAsyncResult(matchId: number, result: AsyncResult): Promise<void> {
-        // TODO: call AMPSettlement.submitAsyncResult.
-        // await this.settlement.submitAsyncResult(matchId, result);
-        console.log("submitAsyncResult called for match:", matchId);
+    async submitOutcomeToMatchmaker(matchId: string, outcome: number, transcriptHash: string): Promise<{ match_id: string, signature: string }> {
+        // dummy signature to reconnect
+        const cmd = `cargo run -q --manifest-path ../../mm-client/Cargo.toml -- submit-outcome ${this.config.matchmakerUrl} ${matchId} ${outcome} ${this.playerAddress}`;
+        const { stdout } = await execAsync(cmd);
+        return { match_id: matchId, signature: stdout.trim() };
     }
 
-    /**
-     * Submits a result hash for real-time agreement settlement.
-     */
-    async submitRealTimeHashResult(matchId: number, result: RealTimeHashResult): Promise<void> {
-        // TODO: call AMPSettlement.submitRealTimeHashResult.
-        // await this.settlement.submitRealTimeHashResult(matchId, result);
-        console.log("submitRealTimeHashResult called for match:", matchId);
+    async createMatch(opts: { gameId: number; stakeAmount: bigint }): Promise<bigint> {
+        const tx = await this.registry.createMatch(opts.gameId, { value: opts.stakeAmount });
+        const receipt = await tx.wait();
+        const event = receipt.logs.map((log: any) => {
+            try { return this.registry.interface.parseLog(log); } catch { return null; }
+        }).find((e: any) => e && e.name === "MatchCreated");
+        return event ? event.args[0] : 0n;
     }
 
-    /**
-     * Subscribes to the MatchSettled event.
-     */
+    async joinMatch(matchId: bigint, stakeAmount: bigint): Promise<void> {
+        const tx = await this.registry.joinMatch(matchId, { value: stakeAmount });
+        await tx.wait();
+    }
+
+    async submitAsyncResult(matchId: bigint, result: AsyncResult): Promise<void> {
+        const tx = await this.settlement.submitAsyncResult(matchId, result);
+        await tx.wait();
+    }
+
     onMatchSettled(handler: (matchId: bigint, outcome: number, payout: bigint) => void): void {
-        // TODO: subscribe to MatchSettled event using provider.on or contract.on.
-        // this.settlement.on("MatchSettled", handler);
-        console.log("Subscribed to MatchSettled events");
+        this.settlement.on("MatchSettled", handler);
     }
 }

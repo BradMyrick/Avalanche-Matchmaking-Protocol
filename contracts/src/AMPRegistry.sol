@@ -8,7 +8,7 @@ import "./AMPTypes.sol";
  * @notice Handles registration of games and creation/joining of match instances.
  */
 contract AMPRegistry {
-    address private system;
+    address public settlement;
     address payable owner;
     uint256 public nextGameId;
     uint256 public nextMatchId;
@@ -23,7 +23,6 @@ contract AMPRegistry {
         _;
         locked = false;
     }
-
 
     mapping(uint256 => AMPTypes.Game) public games;
     mapping(uint256 => AMPTypes.Match) public matches;
@@ -42,8 +41,8 @@ contract AMPRegistry {
     event MatchJoined(uint256 indexed matchId, address playerB);
     event FeesWithdrawn(uint256 amount, address wallet);
 
-    modifier onlySystem() {
-        require(msg.sender == system);
+    modifier onlySettlement() {
+        require(msg.sender == settlement, "Not settlement");
         _;
     }
 
@@ -69,7 +68,7 @@ contract AMPRegistry {
         uint256 minStake,
         address stakeToken
     ) external returns (uint256 gameId) {
-        // TODO: implement permission model if needed. Currently open to any caller.
+        // TODO: Implement permission model if needed. Currently open to any caller.
         gameId = nextGameId++;
         games[gameId] = AMPTypes.Game({
             admin: msg.sender,
@@ -89,8 +88,17 @@ contract AMPRegistry {
         uint256 gameId,
         address[] calldata verifiers
     ) external {
-        // TODO: restrict to game admin (games[gameId].admin).
+        // TODO: Restrict to game admin (games[gameId].admin).
         games[gameId].verifiers = verifiers;
+    }
+
+    /**
+     * @notice Returns the authorized verifiers for a game.
+     */
+    function getGameVerifiers(
+        uint256 gameId
+    ) external view returns (address[] memory) {
+        return games[gameId].verifiers;
     }
 
     /**
@@ -101,7 +109,7 @@ contract AMPRegistry {
     ) external payable returns (uint256 matchId) {
         AMPTypes.Game storage game = games[gameId];
         require(msg.value >= game.minStake, "Stake too low");
-        // TODO: implement ERC20 safeTransferFrom if game.stakeToken != address(0).
+        // TODO: Implement ERC20 safeTransferFrom if game.stakeToken != address(0).
         // This ensures the stake is escrowed in the contract.
 
         matchId = nextMatchId++;
@@ -124,7 +132,7 @@ contract AMPRegistry {
         AMPTypes.Match storage m = matches[matchId];
         require(m.state == AMPTypes.MatchState.OPEN, "Match not open");
         require(msg.value == m.stakeAmount, "Stake mismatch");
-        // TODO: check stakeToken consistency and perform transfer if ERC20.
+        // TODO: Check stakeToken consistency and perform transfer if ERC20.
 
         m.playerB = msg.sender;
         m.state = AMPTypes.MatchState.READY;
@@ -137,10 +145,45 @@ contract AMPRegistry {
      */
     function withdrawFees() external onlyOwner nonReentrant {
         require(feeBalance > 0, "No fees to withdraw");
-        (bool success,) = owner.call{value: feeBalance}("");
+        (bool success, ) = owner.call{value: feeBalance}("");
         require(success, "Transfer Failed");
 
         emit FeesWithdrawn(feeBalance, owner);
         feeBalance = 0;
+    }
+
+    /**
+     * @notice Allows owner to set the settlement contract address.
+     */
+    function setSettlement(address _settlement) external onlyOwner {
+        settlement = _settlement;
+    }
+
+    /**
+     * @notice Settles a match and distributes payouts. Only callable by the Settlement contract.
+     */
+    function settleMatch(
+        uint256 matchId,
+        AMPTypes.MatchState newState,
+        address[] calldata recipients,
+        uint256[] calldata amounts,
+        uint256 protocolFee
+    ) external onlySettlement nonReentrant {
+        AMPTypes.Match storage m = matches[matchId];
+        require(
+            m.state == AMPTypes.MatchState.READY ||
+                m.state == AMPTypes.MatchState.OPEN,
+            "Match not settlable"
+        );
+        m.state = newState;
+
+        feeBalance += protocolFee;
+
+        for (uint i = 0; i < recipients.length; i++) {
+            if (amounts[i] > 0) {
+                (bool success, ) = recipients[i].call{value: amounts[i]}("");
+                require(success, "Transfer failed");
+            }
+        }
     }
 }

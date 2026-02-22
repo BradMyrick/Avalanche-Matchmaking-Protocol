@@ -52,7 +52,7 @@ struct GameMatchRequest {
     rulesType       @1 :Text;      # Variant tag, e.g. "standard", "blitz"
     stake           @2 :PaymentInfo;
     playerInfo      @3 :PlayerInfo;
-    optionalConfig  @4 :Data;      # Game-specific config blob (serialized Cap'n Proto or JSON)
+    optionalConfig  @4 :Data;      # Game-specific config blob (serialized Cap'n Proto)
 }
 
 # Match Assignment

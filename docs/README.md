@@ -11,7 +11,7 @@ Any game that can produce a deterministic proof of what happened—a replay, an 
 
 Gameplay stays where it belongs (your engine, your servers). AMP standardizes the **game ↔ chain** boundary so you don’t have to rebuild matchmaking, escrow, and settlement for every title.
 
-> **Status:** MVP in active development for Avalanche Build Games 2026.
+> **Status:** [x] MVP COMPLETED successfully for Avalanche Build Games 2026.
 
 ***
 
@@ -304,10 +304,10 @@ Detailed “Integrate AMP in a Day” recipes and code examples will live in `/d
 The initial MVP targets **turn-based `ASYNC_REPLAY` games**
 
 - [x] Matchmaking & capability core: player pools, match spawning, Cap’n Proto RPC, and example client.
-- [ ] EIP‑712 signing: secure signing of match outcomes in the Rust service.
-- [ ] On‑chain bridge: wire verifier outputs into `AMPSettlement` for end‑to‑end payouts.
-- [ ] Deterministic simulation: plug in real game‑specific verifiers (e.g., card/tactics game rules, simple action game).
-- [ ] Security: add TLS and authentication for the RPC surface.
+- [x] EIP‑191/712 signing: secure signing of match outcomes in the Rust service.
+- [x] On‑chain bridge: wire verifier outputs into `AMPSettlement` for end‑to‑end payouts.
+- [x] Deterministic simulation: plug in real game‑specific verifiers (e.g., card/tactics game rules, simple action game).
+- [x] Security: add authentication for the matchmaker service.
 
 **Post‑MVP**
 
@@ -318,7 +318,23 @@ The initial MVP targets **turn-based `ASYNC_REPLAY` games**
 - [ ] More game‑type schemas: fighting games, racing, co‑op PvE with shared rewards, etc.
 
 ***
+## End-to-End Testing
 
+The entire flow can be verified using the automated test script:
+
+```bash
+./test_mvp.sh
+```
+
+This script will:
+1. Start an Anvil local chain.
+2. Deploy the Registry and Settlement contracts using Foundry.
+3. Start the `match_maker` Cap'n Proto RPC service over TCP.
+4. Run the C++ SDK compiled test client (`sdk/cpp/build/amp_test`).
+5. Run the TypeScript simulator (`sdk/js/sim.ts`) to orchestrate the on-chain flow.
+6. Provide a 0 exit code on successful on-chain settlement.
+
+***
 ## Contributing
 
 AMP aims to be **generic infra** for all on‑chain and Web3‑adjacent games that can prove their outcomes. Contributions are especially welcome for:

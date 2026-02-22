@@ -36,9 +36,9 @@ interface MatchSession {
     # Represents the connection to a specific active match.
     # The implementation of this capability implicitly knows the matchId and playerId.
     
-    submitOutcome @0 (submission :OutcomeSubmission) -> (accepted :Bool);
+    submitOutcome @0 (submission :OutcomeSubmission) -> (signature :Signature);
     # Submits the result of the game.
-    # Returns true if the submission was accepted/queued.
+    # Returns the Verifier's signature if accepted.
     
     subscribeToEvents @1 (subscriber :MatchListener) -> ();
     # Subscribes to match events (e.g. opponent disconnected, match settled).

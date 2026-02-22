@@ -3,6 +3,7 @@ src = "src"
 out = "out"
 libs = ["lib"]
 evm_version = "cancun" # Required for Avalanche
+via_ir = true
 
 [rpc_endpoints]
 avalanche = "https://api.avax.network/ext/bc/C/rpc"
