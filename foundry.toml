@@ -1,10 +1,11 @@
 [profile.default]
-src = "src"
-out = "out"
-libs = ["lib"]
+src = "contracts/src"
+out = "contracts/out"
+libs = ["lib", "contracts/lib"]
 evm_version = "cancun" # Required for Avalanche
 via_ir = true
 
 [rpc_endpoints]
 avalanche = "https://api.avax.network/ext/bc/C/rpc"
 fuji = "https://api.avax-test.network/ext/bc/C/rpc"
+
