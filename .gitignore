@@ -59,3 +59,6 @@ contracts/broadcast/
 
 # ---- VSCode ----
 .vscode/
+
+# --- Contracts/Forge ---
+contracts/lib/
