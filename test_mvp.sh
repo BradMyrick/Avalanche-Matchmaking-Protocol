@@ -48,9 +48,7 @@ export VERIFIER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789a
 npx ts-node -O '{"module":"commonjs", "moduleResolution":"node"}' sim.ts || { echo "E2E Test Failed!"; kill $ANVIL_PID; kill $MM_PID; exit 1; }
 
 echo "=========================================="
-echo " Tests Passed! Cleaning up background procs"
+echo " Tests Passed!"
 echo "=========================================="
 
-kill $ANVIL_PID
-kill $MM_PID
 exit 0
