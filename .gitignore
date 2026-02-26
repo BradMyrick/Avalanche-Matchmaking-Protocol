@@ -24,6 +24,7 @@ secrets.json
 
 # ---- Logs ----
 *.log
+deploy_logs.txt
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -41,14 +42,30 @@ coverage/
 .cache/
 .parcel-cache
 
-# ---- Rust (verifier) ----
+# ---- Rust (match_maker + mm-client) ----
 target/
 **/*.rs.bk
 *.pdb
 
 # ---- Foundry / Solidity (contracts) ----
-cache/
-out/
-broadcast/
-lib/
+# Ignore build artifacts but keep the lib submodules
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+# Do not ignore contracts/lib/ as they are git submodules
+
+# ---- Other ----
 *.tsbuildinfo
+
+# ---- VSCode ----
+.vscode/
+
+# --- Contracts/Forge ---
+contracts/lib/
+broadcast/
+
+cache/
+
+out/
+
+

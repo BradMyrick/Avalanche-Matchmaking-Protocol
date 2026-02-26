@@ -11,7 +11,7 @@ Any game that can produce a deterministic proof of what happened—a replay, an 
 
 Gameplay stays where it belongs (your engine, your servers). AMP standardizes the **game ↔ chain** boundary so you don’t have to rebuild matchmaking, escrow, and settlement for every title.
 
-> **Status:** MVP in active development for Avalanche Build Games 2026.
+> **Status:** [x] MVP COMPLETED successfully for Avalanche Build Games 2026.
 
 ***
 
@@ -196,80 +196,99 @@ For games and systems where the authoritative result comes from an external orac
 
 ***
 
+
 ## Repository Layout
 
-```text
 /contracts      # Solidity (Foundry) AMPRegistry + AMPSettlement
 /match_maker    # Rust matchmaking & verification service (Cap'n Proto RPC)
 /mm-client      # Rust example client for the matchmaking service
 /sdk/js         # TypeScript SDK (AMPClient) for web and Node games
+/sdk/cpp        # C++ SDK and example client (amp_test)
 /web            # Avalanche-branded React + Tailwind web demo
 /schemas        # Cap'n Proto schemas: generic protocol + game-type schemas
 /docs           # Design docs, settlement mode specs, integration guides
-```
 
-***
+---
 
 ## Quickstart (Local Dev)
-> **Note:** The commands below describe the intended developer workflow.
-> The actual implementation will be added during the Avalanche Build Games 2026 hackathon.
+
+> **Note:** These commands describe the current MVP developer workflow from a clean clone to a passing `./test_mvp.sh`.
 
 Prereqs: Foundry, Rust, Node, and `capnp` installed.
 
-1. **Clone and checkout MVP branch**
+1. **Clone the repo**
 
-```bash
-git clone https://github.com/BradMyrick/Avax-Build-Games-2026.git
-cd Avax-Build-Games-2026
-git checkout amp-mvp-skeleton
-```
+git clone https://github.com/BradMyrick/Avax-Build-Games-2026.git  
+cd Avax-Build-Games-2026  
+# (optional) git checkout amp-mvp-skeleton
 
-2. **Contracts – build & test**
+2. **Contracts – install deps, build**
 
-```bash
-cd contracts
+forge install OpenZeppelin/openzeppelin-contracts --no-commit  
+
+forge clean  
 forge build
-forge test
-```
 
-3. **Match Maker – build**
+3. **Generate Cap’n Proto C++ schemas**
 
-```bash
-cd ../match_maker
-cargo build
-# To run:
-AMP_ADDR=0.0.0.0:50051 cargo run
-```
+capnp compile \
+  -oc++:sdk/cpp/src/schemas \
+  --src-prefix=schemas \
+  schemas/game_types.capnp \
+  schemas/match.capnp \
+  schemas/service.capnp
 
-4. **Client – build**
+4. **C++ SDK – build**
 
-```bash
-cd ../mm-client
-cargo build
-# To run:
-cargo run -- 127.0.0.1:50051
-```
+cd sdk/cpp  
+rm -rf build  
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  
+cmake --build build --config Release  
+cd ../..
 
-5. **SDK – build**
+5. **Wire C++ test client for the MVP script**
 
-```bash
-cd ../sdk/js
-npm install
-npm run build
-```
+mkdir -p build  
+ln -sf ../sdk/cpp/build/amp_test build/amp_test
 
-6. **Web demo – run**
+6. **Rust services & JS SDK (optional for local hacking)**
 
-```bash
-cd ../../web
-npm install
-npm run dev
-# Open http://localhost:5173
-```
+# Match maker  
+cd match_maker  
+cargo build  
+cd ..  
 
-Configure your Fuji RPC and deployed AMP contract addresses in the web app to interact with live C‑Chain testnet.
+# Example Rust client  
+cd mm-client  
+cargo build  
+cd ..  
 
-***
+# JS SDK  
+cd sdk/js  
+npm install  
+npm run build  
+cd ../..
+
+7. **Web demo (optional)**
+
+cd web  
+npm install  
+npm run dev  
+# Open http://localhost:5173  
+cd ..
+
+8. **End-to-end MVP test**
+
+From repo root:
+
+./test_mvp.sh
+
+This will:
+- Start a local Anvil chain  
+- Deploy AMP contracts  
+- Start the Rust matchmaker  
+- Run the C++ SDK test client  
+- Run the JS simulator and verify on-chain settlement
 
 ## Integrating Your Game with AMP
 
@@ -304,10 +323,10 @@ Detailed “Integrate AMP in a Day” recipes and code examples will live in `/d
 The initial MVP targets **turn-based `ASYNC_REPLAY` games**
 
 - [x] Matchmaking & capability core: player pools, match spawning, Cap’n Proto RPC, and example client.
-- [ ] EIP‑712 signing: secure signing of match outcomes in the Rust service.
-- [ ] On‑chain bridge: wire verifier outputs into `AMPSettlement` for end‑to‑end payouts.
-- [ ] Deterministic simulation: plug in real game‑specific verifiers (e.g., card/tactics game rules, simple action game).
-- [ ] Security: add TLS and authentication for the RPC surface.
+- [x] EIP‑191/712 signing: secure signing of match outcomes in the Rust service.
+- [x] On‑chain bridge: wire verifier outputs into `AMPSettlement` for end‑to‑end payouts.
+- [x] Deterministic simulation: plug in real game‑specific verifiers (e.g., card/tactics game rules, simple action game).
+- [x] Security: add authentication for the matchmaker service.
 
 **Post‑MVP**
 
@@ -318,7 +337,23 @@ The initial MVP targets **turn-based `ASYNC_REPLAY` games**
 - [ ] More game‑type schemas: fighting games, racing, co‑op PvE with shared rewards, etc.
 
 ***
+## End-to-End Testing
 
+The entire flow can be verified using the automated test script:
+
+```bash
+./test_mvp.sh
+```
+
+This script will:
+1. Start an Anvil local chain.
+2. Deploy the Registry and Settlement contracts using Foundry.
+3. Start the `match_maker` Cap'n Proto RPC service over TCP.
+4. Run the C++ SDK compiled test client (`sdk/cpp/build/amp_test`).
+5. Run the TypeScript simulator (`sdk/js/sim.ts`) to orchestrate the on-chain flow.
+6. Provide a 0 exit code on successful on-chain settlement.
+
+***
 ## Contributing
 
 AMP aims to be **generic infra** for all on‑chain and Web3‑adjacent games that can prove their outcomes. Contributions are especially welcome for:

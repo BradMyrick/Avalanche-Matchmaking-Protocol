@@ -1,29 +1,20 @@
-# AMP Verifier Service
+# AMP Matchmaker & Verifier - MVP Implementation
 
-Rust async verifier service using Cap'n Proto.
+## Architecture overview
+The matchmaker service is implemented in Rust as a high-performance **Cap'n Proto RPC** server over WebSocket. It serves raw binary capability methods directly matching the `.capnp` definitions.
 
-## Setup
+### 1. Matchmaking Lifecycle
+- **WebSocket Gateway**: Uses `tokio-tungstenite` to handle concurrent player connections.
+- **Identity**: Players "login" by sending their wallet address.
+- **Matchmaking Queue**: A global FIFO queue implementation (`MATCH_QUEUE`) using `Arc<Mutex<Vec<QueueEntry>>>`.
+- **Match Assignment**: When two players enter the queue for the same `gameId`, the server generates a unique `match_id` (UUID format) and sends a `MatchAssignment` message to both.
 
-1. Install Cap'n Proto compiler:
-   - macOS: `brew install capnp`
-   - Linux: `apt-get install capnproto`
+### 2. Outcome Verification (`src/main.rs`)
+- **`verify_and_sign`**: The primary verifier logic. It takes a `match_id`, an `outcome`, and a `transcript_hash`.
+- **ECDSA Signing**: Using `ethers-core`, the server signs the match data according to EIP-191. This signature is required by the `AMPSettlement` contract to authorize payouts.
+- **Payload Encoding**: Values are ABI-encoded identically to the Solidity contract's expectation to ensure the `keccak256` digest matches on-chain.
 
-2. Generate Rust code from schema:
-   ```bash
-   capnp compile -orust ../schemas/match.capnp > src/match_capnp.rs
-   ```
-
-3. Run the server:
-   ```bash
-   cargo run
-   ```
-
-## Development
-
-- `src/main.rs`: TCP listener and RPC setup.
-- `src/verifier_impl.rs`: Implementation of the `Verifier` interface.
-
-TODO:
-- Implement full transcript re-simulation.
-- Implement EIP-712 signing of results.
-- Add configuration for private keys and network endpoints.
+## Security Decisions Taken
+- **Segregated Verifier Keys**: The matchmaker holds the `VERIFIER_KEY` in environment variables. This key is the "Source of Truth" registered in the `AMPRegistry`.
+- **Deterministic Outlines**: Verification is restricted to authorized match identifiers to prevent signature replay across different match instances.
+- **Asynchronous Safety**: Uses `tokio` tasks for each connection to ensure one hanging client doesn't block the matchmaking throughput of others.
