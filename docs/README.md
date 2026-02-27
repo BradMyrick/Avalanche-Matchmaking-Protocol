@@ -136,26 +136,22 @@ Games can use these schemas directly or extend them with custom metadata while s
 
 ### SDKs & Web Demo
 
-- **TypeScript SDK** (`/sdk/js`)
-  A lightweight client wrapper around the Cap’n Proto RPC and AMP contracts.
+- **C++ and C# SDKs** (in progress)
 
-  Core capabilities:
+  - C++ for Unity and Unreal games.
+    currently works via ./test_mvp.sh
+    must build cpp test file using the following command:
+    ``` bash
+        cd ./sdk/cpp
+        cmake --build build --target amp_test -j $(nproc)       
+        cd ../..
 
-  - `connect(walletProvider)`
-  - `findMatch({ gameId, rulesType, stake, ratingBand? })` → `MatchAssignment` and opponent info.
-  - `sendReplay(matchId, replay)` or `sendTranscript(matchId, transcript)` (depending on game type).
-  - `awaitSettlement(matchId)` → final `Outcome` and payout details.
-  - Event subscriptions for important on‑chain events (e.g., `MatchSettled`).
+        ./test_mvp.sh 
+    ```
 
-  The goal: **“integrate AMP in a day”** for any game that can generate replays or transcripts.
+  - C# for Unity and .NET games.
 
-- **Web demo** (`/web`)
-  - Vite + React + Tailwind, Avalanche‑branded dashboard.
-  - Demonstrates:
-    - Wallet connection to Fuji.
-    - Creating and joining a staked duel.
-    - Triggering an off‑chain “play → verify → settle” flow via the Rust service.
-    - Live event log of AMP contract events (`MatchCreated`, `MatchJoined`, `MatchSettled`).
+
 
 ***
 
