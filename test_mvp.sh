@@ -37,15 +37,15 @@ cd sdk/cpp
 ./build/amp_test || { echo "C++ SDK Test Failed!"; kill $ANVIL_PID; kill $MM_PID; exit 1; }
 cd ../..
 
-# 5. Run JS Simulator
-echo "[5/5] Running TS Headless Client Simulator..."
-cd sdk/js
-export REGISTRY_ADDR
-export SETTLEMENT_ADDR
-export VERIFIER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # fake test key
+# 5. Run c#.NET SDK Test
 
-# Use ts-node to run sim.ts
-npx ts-node -O '{"module":"commonjs", "moduleResolution":"node"}' sim.ts || { echo "E2E Test Failed!"; kill $ANVIL_PID; kill $MM_PID; exit 1; }
+echo "[5/5] Running C# .NET SDK Matchmaker Client..."
+
+cd sdk/csharp
+
+dotnet run || { echo "C# SDK Test Failed!"; kill $ANVIL_PID; kill $MM_PID; exit 1; }
+
+cd ../..
 
 echo "=========================================="
 echo " Tests Passed!"

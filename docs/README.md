@@ -136,28 +136,20 @@ Games can use these schemas directly or extend them with custom metadata while s
 
 ## SDKs & Demos
 
-**TypeScript SDK (`/sdk/js`)**  
-A lightweight client wrapper around the Cap’n Proto RPC layer and AMP smart contracts. [build.avax](https://build.avax.network/build-games)
+- **C++ and C# SDKs** (in progress)
 
-**Core capabilities:** [build.avax](https://build.avax.network/build-games)
-- `connect(walletProvider)` [build.avax](https://build.avax.network/build-games)
-- `findMatch({ gameId, rulesType, stake, ratingBand? })` → returns `MatchAssignment` and opponent info [build.avax](https://build.avax.network/build-games)
-- `sendReplay(matchId, replay)` or `sendTranscript(matchId, transcript)` (depending on game type) [build.avax](https://build.avax.network/build-games)
-- `awaitSettlement(matchId)` → returns final `Outcome` and payout details [build.avax](https://build.avax.network/build-games)
-- Event subscriptions for important on‑chain events (e.g., `MatchSettled`) [build.avax](https://build.avax.network/build-games)
+  - C++ for Unity and Unreal games.
+    currently works via ./test_mvp.sh
+    must build cpp test file using the following command:
+    ``` bash
+        cd ./sdk/cpp
+        cmake --build build --target amp_test -j $(nproc)       
+        cd ../..
 
-The goal: **“integrate AMP in a day”** for any game that can generate deterministic replays or match transcripts. [build.avax](https://build.avax.network/build-games)
+        ./test_mvp.sh 
+    ```
 
-**C++ SDK & Demo (`/sdk/cpp`)**  
-A minimal native client and SDK demonstrating AMP integration in C++ using the Cap’n Proto schemas and RPC APIs. [build.avax](https://build.avax.network/build-games)
-
-**Demonstrates:** [build.avax](https://build.avax.network/build-games)
-- Using generated Cap’n Proto types and the C++ SDK to talk to the Rust matchmaker [build.avax](https://build.avax.network/build-games)
-- Creating and joining a staked duel on the C‑Chain via the matchmaking service [build.avax](https://build.avax.network/build-games)
-- Generating a deterministic match transcript and submitting it for verification and settlement [build.avax](https://build.avax.network/build-games)
-- Displaying logs of key AMP contract events (`MatchCreated`, `MatchJoined`, `MatchSettled`) during the test flow [build.avax](https://build.avax.network/build-games)
-
-The demo serves as a reference for native games or engines (Unreal, Godot, custom C++ engines) integrating directly with AMP services and contracts. [build.avax](https://build.avax.network/build-games)
+  - C# for Unity and .NET games.
 
 ***
 
