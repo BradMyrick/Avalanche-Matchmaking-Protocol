@@ -134,7 +134,7 @@ Games can use these schemas directly or extend them with custom metadata while s
 
 ***
 
-### SDKs & Web Demo
+## SDKs & Demos
 
 - **C++ and C# SDKs** (in progress)
 
@@ -150,8 +150,6 @@ Games can use these schemas directly or extend them with custom metadata while s
     ```
 
   - C# for Unity and .NET games.
-
-
 
 ***
 
