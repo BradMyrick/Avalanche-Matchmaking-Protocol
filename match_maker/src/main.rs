@@ -1,3 +1,4 @@
+use amp_telemetry::{self, TelemetryConfig};
 use anyhow::Result;
 use capnp::capability::Promise;
 use capnp_rpc::{RpcSystem, pry, rpc_twoparty_capnp, twoparty};
@@ -9,6 +10,7 @@ use lazy_static::lazy_static;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
+use tracing::info;
 
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use uuid::Uuid;
@@ -37,9 +39,8 @@ struct QueueEntry {
 }
 
 async fn verify_and_sign(_match_id: &str, outcome: u8, transcript_hash: &[u8]) -> Result<Vec<u8>> {
-    let key = env::var("VERIFIER_KEY").unwrap_or_else(|_| {
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string()
-    });
+    let key = env::var("VERIFIER_KEY")
+        .unwrap_or_else(|_| "0123456789TEST0123456789TEST0123456789TEST0123456789TEST".to_string());
     let wallet: LocalWallet = key.parse()?;
 
     let t_hash = if transcript_hash.is_empty() {
@@ -208,9 +209,19 @@ impl game_session_service::Server for GameSessionServiceImpl {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    //TODO: check this
+    let cfg = TelemetryConfig {
+        service_name: "amp-messaging-gateway".to_string(),
+        otlp_endpoint: "http://localhost:4317".to_string(),
+        environment: "dev".to_string(),
+        trace_sample_ratio: 1.0,
+    };
+
+    amp_telemetry::init(cfg).expect("telemetry init failed");
+
     let addr = env::var("AMP_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    println!("AMP WS Matchmaker (Cap'n Proto RPC) starting on {}", addr);
+    println!("AMP WS Matchmaker RPC starting on {}", addr);
 
     let local = tokio::task::LocalSet::new();
 
@@ -234,6 +245,19 @@ async fn main() -> Result<()> {
                     if let Err(e) = rpc_system.await {
                         println!("RPC error: {}", e);
                     }
+                    let game_id = 1;
+                    let match_id = Some(42);
+                    let message_type = "MatchInputFrame";
+                    let schema_id = "capnp.MatchInputFrame@1234abcd";
+                    let span =
+                        amp_telemetry::messaging_span(game_id, match_id, message_type, schema_id);
+                    let _guard = span.enter();
+
+                    amp_telemetry::incr_message_counter(game_id, message_type);
+                    info!("processed message from player");
+
+                    // On shutdown:
+                    amp_telemetry::shutdown();
                 });
             }
         })

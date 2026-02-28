@@ -1,0 +1,15 @@
+[package]
+name = "amp-telemetry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+once_cell = "1.21.3"
+opentelemetry = { version = "0.31.0", features = ["metrics", "trace"] }
+opentelemetry-otlp = {version = "0.31.0", features = ["http-proto", "grpc-tonic", "tls"] }
+opentelemetry_sdk = {version = "0.31.0", features = ["metrics", "trace", "rt-tokio"] }
+thiserror = "2.0.18"
+tracing = "0.1.44"
+tracing-opentelemetry = "0.32.1"
+tracing-subscriber = {version = "0.3.22", features = ["env-filter", "fmt", "json"]}

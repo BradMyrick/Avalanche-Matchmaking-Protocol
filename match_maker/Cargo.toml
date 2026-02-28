@@ -16,6 +16,7 @@ ethers-signers = "2.0.14"
 lazy_static = "1.5.0"
 ws_stream_tungstenite = "0.15.0"
 async-tungstenite = { version = "0.29", features = ["tokio-runtime"] }
-
+amp-telemetry = { path = "../amp-telemetry" }
+tracing = "0.1.44"
 [build-dependencies]
 capnpc = "0.19"
