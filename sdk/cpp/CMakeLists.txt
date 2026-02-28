@@ -6,48 +6,33 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Cap'n Proto detection: CMake package first, then pkg-config fallback ---
 
-# Try the official CapnProto CMake package
-find_package(CapnProto QUIET)
+find_package(CapnProto REQUIRED)
 
-if (CapnProto_FOUND)
-    message(STATUS "Using CapnProto CMake package")
-    include_directories(${CAPNP_INCLUDE_DIRS} ./include ./src)
-    add_definitions(${CAPNP_DEFINITIONS})
-    set(CAPNP_LIBS CapnProto::capnp-rpc CapnProto::capnp CapnProto::kj-async CapnProto::kj)
-else()
-    message(STATUS "CapnProto CMake package not found or unusable, falling back to pkg-config")
+# Go from sdk/cpp -> sdk -> repo root
+get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(CAPNP REQUIRED capnp capnp-rpc kj kj-async)
+# Cap'n Proto schema config
+set(CAPNPC_SRC_PREFIX "${REPO_ROOT}")
+set(CAPNPC_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${CAPNPC_OUTPUT_DIR}")
+include_directories(${CAPNPC_OUTPUT_DIR})
 
-    include_directories(${CAPNP_INCLUDE_DIRS} ./include ./src)
-    link_directories(${CAPNP_LIBRARY_DIRS})
-    add_definitions(${CAPNP_CFLAGS_OTHER})
-
-    set(CAPNP_LIBS ${CAPNP_LIBRARIES})
-endif()
-
-# --- Sources ---
-
-# Generated schema files (from Cap'n Proto)
-set(SCHEMA_SOURCES
-    src/schemas/game_types.capnp.c++
-    src/schemas/match.capnp.c++
-    src/schemas/service.capnp.c++
+# Schemas live in repo-root/schemas
+set(SCHEMA_FILES
+    ${REPO_ROOT}/schemas/game_types.capnp
+    ${REPO_ROOT}/schemas/match.capnp
+    ${REPO_ROOT}/schemas/service.capnp
 )
 
-# SDK implementation
-set(SDK_SOURCES
+capnp_generate_cpp(SCHEMA_SRCS SCHEMA_HDRS ${SCHEMA_FILES})
+
+add_library(amp_sdk STATIC
+    ${SCHEMA_SRCS}
     src/AmpClient.cpp
 )
 
-# --- Targets ---
-
-# Static library for the SDK
-add_library(amp_sdk STATIC ${SCHEMA_SOURCES} ${SDK_SOURCES})
-target_link_libraries(amp_sdk PUBLIC ${CAPNP_LIBS})
+target_link_libraries(amp_sdk PUBLIC CapnProto::capnp-rpc CapnProto::capnp CapnProto::kj-async CapnProto::kj)
 target_include_directories(amp_sdk PUBLIC include)
 
-# Example/test executable
 add_executable(amp_test src/main.cpp)
 target_link_libraries(amp_test PRIVATE amp_sdk)

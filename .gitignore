@@ -63,9 +63,10 @@ contracts/broadcast/
 # --- Contracts/Forge ---
 contracts/lib/
 broadcast/
-
 cache/
-
 out/
-
 lib/
+
+# --- cpp ---
+ 
+
