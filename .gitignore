@@ -71,10 +71,9 @@ lib/
 amp-sdk/cpp_example/build/
 
 # --- Generated Schemas ---
-amp-sdk/schemas/
+amp-sdk/schemas/generated/
 
 # --- C# ---
 amp-sdk/csharp_example/bin/
 amp-sdk/csharp_example/obj/
-amp-sdk/csharp_example/Generated/
  

@@ -12,18 +12,18 @@ find_package(CapnProto REQUIRED)
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
 # Cap'n Proto schema config
-set(CAPNPC_SRC_PREFIX "${REPO_ROOT}")
-set(CAPNPC_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(CAPNPC_SRC_PREFIX "${REPO_ROOT}/amp-sdk/schemas")
+set(CAPNPC_OUTPUT_DIR "${REPO_ROOT}/amp-sdk/schemas/generated/cpp")
 file(MAKE_DIRECTORY "${CAPNPC_OUTPUT_DIR}")
 include_directories(${CAPNPC_OUTPUT_DIR})
 
-# Schemas live in repo-root/schemas
+# Schemas live in repo-root/amp-sdk/schemas
 set(SCHEMA_FILES
-    ${REPO_ROOT}/schemas/game_core.capnp
-    ${REPO_ROOT}/schemas/amp_telemetry.capnp
-    ${REPO_ROOT}/schemas/game_types.capnp
-    ${REPO_ROOT}/schemas/match.capnp
-    ${REPO_ROOT}/schemas/service.capnp
+    ${REPO_ROOT}/amp-sdk/schemas/game_core.capnp
+    ${REPO_ROOT}/amp-sdk/schemas/amp_telemetry.capnp
+    ${REPO_ROOT}/amp-sdk/schemas/game_types.capnp
+    ${REPO_ROOT}/amp-sdk/schemas/match.capnp
+    ${REPO_ROOT}/amp-sdk/schemas/service.capnp
 )
 
 capnp_generate_cpp(SCHEMA_SRCS SCHEMA_HDRS ${SCHEMA_FILES})

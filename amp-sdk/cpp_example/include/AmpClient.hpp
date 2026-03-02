@@ -1,9 +1,9 @@
 #pragma once
 
-#include "schemas/amp_telemetry.capnp.h"
-#include "schemas/game_core.capnp.h"
-#include "schemas/match.capnp.h"
-#include "schemas/service.capnp.h"
+#include "amp_telemetry.capnp.h"
+#include "game_core.capnp.h"
+#include "match.capnp.h"
+#include "service.capnp.h"
 #include <capnp/ez-rpc.h>
 #include <future>
 #include <memory>

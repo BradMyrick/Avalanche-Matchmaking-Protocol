@@ -11,4 +11,8 @@
     <PackageReference Include="Capnp.Net.Runtime" Version="1.3.118" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\schemas\generated\csharp\**\*.cs" />
+  </ItemGroup>
+
 </Project>
