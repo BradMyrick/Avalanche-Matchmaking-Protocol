@@ -40,6 +40,18 @@ verify_command "rustc" "Rust (rustc)" rustc --version || ALL_PASSED=0
 verify_command "cargo" "Cargo" cargo --version || ALL_PASSED=0
 verify_command "dotnet" ".NET SDK (8.0+)" dotnet --version || ALL_PASSED=0
 
+# Require .NET runtime 8.x or 10.x for C# SDK
+if command -v dotnet >/dev/null 2>&1; then
+    printf "%-25s" "Checking .NET runtime (8.x or 10.x)..."
+    if dotnet --list-runtimes | grep -q "Microsoft.NETCore.App 8\." \
+       || dotnet --list-runtimes | grep -q "Microsoft.NETCore.App 10\." ; then
+        echo "✅ Compatible runtime found"
+    else
+        echo "❌ Missing .NET 8.x or 10.x runtime"
+        echo "  -> Please install Microsoft.NETCore.App 8.x or 10.x"
+        ALL_PASSED=0
+    fi
+fi
 
 # Web3/Crypto Tools
 verify_command "forge" "Foundry (forge)" forge --version || ALL_PASSED=0
@@ -48,24 +60,16 @@ verify_command "anvil" "Foundry (anvil)" anvil --version || ALL_PASSED=0
 # Cap'n Proto
 verify_command "capnp" "Cap'n Proto (compiler)" capnp --version || ALL_PASSED=0
 
-#check if DOTNET_TOOLS and PATH env variables are set correctly
+# Check if DOTNET_TOOLS and PATH env variables are set correctly
 printf "%-25s" "Checking environment variables..."
-
 if [ -z "$DOTNET_TOOLS" ] || [ -z "$PATH" ]; then
-
     echo "❌ Missing environment variables: DOTNET_TOOLS or PATH"
-    echo echo "  -> Recommendation: Run 'export DOTNET_TOOLS=/path/to/dotnet/tools'"
-    echo "  -> Recommendation: Run 'export PATH=$PATH:$DOTNET_TOOLS'"
-
+    echo "  -> Recommendation: Run 'export DOTNET_TOOLS=/path/to/dotnet/tools'"
+    echo "  -> Recommendation: Run 'export PATH=\$PATH:\$DOTNET_TOOLS'"
     ALL_PASSED=0
-
 else
-
     echo "✅ Environment variables are set correctly."
-
 fi
-
-
 
 # Check Capnp C# specifically
 printf "%-25s" "Checking capnpc-csharp..."
