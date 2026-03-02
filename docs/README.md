@@ -134,15 +134,13 @@ Games can use these schemas directly or extend them with custom metadata while s
 
 ***
 
-### SDKs
+## SDKs & Demos
 
 - **C++ and C# SDKs** (in progress)
 
   - C++ for Unity and Unreal games. ([See C++ SDK README](../amp-sdk/cpp_example/README.md))
 
   - C# for Unity and .NET games. ([See C# SDK README](../amp-sdk/csharp_example/README.md))
-
-
 
 ***
 
