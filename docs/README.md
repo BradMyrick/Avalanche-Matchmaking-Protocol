@@ -138,18 +138,9 @@ Games can use these schemas directly or extend them with custom metadata while s
 
 - **C++ and C# SDKs** (in progress)
 
-  - C++ for Unity and Unreal games.
-    currently works via ./test_mvp.sh
-    must build cpp test file using the following command:
-    ``` bash
-        cd ./sdk/cpp
-        cmake --build build --target amp_test -j $(nproc)       
-        cd ../..
+  - C++ for Unity and Unreal games. ([See C++ SDK README](../amp-sdk/cpp_example/README.md))
 
-        ./test_mvp.sh 
-    ```
-
-  - C# for Unity and .NET games.
+  - C# for Unity and .NET games. ([See C# SDK README](../amp-sdk/csharp_example/README.md))
 
 
 
@@ -196,12 +187,9 @@ For games and systems where the authoritative result comes from an external orac
 ## Repository Layout
 
 /contracts      # Solidity (Foundry) AMPRegistry + AMPSettlement
-/match_maker    # Rust matchmaking & verification service (Cap'n Proto RPC)
-/mm-client      # Rust example client for the matchmaking service
-/sdk/js         # TypeScript SDK (AMPClient) for web and Node games
-/sdk/cpp        # C++ SDK and example client (amp_test)
-/web            # Avalanche-branded React + Tailwind web demo
-/schemas        # Cap'n Proto schemas: generic protocol + game-type schemas
+/amp-server     # Rust matchmaking & verification service (Cap'n Proto RPC)
+/amp-telemetry  # Rust telemetry receiver
+/amp-sdk        # SDKs and Cap'n Proto schemas (C++, C#)
 /docs           # Design docs, settlement mode specs, integration guides
 
 ---
@@ -225,45 +213,44 @@ forge install OpenZeppelin/openzeppelin-contracts --no-commit
 forge clean  
 forge build
 
-3. **Generate Cap’n Proto C++ schemas**
+3. **Generate Cap'n Proto C# schemas (Optional, for C# SDK)**
 
-capnp compile \
-  -oc++:sdk/cpp/src/schemas \
-  --src-prefix=schemas \
-  amp-sdk/schemas/game_types.capnp \
-  amp-sdk/schemas/match.capnp \
-  amp-sdk/schemas/service.capnp
-
-4. **C++ SDK – build**
-
-cd sdk/cpp  
-rm -rf build  
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  
-cmake --build build --config Release  
+```bash
+cd amp-sdk/schemas
+mkdir -p generated/csharp
+DOTNET_ROLL_FORWARD=Major capnp compile -I/usr/local/include -ocsharp:generated/csharp *.capnp
 cd ../..
+```
 
-5. **Wire C++ test client for the MVP script**
+4. **C++ & C# SDKs – build**
 
-mkdir -p build  
-ln -sf ../sdk/cpp/build/amp_test build/amp_test
+```bash
+# Build C++ SDK
+cd amp-sdk/cpp_example  
+mkdir -p build && cd build
+cmake ..
+make
+cd ../../..
 
-6. **Rust services & JS SDK (optional for local hacking)**
+# Build C# SDK
+cd amp-sdk/csharp_example
+dotnet build
+cd ../..
+```
 
-# Match maker  
-cd match_maker  
+5. **Rust services**
+
+```bash
+# Matchmaker  
+cd amp-server  
 cargo build  
 cd ..  
 
-# Example Rust client  
-cd mm-client  
-cargo build  
-cd ..  
-
-# JS SDK  
-cd sdk/js  
-npm install  
-npm run build  
-cd ../..
+# Telemetry
+cd amp-telemetry
+cargo build
+cd ..
+```
 
 7. **Web demo (optional)**
 
@@ -277,14 +264,17 @@ cd ..
 
 From repo root:
 
+```bash
 ./test_mvp.sh
+```
 
 This will:
 - Start a local Anvil chain  
 - Deploy AMP contracts  
+- Start the Rust telemetry receiver
 - Start the Rust matchmaker  
 - Run the C++ SDK test client  
-- Run the JS simulator and verify on-chain settlement
+- Run the C# SDK test client
 
 ## Integrating Your Game with AMP
 
