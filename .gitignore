@@ -8,6 +8,7 @@ Thumbs.db
 *.swo
 *~
 *.sublime-workspace
+build/
 
 # ---- Secrets & Environment ----
 .env
@@ -29,18 +30,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-
-# ---- Node / TS (web + sdk/js) ----
-node_modules/
-dist/
-build/
-coverage/
-.turbo/
-.next/
-.nuxt/
-.out/
-.cache/
-.parcel-cache
 
 # ---- Rust (match_maker + mm-client) ----
 target/
@@ -68,5 +57,13 @@ out/
 lib/
 
 # --- cpp ---
- 
+amp-sdk/cpp_example/build/
 
+# --- Generated Schemas ---
+amp-sdk/schemas/generated/
+
+# --- C# ---
+amp-sdk/csharp_example/bin/
+amp-sdk/csharp_example/obj/
+ 
+build/

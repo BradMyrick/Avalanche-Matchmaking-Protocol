@@ -30,7 +30,7 @@ At a high level:
   - The service handles matchmaking, verifies transcripts/replays, and performs on‑chain actions on Avalanche.
 
 - **Off‑chain simulation, on‑chain truth**
-  - Matches run off‑chain (Unity, Unreal, Godot, Rust, JS, mobile, etc.).
+  - Matches run off‑chain (Unity, Unreal, Godot, Rust, mobile, etc.).
   - AMP receives only hashes, transcripts, and signed outcomes, and enforces the economic truth on C‑Chain.
 
 - **Built for Avalanche first**
@@ -138,18 +138,9 @@ Games can use these schemas directly or extend them with custom metadata while s
 
 - **C++ and C# SDKs** (in progress)
 
-  - C++ for Unity and Unreal games.
-    currently works via ./test_mvp.sh
-    must build cpp test file using the following command:
-    ``` bash
-        cd ./sdk/cpp
-        cmake --build build --target amp_test -j $(nproc)       
-        cd ../..
+  - C++ for Unity and Unreal games. ([See C++ SDK README](../amp-sdk/cpp_example/README.md))
 
-        ./test_mvp.sh 
-    ```
-
-  - C# for Unity and .NET games.
+  - C# for Unity and .NET games. ([See C# SDK README](../amp-sdk/csharp_example/README.md))
 
 ***
 
@@ -194,12 +185,9 @@ For games and systems where the authoritative result comes from an external orac
 ## Repository Layout
 
 /contracts      # Solidity (Foundry) AMPRegistry + AMPSettlement
-/match_maker    # Rust matchmaking & verification service (Cap'n Proto RPC)
-/mm-client      # Rust example client for the matchmaking service
-/sdk/js         # TypeScript SDK (AMPClient) for web and Node games
-/sdk/cpp        # C++ SDK and example client (amp_test)
-/web            # Avalanche-branded React + Tailwind web demo
-/schemas        # Cap'n Proto schemas: generic protocol + game-type schemas
+/amp-server     # Rust matchmaking & verification service (Cap'n Proto RPC)
+/amp-telemetry  # Rust telemetry receiver
+/amp-sdk        # SDKs and Cap'n Proto schemas (C++, C#)
 /docs           # Design docs, settlement mode specs, integration guides
 
 ---
@@ -208,7 +196,7 @@ For games and systems where the authoritative result comes from an external orac
 
 > **Note:** These commands describe the current MVP developer workflow from a clean clone to a passing `./test_mvp.sh`.
 
-Prereqs: Foundry, Rust, Node, and `capnp` installed.
+Prereqs: Foundry, Rust, and `capnp` installed.
 
 1. **Clone the repo**
 
@@ -216,73 +204,43 @@ git clone https://github.com/BradMyrick/Avax-Build-Games-2026.git
 cd Avax-Build-Games-2026  
 # (optional) git checkout amp-mvp-skeleton
 
-2. **Contracts – install deps, build**
 
-forge install OpenZeppelin/openzeppelin-contracts --no-commit  
 
-forge clean  
-forge build
+2. **Verify Dependencies**
 
-3. **Generate Cap’n Proto C++ schemas**
+```bash
+./dependencies.sh
+```
 
-capnp compile \
-  -oc++:sdk/cpp/src/schemas \
-  --src-prefix=schemas \
-  schemas/game_types.capnp \
-  schemas/match.capnp \
-  schemas/service.capnp
+This will check your system for required tools (`cmake`, `rustc`, `dotnet`, `forge`, `capnp`, etc.).
 
-4. **C++ SDK – build**
+3. **Automatic MVP Setup**
 
-cd sdk/cpp  
-rm -rf build  
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  
-cmake --build build --config Release  
-cd ../..
+```bash
+./mvp_setup.sh
+```
 
-5. **Wire C++ test client for the MVP script**
-
-mkdir -p build  
-ln -sf ../sdk/cpp/build/amp_test build/amp_test
-
-6. **Rust services & JS SDK (optional for local hacking)**
-
-# Match maker  
-cd match_maker  
-cargo build  
-cd ..  
-
-# Example Rust client  
-cd mm-client  
-cargo build  
-cd ..  
-
-# JS SDK  
-cd sdk/js  
-npm install  
-npm run build  
-cd ../..
-
-7. **Web demo (optional)**
-
-cd web  
-npm install  
-npm run dev  
-# Open http://localhost:5173  
-cd ..
+This script will automatically:
+- Install Foundry dependencies and build the smart contracts.
+- Build the Rust Matchmaker and Telemetry services.
+- Generate Cap'n Proto C# schemas.
+- Build the C++ and C# SDKs.
 
 8. **End-to-end MVP test**
 
 From repo root:
 
+```bash
 ./test_mvp.sh
+```
 
 This will:
 - Start a local Anvil chain  
 - Deploy AMP contracts  
+- Start the Rust telemetry receiver
 - Start the Rust matchmaker  
 - Run the C++ SDK test client  
-- Run the JS simulator and verify on-chain settlement
+- Run the C# SDK test client
 
 ## Integrating Your Game with AMP
 
@@ -344,8 +302,7 @@ This script will:
 2. Deploy the Registry and Settlement contracts using Foundry.
 3. Start the `match_maker` Cap'n Proto RPC service over TCP.
 4. Run the C++ SDK compiled test client (`sdk/cpp/build/amp_test`).
-5. Run the TypeScript simulator (`sdk/js/sim.ts`) to orchestrate the on-chain flow.
-6. Provide a 0 exit code on successful on-chain settlement.
+5. Provide a 0 exit code on successful on-chain settlement.
 
 ***
 ## Contributing
@@ -353,7 +310,7 @@ This script will:
 AMP aims to be **generic infra** for all on‑chain and Web3‑adjacent games that can prove their outcomes. Contributions are especially welcome for:
 
 - New game‑type schemas and verifier modules.
-- Game integrations across engines (Unity, Unreal, Godot, JS, Rust).
+- Game integrations across engines (Unity, Unreal, Godot, Rust).
 - SDK ergonomics, dev tools, and documentation.
 
 Before large changes, please open an issue describing:
