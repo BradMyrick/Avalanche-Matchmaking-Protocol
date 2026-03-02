@@ -25,6 +25,9 @@ The client then emits telemetry and game events using the `MatchSession` capabil
 Before building the C# project, you must generate the C# Cap'n Proto schemas. Depending on your installation, the `capnpc-csharp` tool may require an older .NET runtime target, so we use `DOTNET_ROLL_FORWARD` to allow it to run on .NET 8+.
 
 ```bash
+# This is handled automatically by the root ./mvp_setup.sh script
+# To build manually:
+
 # Generate the C# code from the schemas
 cd ../schemas
 mkdir -p generated/csharp

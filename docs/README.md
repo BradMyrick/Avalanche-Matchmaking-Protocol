@@ -213,52 +213,17 @@ forge install OpenZeppelin/openzeppelin-contracts --no-commit
 forge clean  
 forge build
 
-3. **Generate Cap'n Proto C# schemas (Optional, for C# SDK)**
+3. **Automatic MVP Setup**
 
 ```bash
-cd amp-sdk/schemas
-mkdir -p generated/csharp
-DOTNET_ROLL_FORWARD=Major capnp compile -I/usr/local/include -ocsharp:generated/csharp *.capnp
-cd ../..
+./mvp_setup.sh
 ```
 
-4. **C++ & C# SDKs – build**
-
-```bash
-# Build C++ SDK
-cd amp-sdk/cpp_example  
-mkdir -p build && cd build
-cmake ..
-make
-cd ../../..
-
-# Build C# SDK
-cd amp-sdk/csharp_example
-dotnet build
-cd ../..
-```
-
-5. **Rust services**
-
-```bash
-# Matchmaker  
-cd amp-server  
-cargo build  
-cd ..  
-
-# Telemetry
-cd amp-telemetry
-cargo build
-cd ..
-```
-
-7. **Web demo (optional)**
-
-cd web  
-npm install  
-npm run dev  
-# Open http://localhost:5173  
-cd ..
+This script will automatically:
+- Install Foundry dependencies and build the smart contracts.
+- Build the Rust Matchmaker and Telemetry services.
+- Generate Cap'n Proto C# schemas.
+- Build the C++ and C# SDKs.
 
 8. **End-to-end MVP test**
 

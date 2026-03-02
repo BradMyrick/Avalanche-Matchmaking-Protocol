@@ -32,7 +32,9 @@ This exercise verifies that:
 ### Build
 
 ```bash
-mkdir build && cd build
+# This is handled automatically by the root ./mvp_setup.sh script
+# To build manually:
+mkdir -p build && cd build
 cmake ..
 make
 ```
