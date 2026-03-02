@@ -33,7 +33,7 @@ cd ..
 
 # 3. Start Matchmaker
 echo "[3/4] Starting Rust Matchmaker..."
-cd match_maker
+cd amp-server
 export VERIFIER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # fake test key
 cargo run > matchmaker.log 2>&1 &
 MM_PID=$!
