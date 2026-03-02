@@ -48,6 +48,25 @@ verify_command "anvil" "Foundry (anvil)" anvil --version || ALL_PASSED=0
 # Cap'n Proto
 verify_command "capnp" "Cap'n Proto (compiler)" capnp --version || ALL_PASSED=0
 
+#check if DOTNET_TOOLS and PATH env variables are set correctly
+printf "%-25s" "Checking environment variables..."
+
+if [ -z "$DOTNET_TOOLS" ] || [ -z "$PATH" ]; then
+
+    echo "❌ Missing environment variables: DOTNET_TOOLS or PATH"
+    echo echo "  -> Recommendation: Run 'export DOTNET_TOOLS=/path/to/dotnet/tools'"
+    echo "  -> Recommendation: Run 'export PATH=$PATH:$DOTNET_TOOLS'"
+
+    ALL_PASSED=0
+
+else
+
+    echo "✅ Environment variables are set correctly."
+
+fi
+
+
+
 # Check Capnp C# specifically
 printf "%-25s" "Checking capnpc-csharp..."
 if command -v capnpc-csharp >/dev/null 2>&1; then
