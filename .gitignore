@@ -68,5 +68,13 @@ out/
 lib/
 
 # --- cpp ---
- 
+amp-sdk/cpp_example/build/
 
+# --- Generated Schemas ---
+amp-sdk/schemas/
+
+# --- C# ---
+amp-sdk/csharp_example/bin/
+amp-sdk/csharp_example/obj/
+amp-sdk/csharp_example/Generated/
+ 

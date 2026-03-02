@@ -1,14 +1,18 @@
 fn main() {
-    println!("cargo:rerun-if-changed=../schemas/match.capnp");
-    println!("cargo:rerun-if-changed=../schemas/game_types.capnp");
-    println!("cargo:rerun-if-changed=../schemas/service.capnp");
-    println!("cargo:rerun-if-changed=../schemas/rust.capnp");
+    println!("cargo:rerun-if-changed=../amp-sdk/schemas/match.capnp");
+    println!("cargo:rerun-if-changed=../amp-sdk/schemas/game_types.capnp");
+    println!("cargo:rerun-if-changed=../amp-sdk/schemas/service.capnp");
+    println!("cargo:rerun-if-changed=../amp-sdk/schemas/game_core.capnp");
+    println!("cargo:rerun-if-changed=../amp-sdk/schemas/amp_telemetry.capnp");
+    println!("cargo:rerun-if-changed=../amp-sdk/schemas/rust.capnp");
 
     capnpc::CompilerCommand::new()
-        .src_prefix("../schemas")
-        .file("../schemas/match.capnp")
-        .file("../schemas/game_types.capnp")
-        .file("../schemas/service.capnp")
+        .src_prefix("../amp-sdk/schemas")
+        .file("../amp-sdk/schemas/match.capnp")
+        .file("../amp-sdk/schemas/game_types.capnp")
+        .file("../amp-sdk/schemas/service.capnp")
+        .file("../amp-sdk/schemas/game_core.capnp")
+        .file("../amp-sdk/schemas/amp_telemetry.capnp")
         .run()
         .expect("capnp compilation failed");
 }

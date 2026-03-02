@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env zsh
+source ~/.zshrc 2>/dev/null || true
 set -e
 
 echo "=========================================="
@@ -22,6 +23,14 @@ echo "Registry: $REGISTRY_ADDR"
 echo "Settlement: $SETTLEMENT_ADDR"
 cd ..
 
+# 2.5 Start Telemetry Receiver
+echo "[2.5/4] Starting Telemetry Receiver..."
+cd amp-telemetry
+cargo run --bin amp-telemetry > telemetry.log 2>&1 &
+TELEMETRY_PID=$!
+sleep 2 # wait for receiver
+cd ..
+
 # 3. Start Matchmaker
 echo "[3/4] Starting Rust Matchmaker..."
 cd match_maker
@@ -33,22 +42,30 @@ cd ..
 
 # 4. Run C++ Native SDK Test
 echo "[4/5] Running C++ Native SDK Matchmaker Client..."
-cd sdk/cpp
-./build/amp_test || { echo "C++ SDK Test Failed!"; kill $ANVIL_PID; kill $MM_PID; exit 1; }
+cd amp-sdk/cpp_example
+./build/amp_test || { echo "C++ SDK Test Failed!"; kill $ANVIL_PID; kill $MM_PID; kill $TELEMETRY_PID; exit 1; }
 cd ../..
 
 # 5. Run c#.NET SDK Test
 
 echo "[5/5] Running C# .NET SDK Matchmaker Client..."
 
-cd sdk/csharp
+cd amp-sdk/csharp_example
 
-dotnet run || { echo "C# SDK Test Failed!"; kill $ANVIL_PID; kill $MM_PID; exit 1; }
+zsh -ic "dotnet run" || { echo "C# SDK Test Failed!"; kill $ANVIL_PID; kill $MM_PID; kill $TELEMETRY_PID; exit 1; }
 
 cd ../..
 
 echo "=========================================="
 echo " Tests Passed!"
 echo "=========================================="
-
+if [ -n "$ANVIL_PID" ]; then
+    kill $ANVIL_PID 2>/dev/null || true
+fi
+if [ -n "$MM_PID" ]; then
+    kill $MM_PID 2>/dev/null || true
+fi
+if [ -n "$TELEMETRY_PID" ]; then
+    kill $TELEMETRY_PID 2>/dev/null || true
+fi
 exit 0

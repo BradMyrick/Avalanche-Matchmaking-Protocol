@@ -1,4 +1,4 @@
-use amp_telemetry::{self, TelemetryConfig};
+// use amp_telemetry::{self, TelemetryConfig};
 use anyhow::Result;
 use capnp::capability::Promise;
 use capnp_rpc::{RpcSystem, pry, rpc_twoparty_capnp, twoparty};
@@ -23,6 +23,12 @@ pub mod match_capnp {
 }
 pub mod service_capnp {
     include!(concat!(env!("OUT_DIR"), "/service_capnp.rs"));
+}
+pub mod game_core_capnp {
+    include!(concat!(env!("OUT_DIR"), "/game_core_capnp.rs"));
+}
+pub mod amp_telemetry_capnp {
+    include!(concat!(env!("OUT_DIR"), "/amp_telemetry_capnp.rs"));
 }
 
 use match_capnp::*;
@@ -210,14 +216,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
 #[tokio::main]
 async fn main() -> Result<()> {
     //TODO: check this
-    let cfg = TelemetryConfig {
-        service_name: "amp-messaging-gateway".to_string(),
-        otlp_endpoint: "http://localhost:4317".to_string(),
-        environment: "dev".to_string(),
-        trace_sample_ratio: 1.0,
-    };
-
-    amp_telemetry::init(cfg).expect("telemetry init failed");
+    // Telemetry relies on the MatchSession capnp interface now.
 
     let addr = env::var("AMP_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -245,19 +244,10 @@ async fn main() -> Result<()> {
                     if let Err(e) = rpc_system.await {
                         println!("RPC error: {}", e);
                     }
-                    let game_id = 1;
-                    let match_id = Some(42);
-                    let message_type = "MatchInputFrame";
-                    let schema_id = "capnp.MatchInputFrame@1234abcd";
-                    let span =
-                        amp_telemetry::messaging_span(game_id, match_id, message_type, schema_id);
-                    let _guard = span.enter();
-
-                    amp_telemetry::incr_message_counter(game_id, message_type);
+                    // Capnp telemetry handled via events.
                     info!("processed message from player");
 
-                    // On shutdown:
-                    amp_telemetry::shutdown();
+                    // Shutdown handler
                 });
             }
         })

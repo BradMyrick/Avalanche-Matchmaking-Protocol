@@ -230,9 +230,9 @@ forge build
 capnp compile \
   -oc++:sdk/cpp/src/schemas \
   --src-prefix=schemas \
-  schemas/game_types.capnp \
-  schemas/match.capnp \
-  schemas/service.capnp
+  amp-sdk/schemas/game_types.capnp \
+  amp-sdk/schemas/match.capnp \
+  amp-sdk/schemas/service.capnp
 
 4. **C++ SDK – build**
 

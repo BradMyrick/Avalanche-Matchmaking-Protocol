@@ -19,6 +19,8 @@ include_directories(${CAPNPC_OUTPUT_DIR})
 
 # Schemas live in repo-root/schemas
 set(SCHEMA_FILES
+    ${REPO_ROOT}/schemas/game_core.capnp
+    ${REPO_ROOT}/schemas/amp_telemetry.capnp
     ${REPO_ROOT}/schemas/game_types.capnp
     ${REPO_ROOT}/schemas/match.capnp
     ${REPO_ROOT}/schemas/service.capnp
