@@ -30,7 +30,7 @@ At a high level:
   - The service handles matchmaking, verifies transcripts/replays, and performs on‑chain actions on Avalanche.
 
 - **Off‑chain simulation, on‑chain truth**
-  - Matches run off‑chain (Unity, Unreal, Godot, Rust, JS, mobile, etc.).
+  - Matches run off‑chain (Unity, Unreal, Godot, Rust, mobile, etc.).
   - AMP receives only hashes, transcripts, and signed outcomes, and enforces the economic truth on C‑Chain.
 
 - **Built for Avalanche first**
@@ -134,7 +134,7 @@ Games can use these schemas directly or extend them with custom metadata while s
 
 ***
 
-### SDKs & Web Demo
+### SDKs
 
 - **C++ and C# SDKs** (in progress)
 
@@ -198,7 +198,7 @@ For games and systems where the authoritative result comes from an external orac
 
 > **Note:** These commands describe the current MVP developer workflow from a clean clone to a passing `./test_mvp.sh`.
 
-Prereqs: Foundry, Rust, Node, and `capnp` installed.
+Prereqs: Foundry, Rust, and `capnp` installed.
 
 1. **Clone the repo**
 
@@ -206,12 +206,15 @@ git clone https://github.com/BradMyrick/Avax-Build-Games-2026.git
 cd Avax-Build-Games-2026  
 # (optional) git checkout amp-mvp-skeleton
 
-2. **Contracts – install deps, build**
 
-forge install OpenZeppelin/openzeppelin-contracts --no-commit  
 
-forge clean  
-forge build
+2. **Verify Dependencies**
+
+```bash
+./dependencies.sh
+```
+
+This will check your system for required tools (`cmake`, `rustc`, `dotnet`, `forge`, `capnp`, etc.).
 
 3. **Automatic MVP Setup**
 
@@ -301,8 +304,7 @@ This script will:
 2. Deploy the Registry and Settlement contracts using Foundry.
 3. Start the `match_maker` Cap'n Proto RPC service over TCP.
 4. Run the C++ SDK compiled test client (`sdk/cpp/build/amp_test`).
-5. Run the TypeScript simulator (`sdk/js/sim.ts`) to orchestrate the on-chain flow.
-6. Provide a 0 exit code on successful on-chain settlement.
+5. Provide a 0 exit code on successful on-chain settlement.
 
 ***
 ## Contributing
@@ -310,7 +312,7 @@ This script will:
 AMP aims to be **generic infra** for all on‑chain and Web3‑adjacent games that can prove their outcomes. Contributions are especially welcome for:
 
 - New game‑type schemas and verifier modules.
-- Game integrations across engines (Unity, Unreal, Godot, JS, Rust).
+- Game integrations across engines (Unity, Unreal, Godot, Rust).
 - SDK ergonomics, dev tools, and documentation.
 
 Before large changes, please open an issue describing:
