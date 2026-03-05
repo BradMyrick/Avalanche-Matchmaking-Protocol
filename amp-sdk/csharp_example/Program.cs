@@ -5,6 +5,25 @@ namespace AmpSdkExample
 {
     class Program
     {
+        static async Task RunOpponent(string serverUrl, string gameIdStr)
+        {
+            await Task.Delay(500); // Wait half a second for player A to connect
+            try
+            {
+                using var client = new AmpClient(serverUrl);
+                var dummySig = new byte[] { 0x05, 0x06, 0x07, 0x08 };
+                if (await client.ConnectAsync(dummySig))
+                {
+                    Console.WriteLine("[Player B] Connected to Matchmaker. Requesting match...");
+                    await client.RequestMatchAsync(gameIdStr);
+                }
+            }
+            catch (Exception)
+            {
+                // Ignore background errors
+            }
+        }
+
         static async Task Main(string[] args)
         {
             var serverUrl = Environment.GetEnvironmentVariable("AMP_ADDR") ?? "127.0.0.1:50051";
@@ -12,7 +31,7 @@ namespace AmpSdkExample
 
             try
             {
-                var client = new AmpClient(serverUrl);
+                using var client = new AmpClient(serverUrl);
 
                 // 1. Connect and login via signature
                 var pseudoSignature = new byte[] { 0x01, 0x02, 0x03 };
@@ -22,10 +41,14 @@ namespace AmpSdkExample
                     Console.WriteLine("Failed to connect.");
                     return;
                 }
-                Console.WriteLine("[Player] Connected & Logged in to AMP matchmaker.");
+                Console.WriteLine("[Player A] Connected & Logged in to AMP matchmaker.");
+
+                string gameIdStr = "0x6767676767676767";
+
+                Console.WriteLine("Spawning Player B thread...");
+                _ = Task.Run(() => RunOpponent(serverUrl, gameIdStr));
 
                 // 2. Request a match
-                string gameIdStr = "0x6767676767676767";
                 string matchId = await client.RequestMatchAsync(gameIdStr);
                 Console.WriteLine($"Got MatchAssignment! Match ID: {matchId}");
 
@@ -50,7 +73,7 @@ namespace AmpSdkExample
             catch (Exception ex)
             {
                 Console.WriteLine($"AMP Connect Error: {ex.Message}");
-                Console.WriteLine("C++ SDK Test Failed!"); // (Keep format for test script matching)
+                Console.WriteLine("C# SDK Test Failed!"); 
                 Environment.Exit(1);
             }
         }

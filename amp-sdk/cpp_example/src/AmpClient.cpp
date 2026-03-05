@@ -40,6 +40,21 @@ MatchAssignment AmpClient::requestMatch(const std::string &gameId) {
         reinterpret_cast<const kj::byte *>(gameId.data()), gameId.size());
     gmReq.setGameId(gameIdBytes);
 
+    gmReq.setRulesType("standard");
+    auto pInfo = gmReq.initPlayerInfo();
+    pInfo.setPlayerId(kj::arrayPtr(reinterpret_cast<const kj::byte*>("p1"), 2));
+    pInfo.setDisplayName("CppPlayer");
+    pInfo.setElo(Elo::UNRANKED);
+    pInfo.setRegion(Region::NA);
+    pInfo.setPlayerWallet(kj::ArrayPtr<const kj::byte>());
+
+    auto pStake = gmReq.initStake();
+    pStake.setPayerWallet(kj::ArrayPtr<const kj::byte>());
+    pStake.setFeeToken(kj::ArrayPtr<const kj::byte>());
+    pStake.setAuthSpend(0);
+
+    gmReq.setOptionalConfig(kj::ArrayPtr<const kj::byte>());
+
     auto response = req.send().wait(rpcClient->getWaitScope());
     auto assignment = response.getAssignment();
 
@@ -66,7 +81,11 @@ void AmpClient::emitGameEvent(const std::string &eventType) {
   try {
     auto req = matchSession.emitGameEventRequest();
     auto event = req.initEvent();
-    event.setEventType(eventType);
+    event.setEventId(0);
+    event.setTimestamp(0);
+    event.setTriggeredBy(kj::arrayPtr(reinterpret_cast<const kj::byte*>("p1"), 2));
+    event.setEventType("move");
+    event.setEventData(kj::arrayPtr(reinterpret_cast<const kj::byte*>(eventType.data()), eventType.size()));
     auto promise = req.send();
     // Here we just fire and forget or could wait
   } catch (...) {
@@ -79,8 +98,11 @@ void AmpClient::emitTelemetry(uint8_t eventTypeEnum, uint64_t timestamp) {
   try {
     auto req = matchSession.emitTelemetryRequest();
     auto event = req.initEvent();
+    event.setMatchId(kj::ArrayPtr<const kj::byte>());
     event.setTimestamp(timestamp);
     event.setEventType(static_cast<TelemetryEventType>(eventTypeEnum));
+    event.setVerifierId(kj::ArrayPtr<const kj::byte>());
+    event.setEventData(kj::ArrayPtr<const kj::byte>());
     auto promise = req.send();
     // Fire and forget, or collect promise
   } catch (...) {
@@ -108,7 +130,12 @@ AmpClient::submitOutcome(const std::string &matchId, uint8_t outcome,
     sub.setMatchId(matchIdBytes);
 
     auto matchOutcome = sub.initOutcome();
+    matchOutcome.setType(outcome == 0 ? OutcomeType::WIN : OutcomeType::UNKNOWN);
+    auto scores = matchOutcome.initScores(2);
+    scores.set(0, 1);
+    scores.set(1, 0);
     matchOutcome.setVictor(outcome);
+    matchOutcome.setMetadata(kj::ArrayPtr<const kj::byte>());
 
     if (!transcriptHash.empty()) {
       kj::ArrayPtr<const kj::byte> hashBytes(transcriptHash.data(),

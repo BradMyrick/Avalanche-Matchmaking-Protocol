@@ -1,5 +1,10 @@
-#!/usr/bin/env zsh
-source ~/.zshrc 2>/dev/null || true
+#!/usr/bin/env bash
+# We use bash to bootstrap, but execute the rest of the script targeting the user's default environment
+if [ -n "$ZSH_VERSION" ] || [[ "$SHELL" == *"zsh"* ]]; then
+    source ~/.zshrc 2>/dev/null || true
+else
+    source ~/.bashrc 2>/dev/null || true
+fi
 set -e
 
 echo "=========================================="
@@ -76,13 +81,23 @@ else
   exit 0
 fi
 
-zsh -ic "dotnet run --framework $FRAMEWORK" || {
-  echo "C# SDK Test Failed!"
-  kill $ANVIL_PID 2>/dev/null || true
-  kill $MM_PID 2>/dev/null || true
-  kill $TELEMETRY_PID 2>/dev/null || true
-  exit 1
-}
+if [ -n "$ZSH_VERSION" ] || [[ "$SHELL" == *"zsh"* ]]; then
+    zsh -ic "dotnet run --framework $FRAMEWORK" || {
+      echo "C# SDK Test Failed!"
+      kill $ANVIL_PID 2>/dev/null || true
+      kill $MM_PID 2>/dev/null || true
+      kill $TELEMETRY_PID 2>/dev/null || true
+      exit 1
+    }
+else
+    bash -ic "dotnet run --framework $FRAMEWORK" || {
+      echo "C# SDK Test Failed!"
+      kill $ANVIL_PID 2>/dev/null || true
+      kill $MM_PID 2>/dev/null || true
+      kill $TELEMETRY_PID 2>/dev/null || true
+      exit 1
+    }
+fi
 
 cd ../..
 

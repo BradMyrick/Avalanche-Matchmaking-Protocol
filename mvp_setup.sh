@@ -1,5 +1,9 @@
-#!/usr/bin/env zsh
-source ~/.zshrc 2>/dev/null || true
+#!/usr/bin/env bash
+if [ -n "$ZSH_VERSION" ] || [[ "$SHELL" == *"zsh"* ]]; then
+    source ~/.zshrc 2>/dev/null || true
+else
+    source ~/.bashrc 2>/dev/null || true
+fi
 set -e
 
 echo "=========================================="
