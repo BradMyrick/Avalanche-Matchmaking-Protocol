@@ -1,0 +1,58 @@
+name: AMP CI
+
+on:
+  push:
+    branches: [ main, mvp ]
+  pull_request:
+    branches: [ main, mvp ]
+
+jobs:
+  test-rust:
+    name: Rust Services (amp-server, amp-telemetry, trace-viewer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Cap'n Proto
+        run: sudo apt-get update && sudo apt-get install -y capnproto
+        
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        
+      - name: Run amp-server tests
+        run: cd amp-server && cargo test
+        
+      - name: Run amp-telemetry tests
+        run: cd amp-telemetry && cargo test
+        
+      - name: Run trace-viewer check
+        run: cd trace-viewer && cargo check
+
+  test-contracts:
+    name: Foundry Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        
+      - name: Run Forge tests
+        run: cd contracts && forge test -vvv
+
+  test-sdk-csharp:
+    name: C# SDK Example
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+          
+      - name: Build C# Example
+        run: cd amp-sdk/csharp_example && dotnet build
