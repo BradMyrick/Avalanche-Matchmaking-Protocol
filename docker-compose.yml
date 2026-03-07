@@ -1,0 +1,37 @@
+version: "3.9"
+services:
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    command: "anvil --host 0.0.0.0"
+    ports:
+      - "8545:8545"
+
+  amp-telemetry:
+    image: rust:latest
+    working_dir: /app/amp-telemetry
+    volumes:
+      - .:/app
+    command: "cargo run --bin amp-telemetry"
+    environment:
+      # Isolate the target dir to avoid host conflicts
+      - CARGO_TARGET_DIR=/tmp/target
+    ports:
+      - "4317:4317"
+    depends_on:
+      - anvil
+
+  amp-server:
+    image: rust:latest
+    working_dir: /app/amp-server
+    volumes:
+      - .:/app
+    command: "cargo run"
+    environment:
+      - AMP_ADDR=0.0.0.0:50051
+      - VERIFIER_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - CARGO_TARGET_DIR=/tmp/target
+    ports:
+      - "50051:50051"
+    depends_on:
+      - anvil
+      - amp-telemetry

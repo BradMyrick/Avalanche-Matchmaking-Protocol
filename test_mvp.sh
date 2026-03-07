@@ -17,9 +17,11 @@ anvil > anvil.log 2>&1 &
 ANVIL_PID=$!
 sleep 2 # wait for node to boot
 
-# 2. Deploy Contracts
-echo "[2/4] Deploying AMP Contracts..."
+# 2. Deploy Contracts & Run L1 Verification
+echo "[2/4] Deploying AMP Contracts & Running L1 Verification Tests..."
 cd contracts
+forge test -vvv || { echo "L1 Contract Verification Failed!"; kill $ANVIL_PID; exit 1; }
+
 export PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 # fake test key
 forge script script/Deploy.s.sol --rpc-url http://localhost:8545 --broadcast > deploy_logs.txt
 REGISTRY_ADDR=$(cat deploy_logs.txt | grep "AMPRegistry Deployed at:" | awk '{print $4}')
@@ -36,7 +38,7 @@ TELEMETRY_PID=$!
 sleep 2 # wait for receiver
 cd ..
 
-# 3. Start Matchmaker
+# 3. Start AMP-Server
 echo "[3/4] Starting Rust Matchmaker..."
 cd amp-server
 export VERIFIER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # fake test key
