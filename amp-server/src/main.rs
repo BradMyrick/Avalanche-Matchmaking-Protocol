@@ -109,6 +109,22 @@ impl match_session::Server for MatchSessionImpl {
     ) -> Promise<(), ::capnp::Error> {
         Promise::ok(())
     }
+
+    fn emit_game_event(
+        &mut self,
+        _params: match_session::EmitGameEventParams,
+        _results: match_session::EmitGameEventResults,
+    ) -> Promise<(), ::capnp::Error> {
+        Promise::ok(())
+    }
+
+    fn emit_telemetry(
+        &mut self,
+        _params: match_session::EmitTelemetryParams,
+        _results: match_session::EmitTelemetryResults,
+    ) -> Promise<(), ::capnp::Error> {
+        Promise::ok(())
+    }
 }
 
 struct UserSessionImpl {

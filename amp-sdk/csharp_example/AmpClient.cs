@@ -1,22 +1,25 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 
 // Expected namespaces generated from Cap'n Proto schemas
 using CapnpGen;
+using Capnp.Rpc;
 
 namespace AmpSdkExample
 {
-    public class AmpClient
+    public class AmpClient : IDisposable
     {
         private readonly string _serverAddress;
         
-        // Capabilities from generated interface (usually IName)
-        private IGameSessionService _gameSessionService;
-        private IUserSession _userSession;
-        private IMatchSession _matchSession;
-        
+        private TcpRpcClient? _rpcClient;
+        private IGameSessionService? _sessionService;
+        private IUserSession? _userSession;
+        private IMatchSession? _matchSession;
+
         // Flag for tracking whether we can emit securely
-        private bool _hasMatchSession = false;
+        private bool _hasMatchSession => _matchSession != null;
 
         public AmpClient(string address)
         {
@@ -31,27 +34,59 @@ namespace AmpSdkExample
         {
             Console.WriteLine($"[AmpClient] Connecting to matchmaker at {_serverAddress}...");
             
-            // In a real implementation:
-            // var rpcClient = new TcpRpcClient(_serverAddress, 50051);
-            // _gameSessionService = rpcClient.GetMain<IGameSessionService>();
-            // _userSession = await _gameSessionService.Login(playerSignature);
-            
-            await Task.Delay(100);
-            return true;
+            try
+            {
+                var parts = _serverAddress.Split(':');
+                var host = parts[0];
+                var port = parts.Length > 1 ? int.Parse(parts[1]) : 50051;
+
+                _rpcClient = new TcpRpcClient(host, port);
+                _sessionService = _rpcClient.GetMain<IGameSessionService>();
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                _userSession = await _sessionService.Login(playerSignature, cts.Token);
+                return _userSession != null;
+            }
+            catch (System.Exception ex)
+            {
+                Console.WriteLine($"[AmpClient] Connect Error: {ex.Message}");
+                return false;
+            }
         }
 
         public async Task<string> RequestMatchAsync(string gameId)
         {
+            if (_userSession == null) throw new InvalidOperationException("Not logged in.");
+
             Console.WriteLine($"[AmpClient] Requesting match for game: {gameId}...");
             
-            // Real implementation:
-            // var assignmentAndSession = await _userSession.RequestMatch(new GameMatchRequest { GameId = ... });
-            // string matchId = assignmentAndSession.Item1.MatchId;
-            // _matchSession = assignmentAndSession.Item2;
+            var req = new GameMatchRequest
+            {
+                GameId = System.Text.Encoding.UTF8.GetBytes(gameId),
+                RulesType = "standard",
+                PlayerInfo = new PlayerInfo
+                {
+                    PlayerId = System.Text.Encoding.UTF8.GetBytes("p1"),
+                    DisplayName = "CSharpPlayer",
+                    Elo = Elo.unranked,
+                    Region = Region.na,
+                    // Empty wallet
+                    PlayerWallet = Array.Empty<byte>()
+                },
+                Stake = new PaymentInfo
+                {
+                    PayerWallet = Array.Empty<byte>(),
+                    FeeToken = Array.Empty<byte>(),
+                    AuthSpend = 0
+                },
+                OptionalConfig = Array.Empty<byte>()
+            };
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1)); // matches might take a while
+            var (assignment, matchSession) = await _userSession.RequestMatch(req, cts.Token);
             
-            await Task.Delay(100);
-            _hasMatchSession = true; // Capability established
-            return "match-1234";
+            _matchSession = matchSession;
+            return System.Text.Encoding.UTF8.GetString(System.Linq.Enumerable.ToArray(assignment.MatchId));
         }
 
         public async Task EmitTelemetryAsync(byte eventTypeEnum, ulong timestamp)
@@ -60,10 +95,16 @@ namespace AmpSdkExample
             
             Console.WriteLine($"[AmpClient] EmitTelemetry (Secured via MatchSession): type={eventTypeEnum}, time={timestamp}");
             
-            // Real implementation:
-            // await _matchSession.EmitTelemetry(new AmpTelemetryEvent { EventType = (TelemetryEventType)eventTypeEnum, Timestamp = timestamp });
+            var ev = new AmpTelemetryEvent
+            {
+                MatchId = Array.Empty<byte>(),
+                EventType = (TelemetryEventType)eventTypeEnum,
+                Timestamp = timestamp,
+                VerifierId = Array.Empty<byte>(),
+                EventData = Array.Empty<byte>()
+            };
             
-            await Task.CompletedTask;
+            await _matchSession!.EmitTelemetry(ev);
         }
 
         public async Task EmitGameEventAsync(string eventType)
@@ -71,22 +112,48 @@ namespace AmpSdkExample
             if (!_hasMatchSession) return;
             Console.WriteLine($"[AmpClient] EmitGameEvent (Secured via MatchSession): {eventType}");
             
-            // Real implementation:
-            // await _matchSession.EmitGameEvent(new GameEvent { EventType = eventType, Timestamp = ... });
+            var ev = new GameEvent
+            {
+                EventId = 0,
+                Timestamp = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000UL,
+                TriggeredBy = System.Text.Encoding.UTF8.GetBytes("p1"),
+                EventType = "move",
+                EventData = System.Text.Encoding.UTF8.GetBytes(eventType)
+            };
             
-            await Task.CompletedTask;
+            await _matchSession!.EmitGameEvent(ev);
         }
 
         public async Task<byte[]> SubmitOutcomeAsync(string matchId, byte outcome)
         {
+            if (!_hasMatchSession) throw new InvalidOperationException("No match session.");
+            
             Console.WriteLine($"[AmpClient] SubmitOutcome: match={matchId}, outcome={outcome}");
             
-            // Real implementation:
-            // var signature = await _matchSession.SubmitOutcome(new OutcomeSubmission { ... });
-            // return signature;
+            var submission = new OutcomeSubmission
+            {
+                MatchId = System.Text.Encoding.UTF8.GetBytes(matchId),
+                Outcome = new Outcome
+                {
+                    Type = outcome == 0 ? OutcomeType.win : OutcomeType.unknown,
+                    Scores = new ulong[] { 1, 0 },
+                    Victor = outcome,
+                    Metadata = Array.Empty<byte>()
+                },
+                ReplayHash = Array.Empty<byte>(),
+                Signature = Array.Empty<byte>()
+            };
 
-            await Task.Delay(100);
-            return new byte[] { 0xDE, 0xAD, 0xBE, 0xEF };
+            var sig = await _matchSession!.SubmitOutcome(submission);
+            return System.Linq.Enumerable.ToArray(sig);
+        }
+
+        public void Dispose()
+        {
+            _matchSession?.Dispose();
+            _userSession?.Dispose();
+            _sessionService?.Dispose();
+            _rpcClient?.Dispose();
         }
     }
 }

@@ -67,3 +67,8 @@ amp-sdk/csharp_example/bin/
 amp-sdk/csharp_example/obj/
  
 build/
+
+.cache/
+
+*.bin
+*.exe

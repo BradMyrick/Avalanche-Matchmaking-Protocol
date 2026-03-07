@@ -18,3 +18,20 @@ The matchmaker service is implemented in Rust as a high-performance **Cap'n Prot
 - **Segregated Verifier Keys**: The matchmaker holds the `VERIFIER_KEY` in environment variables. This key is the "Source of Truth" registered in the `AMPRegistry`.
 - **Deterministic Outlines**: Verification is restricted to authorized match identifiers to prevent signature replay across different match instances.
 - **Asynchronous Safety**: Uses `tokio` tasks for each connection to ensure one hanging client doesn't block the matchmaking throughput of others.
+
+## Running Locally against Anvil
+To run the server locally for the MVP flow, you'll need Anvil contracts deployed first.
+
+### Run Command
+From inside the `amp-server/` directory:
+```bash
+export VERIFIER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+cargo run
+```
+
+### Happy Path MVP Demo
+1. Start `anvil` and deploy `contracts/`.
+2. Start `amp-server` as shown above.
+3. Start the `amp-telemetry` receiver in a separate terminal.
+4. Run either the C++ or C# SDK example, which will connect to the local server, request a match, simulate gameplay, emit telemetry, and submit its outcome to the server.
+5. Watch the `amp-server` terminal issue a signature via the ECDSA verification logic.
