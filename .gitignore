@@ -72,3 +72,7 @@ build/
 
 *.bin
 *.exe
+# Slither and Python
+.slither_venv/
+__pycache__/
+*.pyc

@@ -52,6 +52,7 @@ library AMPTypes {
         address[] verifiers; // Addresses authorized to sign results for ASYNC_VERIFIER mode
         uint256 minStake;
         address stakeToken; // address(0) for AVAX
+        address arbiter; // Address authorized to resolve disputes
     }
 
     /**

@@ -2,18 +2,23 @@
 pragma solidity ^0.8.33;
 
 import "./AMPTypes.sol";
+import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import "openzeppelin-contracts/contracts/metatx/ERC2771Context.sol";
 
 /**
  * @title AMPRegistry
  * @notice Handles registration of games and creation/joining of match instances.
  */
-contract AMPRegistry {
+contract AMPRegistry is ERC2771Context {
+    using SafeERC20 for IERC20;
+
     address public settlement;
-    address payable owner;
+    address payable public immutable owner;
     uint256 public nextGameId;
     uint256 public nextMatchId;
 
-    uint256 public feeBalance;
+    mapping(address => uint256) public feeBalances;
 
     bool private locked;
 
@@ -29,30 +34,30 @@ contract AMPRegistry {
 
     event GameRegistered(
         uint256 indexed gameId,
-        address admin,
+        address indexed admin,
         AMPTypes.SettlementMode mode
     );
     event MatchCreated(
         uint256 indexed matchId,
         uint256 indexed gameId,
-        address playerA,
+        address indexed playerA,
         uint256 stakeAmount
     );
-    event MatchJoined(uint256 indexed matchId, address playerB);
-    event FeesWithdrawn(uint256 amount, address wallet);
+    event MatchJoined(uint256 indexed matchId, address indexed playerB);
+    event FeesWithdrawn(address indexed token, uint256 amount, address indexed wallet);
 
     modifier onlySettlement() {
-        require(msg.sender == settlement, "Not settlement");
+        require(_msgSender() == settlement, "Not settlement");
         _;
     }
 
     modifier onlyOwner() {
-        require(msg.sender == owner);
+        require(_msgSender() == owner);
         _;
     }
 
-    constructor() {
-        owner = payable(msg.sender);
+    constructor(address trustedForwarder) ERC2771Context(trustedForwarder) {
+        owner = payable(_msgSender());
     }
 
     /**
@@ -61,24 +66,26 @@ contract AMPRegistry {
      * @param verifiers Authorized verifier addresses (for ASYNC_VERIFIER mode).
      * @param minStake Minimum stake amount required for matches.
      * @param stakeToken Token to be used for stakes (address(0) for AVAX).
+     * @param arbiter Address authorized to resolve RT_HASH_AGREE disputes.
      */
     function registerGame(
         AMPTypes.SettlementMode mode,
         address[] calldata verifiers,
         uint256 minStake,
-        address stakeToken
+        address stakeToken,
+        address arbiter
     ) external returns (uint256 gameId) {
-        // TODO: Implement permission model if needed. Currently open to any caller.
         gameId = nextGameId++;
         games[gameId] = AMPTypes.Game({
-            admin: msg.sender,
+            admin: _msgSender(),
             mode: mode,
             verifiers: verifiers,
             minStake: minStake,
-            stakeToken: stakeToken
+            stakeToken: stakeToken,
+            arbiter: arbiter
         });
 
-        emit GameRegistered(gameId, msg.sender, mode);
+        emit GameRegistered(gameId, _msgSender(), mode);
     }
 
     /**
@@ -88,7 +95,7 @@ contract AMPRegistry {
         uint256 gameId,
         address[] calldata verifiers
     ) external {
-        // TODO: Restrict to game admin (games[gameId].admin).
+        require(_msgSender() == games[gameId].admin, "Not game admin");
         games[gameId].verifiers = verifiers;
     }
 
@@ -105,58 +112,80 @@ contract AMPRegistry {
      * @notice Creates a new match for a registered game.
      */
     function createMatch(
-        uint256 gameId
-    ) external payable returns (uint256 matchId) {
+        uint256 gameId,
+        uint256 stakeAmount
+    ) external payable nonReentrant returns (uint256 matchId) {
         AMPTypes.Game storage game = games[gameId];
-        require(msg.value >= game.minStake, "Stake too low");
-        // TODO: Implement ERC20 safeTransferFrom if game.stakeToken != address(0).
-        // This ensures the stake is escrowed in the contract.
+        
+        uint256 actualStake;
+        if (game.stakeToken == address(0)) {
+            require(msg.value >= game.minStake, "Stake too low");
+            actualStake = msg.value;
+        } else {
+            require(stakeAmount >= game.minStake, "Stake too low");
+            require(msg.value == 0, "Native token sent for ERC20 match");
+            IERC20(game.stakeToken).safeTransferFrom(_msgSender(), address(this), stakeAmount);
+            actualStake = stakeAmount;
+        }
 
         matchId = nextMatchId++;
         matches[matchId] = AMPTypes.Match({
             gameId: gameId,
-            playerA: msg.sender,
+            playerA: _msgSender(),
             playerB: address(0),
-            stakeAmount: msg.value,
+            stakeAmount: actualStake,
             state: AMPTypes.MatchState.OPEN,
             createdAt: block.timestamp
         });
 
-        emit MatchCreated(matchId, gameId, msg.sender, msg.value);
+        emit MatchCreated(matchId, gameId, _msgSender(), actualStake);
     }
 
     /**
      * @notice Joins an existing OPEN match.
      */
-    function joinMatch(uint256 matchId) external payable {
+    function joinMatch(uint256 matchId) external payable nonReentrant {
         AMPTypes.Match storage m = matches[matchId];
         require(m.state == AMPTypes.MatchState.OPEN, "Match not open");
-        require(msg.value == m.stakeAmount, "Stake mismatch");
-        // TODO: Check stakeToken consistency and perform transfer if ERC20.
+        
+        AMPTypes.Game storage game = games[m.gameId];
 
-        m.playerB = msg.sender;
+        if (game.stakeToken == address(0)) {
+            require(msg.value == m.stakeAmount, "Stake mismatch");
+        } else {
+            require(msg.value == 0, "Native token sent for ERC20 match");
+            IERC20(game.stakeToken).safeTransferFrom(_msgSender(), address(this), m.stakeAmount);
+        }
+
+        m.playerB = _msgSender();
         m.state = AMPTypes.MatchState.READY;
 
-        emit MatchJoined(matchId, msg.sender);
+        emit MatchJoined(matchId, _msgSender());
     }
 
     /**
      * @notice Pays out collected fees
      */
-    function withdrawFees() external onlyOwner nonReentrant {
-        require(feeBalance > 0, "No fees to withdraw");
-        (bool success, ) = owner.call{value: feeBalance}("");
-        require(success, "Transfer Failed");
+    function withdrawFees(address token) external onlyOwner nonReentrant {
+        uint256 amount = feeBalances[token];
+        require(amount > 0, "No fees to withdraw");
+        feeBalances[token] = 0;
 
-        emit FeesWithdrawn(feeBalance, owner);
-        feeBalance = 0;
+        if (token == address(0)) {
+            (bool success, ) = owner.call{value: amount}("");
+            require(success, "Transfer Failed");
+        } else {
+            IERC20(token).safeTransfer(owner, amount);
+        }
+
+        emit FeesWithdrawn(token, amount, owner);
     }
 
     /**
      * @notice Allows owner to set the settlement contract address.
      */
-    function setSettlement(address _settlement) external onlyOwner {
-        settlement = _settlement;
+    function setSettlement(address settlementAddress) external onlyOwner {
+        settlement = settlementAddress;
     }
 
     /**
@@ -172,17 +201,23 @@ contract AMPRegistry {
         AMPTypes.Match storage m = matches[matchId];
         require(
             m.state == AMPTypes.MatchState.READY ||
-                m.state == AMPTypes.MatchState.OPEN,
+                m.state == AMPTypes.MatchState.OPEN ||
+                m.state == AMPTypes.MatchState.DISPUTED,
             "Match not settlable"
         );
         m.state = newState;
 
-        feeBalance += protocolFee;
+        AMPTypes.Game storage game = games[m.gameId];
+        feeBalances[game.stakeToken] += protocolFee;
 
         for (uint i = 0; i < recipients.length; i++) {
             if (amounts[i] > 0) {
-                (bool success, ) = recipients[i].call{value: amounts[i]}("");
-                require(success, "Transfer failed");
+                if (game.stakeToken == address(0)) {
+                    (bool success, ) = recipients[i].call{value: amounts[i]}("");
+                    require(success, "Transfer failed");
+                } else {
+                    IERC20(game.stakeToken).safeTransfer(recipients[i], amounts[i]);
+                }
             }
         }
     }
