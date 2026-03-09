@@ -11,7 +11,7 @@ contract AMPRegistryTest is Test {
     address public playerB = address(0x20);
 
     function setUp() public {
-        registry = new AMPRegistry();
+        registry = new AMPRegistry(address(0));
         vm.deal(playerA, 10 ether);
         vm.deal(playerB, 10 ether);
     }
@@ -19,16 +19,16 @@ contract AMPRegistryTest is Test {
     function testRegisterGame() public {
         address[] memory verifiers = new address[](1);
         verifiers[0] = address(0x123);
-        uint256 gameId = registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0));
+        uint256 gameId = registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         assertEq(gameId, 0);
     }
 
     function testCreateMatch() public {
         address[] memory verifiers = new address[](1);
-        uint256 gameId = registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0));
+        uint256 gameId = registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
 
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId);
+        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         assertEq(matchId, 0);
         
         (,address pA, address pB, uint256 stake,,) = registry.matches(matchId);
@@ -39,10 +39,10 @@ contract AMPRegistryTest is Test {
 
     function testJoinMatch() public {
         address[] memory verifiers = new address[](1);
-        uint256 gameId = registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0));
+        uint256 gameId = registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
 
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId);
+        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
 
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);

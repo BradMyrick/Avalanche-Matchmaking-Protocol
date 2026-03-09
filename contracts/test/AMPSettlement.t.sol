@@ -16,8 +16,8 @@ contract AMPSettlementTest is Test {
     address public verifierPubKey;
 
     function setUp() public {
-        registry = new AMPRegistry();
-        settlement = new AMPSettlement(address(registry));
+        registry = new AMPRegistry(address(0));
+        settlement = new AMPSettlement(address(registry), address(0));
         registry.setSettlement(address(settlement));
 
         verifierPubKey = vm.addr(verifierPrivKey);
@@ -36,12 +36,13 @@ contract AMPSettlementTest is Test {
             AMPTypes.SettlementMode.ASYNC_VERIFIER,
             verifiers,
             1 ether,
+            address(0),
             address(0)
         );
 
         // 2. Create Match
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 1 ether}(gameId);
+        uint256 matchId = registry.createMatch{value: 1 ether}(gameId, 1 ether);
 
         // 3. Join Match
         vm.prank(playerB);
@@ -67,7 +68,7 @@ contract AMPSettlementTest is Test {
         // 5. Submit Async Result
         uint256 playerABalanceBefore = playerA.balance;
         uint256 playerBBalanceBefore = playerB.balance;
-        uint256 feeBalanceBefore = registry.feeBalance();
+        uint256 feeBalanceBefore = registry.feeBalances(address(0));
 
         settlement.submitAsyncResult(matchId, result);
 
@@ -78,6 +79,50 @@ contract AMPSettlementTest is Test {
         // Payout: Total pool = 2 ether. Fee = 1% = 0.02 ether. Payout = 1.98 ether.
         assertEq(playerA.balance, playerABalanceBefore + 1.98 ether);
         assertEq(playerB.balance, playerBBalanceBefore); // B lost
-        assertEq(registry.feeBalance(), feeBalanceBefore + 0.02 ether);
+        assertEq(registry.feeBalances(address(0)), feeBalanceBefore + 0.02 ether);
+    }
+
+    function testResolveDispute() public {
+        address[] memory verifiers = new address[](1);
+        verifiers[0] = verifierPubKey;
+
+        vm.prank(admin);
+        uint256 gameId = registry.registerGame(
+            AMPTypes.SettlementMode.RT_HASH_AGREE,
+            verifiers,
+            1 ether,
+            address(0),
+            admin // admin is arbiter
+        );
+
+        vm.prank(playerA);
+        uint256 matchId = registry.createMatch{value: 1 ether}(gameId, 1 ether);
+
+        vm.prank(playerB);
+        registry.joinMatch{value: 1 ether}(matchId);
+
+        AMPTypes.RealTimeHashResult memory resultA = AMPTypes.RealTimeHashResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.WIN_A,
+            transcriptHash: bytes32(uint256(1))
+        });
+        AMPTypes.RealTimeHashResult memory resultB = AMPTypes.RealTimeHashResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.WIN_B,
+            transcriptHash: bytes32(uint256(2))
+        });
+
+        vm.prank(playerA);
+        settlement.submitRealTimeHashResult(matchId, resultA);
+
+        vm.prank(playerB);
+        settlement.submitRealTimeHashResult(matchId, resultB);
+
+        uint256 playerBBalanceBefore = playerB.balance;
+        
+        vm.prank(admin);
+        settlement.resolveDispute(matchId, AMPTypes.OutcomeCode.WIN_B);
+
+        assertEq(playerB.balance, playerBBalanceBefore + 1.98 ether);
     }
 }
