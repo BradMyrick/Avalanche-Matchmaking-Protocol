@@ -49,3 +49,11 @@ This script will:
 3.  **Secure Telemetry**: Only a client holding the `MatchSession` capability can emit events or submit outcomes for that specific match ID, guaranteeing isolation.
 4.  **Off-Chain Verification**: The AMP node consumes game transcripts, simulates deterministic rollback, and cryptographically signs a valid outcome using the `VERIFIER_KEY`.
 5.  **On-Chain Settlement**: The smart contract (`AMPSettlement`) verifies the payload's `ecrecover` signature against the authorized verifier, releasing escrowed game funds on the Ledger.
+
+
+## Todo's
+[] Add a test for non--native token withdrawals (e.g., USDC) to ensure the logic works across ERC20s.
+[] Forwarder currently address(0) - ERC2771 is “wired but off,” and that registry/settlement rely on _msgSender() always
+
+
+

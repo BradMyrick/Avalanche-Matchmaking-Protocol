@@ -76,3 +76,4 @@ build/
 .slither_venv/
 __pycache__/
 *.pyc
+git-pip.py
