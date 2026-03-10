@@ -1,0 +1,27 @@
+# Glossary
+
+Essential definitions for the Avalanche Matchmaking Protocol.
+
+### ASYNC_VERIFIER
+A settlement mode where the Verifier node replays the entire match transcript to determine the outcome. Used for high-stakes matches or when client hashes mismatch.
+
+### Attestation
+A cryptographically signed message from an authorized Verifier node that certifies the final state and winner of a match.
+
+### Capability
+A security handle used in the Cap'n Proto RPC layer. Possessing a `MatchSession` capability proves that a player is authorized to interact with that specific match.
+
+### Determinism
+The property where a game engine produce the exact same output state given the same sequence of inputs and the same initial seed.
+
+### Match Transcript
+An ordered log of all `MatchConfig`, `InputFrames`, and `GameEvents` in a match.
+
+### RT_HASH_AGREE
+"Real-Time Hash Agreement." A settlement mode where clients submit state hashes, and the Verifier settles the match instantly if they agree.
+
+### Rolling Hash
+A cryptographic hash that is updated tick-by-tick during a match to represent the current state of the transcript.
+
+### Stake
+The collateral (AVAX or ERC-20) deposited by a player into the `AMPSettlement` contract before a match begins.

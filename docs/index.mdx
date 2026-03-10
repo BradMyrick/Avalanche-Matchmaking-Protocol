@@ -1,0 +1,61 @@
+# AMP – Avalanche Matchmaking Protocol
+
+AMP is a capability-based matchmaking protocol and off-chain verifier network designed to secure high-frequency Web3 game state without sacrificing sub-millisecond latency.
+
+By removing the reliance on centralized trust and spoofable shared tokens, AMP ensures fair play and irrefutable payouts for competitive Avalanche games. The protocol pairs players, verifies deterministic game transcripts off-chain, and commits settled outcomes directly to Avalanche.
+
+> [!IMPORTANT]
+> **Why AMP?**  
+> Traditional Web2 matchmaking backend lacks verifiable settlement for Web3 stakes. Putting every game tick on-chain is too slow and expensive. AMP gives you the best of both worlds: off-chain fast-action with on-chain guarantees.
+
+---
+
+## Live Deployment (Fuji Testnet)
+
+AMP smart contracts are currently deployed on the Avalanche Fuji Testnet. You can point your game clients to these addresses to test real on-chain settlement.
+
+| Contract | Address |
+| :--- | :--- |
+| **AMPRegistry** | `0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34` |
+| **AMPSettlement** | `0xecD9C6C1727d610A7C0Aeb3a37A6278049791a24` |
+
+---
+
+## MVP Quickstart (Local)
+
+You can run the full AMP MVP locally against Anvil to verify the entire flow end-to-end, without needing real Fuji testnet tokens.
+
+From the repository root:
+
+```bash
+# 1. Check dependencies (Foundry, Rust, Go, etc.)
+./mvp_dependency_checker.sh
+
+# 2. Setup the local Anvil node and build tools
+./mvp_setup.sh
+
+# 3. Run the end-to-end local test
+./test_mvp.sh
+```
+
+### What happens in `test_mvp.sh`?
+
+1. Starts **Anvil** locally.
+2. Deploys `AMPRegistry` and `AMPSettlement` contracts to Anvil.
+3. Starts the Rust `amp-telemetry` receiver for logging.
+4. Starts the Rust `amp-server` (matchmaker & verifier).
+5. Runs the C++ SDK simulation (two simulated players playing a match).
+6. Runs the C# SDK simulation.
+7. Validates the transcript, generates the verifier attestation, and settles the match on-chain.
+
+---
+
+## Project Structure
+
+Navigate through the sidebar to learn more about how AMP works and how to integrate it into your game:
+
+- **Core Concept & Architecture**: Learn about the high-level design, trust model, and match transcripts.
+- **Integration & SDK**: End-to-end guides for integrating AMP into your game using our C# and C++ SDKs.
+- **Verifier & Infra**: Details on running verifiers and the settlement attestation process.
+- **GTM & Ecosystem**: Our business model, vision, and roadmap for AMP on Avalanche.
+- **Reference**: Smart contract references and Glossary.
