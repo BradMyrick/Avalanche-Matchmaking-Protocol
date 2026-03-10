@@ -21,9 +21,9 @@ For AMP to function in `RT_HASH_AGREE` (Real-Time Hash Agreement) mode, the game
 
 Instead of sending the entire gigabyte-sized replay file to the Verifier, clients maintain a **rolling hash** of the transcript:
 
-1. Let $H_0$ be the hash of `MatchConfig`.
-2. For every tick $t$, calculate $H_t = \text{Hash}(H_{t-1} \parallel \text{TickData}_t)$.
-3. Clients periodically send $H_t$ to the Verifier (e.g., every 60 ticks) to checkpoint their state.
+1. Let `H_0` be the hash of `MatchConfig`.
+2. For every tick `t`, calculate `H_t = Hash(H_t-1 || TickData_t)`.
+3. Clients periodically send `H_t` to the Verifier (e.g., every 60 ticks) to checkpoint their state.
 
 If player A's hash diverges from player B's hash at tick 1200, the Verifier instantly knows a desync or cheating attempt has occurred and can halt the match.
 
