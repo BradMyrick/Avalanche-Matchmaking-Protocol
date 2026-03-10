@@ -10,7 +10,7 @@ By removing the reliance on centralized trust, AMP ensures fair play and irrefut
 
 For full technical documentation, architecture deep-dives, integration guides, and contract references, please visit our official documentation site:
 
-### 👉 [docs.amp.page](https://docs.amp.page)
+### 👉 [https://docs.page/BradMyrick/Avax-Build-Games-2026](https://docs.page/BradMyrick/Avax-Build-Games-2026)
 
 ---
 
@@ -27,7 +27,7 @@ You can run the full AMP MVP locally against Anvil to verify the entire flow end
 ./test_mvp.sh
 ```
 
-For detailed instructions on running the MVP and integrating the SDKs, see the [Getting Started](https://docs.amp.page/index) section in our documentation.
+For detailed instructions on running the MVP and integrating the SDKs, see the [Getting Started](https://docs.page/BradMyrick/Avax-Build-Games-2026/) section in our documentation.
 
 ---
 
