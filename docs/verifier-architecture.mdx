@@ -1,0 +1,38 @@
+# Verifier Architecture
+
+The AMP Verifier is the "heart" of the protocol's trust model. It is a high-performance Rust-based service responsible for matching players and certifying match outcomes.
+
+## Trust Model: "Trust but Verify"
+
+AMP uses a hybrid trust model:
+1.  **Matchmaking:** Players trust the Verifier to pair them fairly based on capabilities and MMR.
+2.  **Gameplay:** In `RT_HASH_AGREE` mode, players trust each other not to collude, with the Verifier acting as a witness to their hashed state.
+3.  **Settlement:** The Avalanche network trusts the Verifier's cryptographic signature (attestation) to release funds from escrow.
+
+## Attestation Format
+
+When a match is settled, the Verifier generates a signed **Attestation**. This is a compact Cap'n Proto message containing:
+
+- `matchId`: Unique identifier for the match.
+- `winnerId`: The address/ID of the winning player (or "draw").
+- `payouts`: A list of addresses and amounts.
+- `transcriptHash`: The final agreed-upon state hash.
+- `signature`: An ECDSA signature from the Verifier's private key.
+
+## Settlement Modes (Deep Dive)
+
+### 1. Real-Time Hash Agreement (`RT_HASH_AGREE`)
+- **Latency:** Sub-millisecond.
+- **Cost:** Practically zero.
+- **Use Case:** Trusted competitive play between known entities or low-stakes games.
+
+### 2. Asynchronous Replay (`ASYNC_VERIFIER`)
+- **Latency:** Seconds to Minutes (depending on match length).
+- **Cost:** Compute-intensive (requires running a headless game instance).
+- **Use Case:** High-stakes tournaments, anti-cheat enforcement, or when a desync is detected in real-time mode.
+
+---
+
+## Security & Anti-Cheat
+
+Because the Verifier has access to the full `MatchTranscript` (all inputs from all players), it can detect impossible movements or actions (e.g., speed hacks) by re-simulating the game logic. In Phase 2, we will introduce **Fraud Proofs**, allowing third parties to challenge a Verifier's attestation if they suspect foul play.

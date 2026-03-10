@@ -1,0 +1,39 @@
+# Contracts Reference
+
+The AMP protocol is powered by two primary smart contracts on the Avalanche Fuji Testnet.
+
+## `AMPRegistry`
+**Address:** `0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34`
+
+The Registry manages game metadata and verifier authorizations.
+
+### Key Functions
+| Function | Description |
+| :--- | :--- |
+| `registerGame(bytes32 schemaHash, uint256 fee)` | Registers a new game and its Cap'n Proto schema. |
+| `isVerifier(address verifier)` | Returns true if the address is a whitelisted verifier. |
+| `getGameConfig(uint256 gameId)` | Retrieves the configuration and owner of a game. |
+
+---
+
+## `AMPSettlement`
+**Address:** `0xecD9C6C1727d610A7C0Aeb3a37A6278049791a24`
+
+The Settlement contract handles escrows, attestation verification, and payouts.
+
+### Key Functions
+| Function | Description |
+| :--- | :--- |
+| `depositStake(uint256 gameId)` | Escrows the required stake for a game match. |
+| `submitAttestation(Attestation att)` | Submits a signed outcome from a Verifier. |
+| `claimWinnings(uint256 matchId)` | Allows a player to withdraw their settled winnings. |
+
+### Events
+- `StakeDeposited(address indexed player, uint256 gameId, uint256 amount)`
+- `MatchSettled(uint256 indexed matchId, address winner, uint256 payout)`
+- `VerifierUpdated(address indexed verifier, bool active)`
+
+---
+
+## Development & ABI
+The Solidity source code and ABIs for these contracts can be found in the `/contracts` directory of the official repository.

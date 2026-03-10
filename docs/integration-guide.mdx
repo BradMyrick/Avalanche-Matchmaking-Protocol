@@ -1,0 +1,56 @@
+# Integrate AMP in a Day
+
+AMP is designed to be the fastest way to add secure, wagered matchmaking to your game. This guide walks you through a typical "one-day" integration flow.
+
+## Prerequisites
+
+1.  **Avalanche Fuji Wallet:** You'll need a small amount of Fuji AVAX for contract interactions.
+2.  **Game Server/Client:** A C++ or C# based game engine.
+3.  **Cap'n Proto:** Familiarity with schema-based serialization.
+
+---
+
+## The 4-Step Flow
+
+### 1. Register Your Game
+Before players can use AMP with your game, you must register it on the `AMPRegistry` contract.
+
+1.  Go to the [AMP Dashboard](https://amp.avax.network) (or use our CLI).
+2.  Define your `GameConfig` (tick rate, max players, etc.).
+3.  Upload your `.capnp` schemas.
+4.  Submit the registration transaction. You will receive a `gameId`.
+
+### 2. Implement the SDK
+Add the AMP SDK to your game client.
+
+```csharp
+// Example: Initializing the AMP Client in C#
+var ampClient = new AmpClient("fuji.amp.rpc.endpoint:5555");
+var session = await ampClient.LoginAsync(playerPrivateKey);
+```
+
+### 3. Matchmaking & Escalation
+When a player clicks "Find Match":
+
+1.  Call `session.RequestMatch(gameId)`.
+2.  The SDK will wait for a `MatchAssignment`.
+3.  Once found, the SDK receives a **Capability Token** specifically for that match.
+
+### 4. Deterministic Looping
+During gameplay, ensure your state remains deterministic.
+
+1.  Every 10-60 ticks, call `matchSession.StreamStateHash(currentHash)`.
+2.  At the end of the match, call `matchSession.SubmitFinalOutcome(winnerId, finalHash)`.
+
+---
+
+## Day 1 Checklist
+
+- [ ] Game registered on Fuji.
+- [ ] AMP SDK linked in project.
+- [ ] Player can "Login" and get a session.
+- [ ] Matchmaker successfully pairs two local clients.
+- [ ] Settlement contract reflects a test payout.
+
+> [!TIP]
+> Use the **Local MVP Flow** (Anvil) to test your integration before deploying to Fuji. It's faster and doesn't require real network latency.

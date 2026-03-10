@@ -1,0 +1,18 @@
+# FAQ
+
+Common questions about AMP.
+
+### "Can someone fork AMP?"
+Yes. AMP is open-source. However, the value of the protocol lies in the **Verifier Network** and the **Trust Ecosystem** built around the shared settlement contracts on Avalanche.
+
+### "What if the verifier is wrong?"
+In Phase 1, we rely on a whitelist of reputable verifiers. In Phase 2, we are introducing **Fraud Proofs**, allowing anyone to challenge an incorrect attestation by providing the transcript that proves the Verifier's result was invalid.
+
+### "Does AMP provide anti-cheat?"
+AMP provides **verifiable anti-cheat**. Because we have the match transcript, the `ASYNC_VERIFIER` can catch many common cheats (speed hacks, wall hacks) by re-simulating the game logic. However, AMP is not a replacement for traditional anti-cheat (like Easy Anti-Cheat) which runs on the local machine to prevent memory manipulation.
+
+### "Is AMP limited to Avalanche?"
+While optimized for Avalanche (using Avalanche-specific settlement and targeting an Avalanche Subnet), the core protocol logic is chain-agnostic.
+
+### "What engines are supported?"
+We currently provide SDKs for **C++ (Unreal)** and **C# (Unity)**. Because we use Cap'n Proto, you can easily generate an SDK for any language (Rust, Go, Python, etc.) that supports the Cap'n Proto RPC specification.

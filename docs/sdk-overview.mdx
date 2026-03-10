@@ -1,0 +1,47 @@
+# SDK Overview
+
+AMP provides lightweight, high-performance SDKs for C++ and C# (Unity). These SDKs handle the complexities of Cap'n Proto RPC, capability management, and cryptographic signing so you can focus on building your game.
+
+## Supported Platforms
+
+| Language | Engine | Status | Repository |
+| :--- | :--- | :--- | :--- |
+| **C++** | Unreal / Custom | Beta | `amp-sdk-cpp` |
+| **C#** | Unity / Godot | Beta | `amp-sdk-csharp` |
+| **Go** | Server-side / CLI | Alpha | `amp-sdk-go` |
+
+---
+
+## Installation
+
+### Unity (C#)
+1.  Download the `AMP.unitypackage` from the [Releases](https://github.com/BradMyrick/Avax-Build-Games-2026/releases) page.
+2.  Import it into your project.
+3.  Add the `AMPManager` prefab to your initial scene.
+
+### Native C++
+1.  Clone the SDK repository: `git clone https://github.com/BradMyrick/amp-sdk-cpp`.
+2.  Include the headers using CMake:
+    ```cmake
+    add_subdirectory(amp-sdk-cpp)
+    target_link_libraries(MyGame PRIVATE amp::sdk)
+    ```
+
+---
+
+## Core SDK API
+
+### `UserSession`
+Created upon successful login. Used for global actions like matchmaking and MMR lookups.
+
+### `MatchSession`
+A short-lived capability granted when a match is found. This is where you stream telemetry and submit outcomes.
+
+### `TelemetryBuffer`
+A helper class provided in the SDK to automatically batch and hash your match transcript on a separate thread to ensure zero impact on game frame rates.
+
+---
+
+## Versioning Philosophy
+
+The AMP SDKs follow strict semantic versioning. However, because the protocol relies on **Cap'n Proto**, the RPC interfaces are backwards and forwards compatible. You can usually update your game server without forcing an immediate update to all deployed game clients.

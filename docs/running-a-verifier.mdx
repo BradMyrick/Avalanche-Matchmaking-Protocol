@@ -1,0 +1,47 @@
+# Running a Verifier
+
+While AMP starts as a managed network, the protocol is designed for decentralization. In the future, studios or third-party infrastructure providers will be able to run their own AMP Verifiers to earn fees and support the network.
+
+> [!WARNING]
+> Running a verifier is currently in **Alpha**. The instructions below are for advanced users and developers looking to test the infra locally or on Fuji.
+
+## Hardware Requirements
+
+- **CPU:** 4+ Cores (High clock speed preferred for `ASYNC_VERIFIER` replays).
+- **RAM:** 8GB minimum.
+- **Disk:** NVMe SSD (for fast transcript logging).
+- **Network:** Low latency, stable IP.
+
+## Configuration
+
+The Verifier is configured via an `amp-config.yaml` file:
+
+```yaml
+network:
+  listen_addr: "0.0.0.0:5555"
+  avax_rpc: "https://api.avax-test.network/ext/bc/C/rpc"
+
+verifier:
+  private_key: "0x..." # The key used to sign attestations
+  registry_addr: "0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34"
+
+logging:
+  level: "info"
+  telemetry_path: "./logs/traces"
+```
+
+## Setup & Execution
+
+1.  **Clone the Repo:** `git clone https://github.com/BradMyrick/Avax-Build-Games-2026`
+2.  **Build the Server:**
+    ```bash
+    cargo build --release --bin amp-server
+    ```
+3.  **Run:**
+    ```bash
+    ./target/release/amp-server --config ./amp-config.yaml
+    ```
+
+## Registration
+
+To be recognized by the `AMPSettlement` contract, your Verifier's public key must be whitelisted in the `AMPRegistry`. For the Beta/Fuji phase, please contact the AMP team to have your address added to the allowed verifier set.

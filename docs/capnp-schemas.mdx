@@ -1,0 +1,55 @@
+# Cap'n Proto Schemas
+
+AMP leverages [Cap'n Proto](https://capnproto.org/) for all match-related data. Cap'n Proto is a "zero-copy" serialization format that is significantly faster than JSON or Protobuf, making it ideal for high-frequency game telemetry.
+
+## Base Schema: `match.capnp`
+
+The core data structures for every match are defined in `match.capnp`.
+
+```capnp
+@0xabcdef1234567890;
+
+struct InputFrame {
+  tick @0 :UInt64;
+  playerId @1 :UInt32;
+  inputData @2 :Data; # Opaque game-specific bits
+}
+
+struct MatchAssignment {
+  matchId @0 :Text;
+  verifierEndpoint @1 :Text;
+  playerCapabilities @2 :List(Text);
+}
+
+struct MatchTranscript {
+  config @0 :MatchConfig;
+  frames @1 :List(InputFrame);
+  events @2 :List(GameEvent);
+}
+```
+
+---
+
+## Why Cap'n Proto?
+
+1.  **Zero-Copy:** Data is structured in memory exactly as it appears on the wire. No expensive encode/decode steps.
+2.  **Performance:** Millions of messages per second on standard hardware.
+3.  **Schema Evolution:** Add new fields to your game events without breaking existing verifiers or clients.
+
+## Versioning Strategy
+
+AMP uses **Canonical Schemas** for the core protocol, but allows developers to define **Extended Schemas** for their specific game logic.
+
+- **v1.x (Current):** Focuses on basic state hashing and `RT_HASH_AGREE`.
+- **v2.x (Roadmap):** Will introduce nested capability handles for complex multi-stage tournaments.
+
+---
+
+## Compiling Schemas
+
+If you are a developer extending AMP, you can compile your custom `.capnp` files using the `capnpc` tool:
+
+```bash
+capnpc -oc++ my_game_events.capnp
+capnpc -ocsharp my_game_events.capnp
+```
