@@ -2,8 +2,18 @@
   "$schema": "https://docs.page/schema.json",
   "name": "AMP Docs",
   "description": "Avalanche Matchmaking Protocol Documentation",
-  "sidebar": {
-    "Core Concept & Architecture": {
+  "theme": {
+    "defaultTheme": "dark",
+    "primary": "#E84142"
+  },
+  "header": {
+    "showName": true,
+    "showThemeToggle": true,
+    "showGitHubCard": true
+  },
+  "sidebar": [
+    {
+      "group": "Core Concept & Architecture",
       "pages": [
         {
           "title": "Welcome to AMP",
@@ -22,7 +32,8 @@
         }
       ]
     },
-    "Integration & SDK": {
+    {
+      "group": "Integration & SDK",
       "pages": [
         {
           "title": "Integrate in a Day",
@@ -41,7 +52,8 @@
         }
       ]
     },
-    "Verifier & Infra": {
+    {
+      "group": "Verifier & Infra",
       "pages": [
         {
           "title": "Verifier Architecture",
@@ -55,7 +67,8 @@
         }
       ]
     },
-    "Business & Ecosystem": {
+    {
+      "group": "Business & Ecosystem",
       "pages": [
         {
           "title": "GTM & Vision",
@@ -79,7 +92,8 @@
         }
       ]
     },
-    "Reference": {
+    {
+      "group": "Reference",
       "pages": [
         {
           "title": "Contracts Reference",
@@ -98,5 +112,5 @@
         }
       ]
     }
-  }
+  ]
 }

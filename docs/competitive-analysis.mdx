@@ -4,7 +4,7 @@ AMP occupies a unique niche in the gaming infrastructure landscape. Unlike tradi
 
 ## Comparison Table
 
-| Feature | AMP | Photon | GameLift | AccelByte | Custom Contracts |
+| Feature | AMP | [Photon](https://www.photonengine.com/) | [GameLift](https://docs.aws.amazon.com/gameliftservers/latest/flexmatchguide/match-intro.html#match-intro-features) | AccelByte | Custom Contracts |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Settlement** | On-Chain (Trustless) | Web2 (Trust) | Web2 (Trust) | Web2 (Trust) | On-Chain (Slow/Expensive) |
 | **Latency** | Sub-ms | Low | Variable | Medium | N/A |
@@ -16,8 +16,8 @@ AMP occupies a unique niche in the gaming infrastructure landscape. Unlike tradi
 
 ## Detailed Commentary
 
-### vs. Photon / GameLift
-Photon and AWS GameLift are excellent for state synchronization, but they provide zero help when it comes to **on-chain wagering**. If you want to escrow $10 of AVAX for a match, you have to build your own bridge and trust that your centralized server isn't hacked or manipulated to send funds to the wrong person. AMP automates this trust with attestations.
+### vs. [Photon](https://www.photonengine.com/) / [GameLift](https://docs.aws.amazon.com/gameliftservers/latest/flexmatchguide/match-intro.html#match-intro-features)
+[Photon](https://www.photonengine.com/) and [AWS GameLift](https://docs.aws.amazon.com/gameliftservers/latest/flexmatchguide/match-intro.html#match-intro-features) are excellent for state synchronization, but they provide zero help when it comes to **on-chain wagering**. If you want to escrow $10 of AVAX for a match, you have to build your own bridge and trust that your centralized server isn't hacked or manipulated to send funds to the wrong person. AMP automates this trust with attestations.
 
 ### vs. Pure Smart Contract Games
 Building a game purely on-chain (e.g., using MUD or Dojo) is revolutionary but currently limited by the transaction throughput of the underlying L1/L2. AMP allows you to play the game at 60 FPS while getting the same finality and security of a smart contract for the outcome.
