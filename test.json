@@ -1,0 +1,14 @@
+{
+    "name": "AMP Docs",
+    "description": "Avalanche Matchmaking Protocol Documentation",
+    "sidebar": {
+        "Getting Started": {
+            "pages": [
+                {
+                    "title": "Welcome to AMP",
+                    "href": "/"
+                }
+            ]
+        }
+    }
+}
