@@ -52,33 +52,14 @@ impl App {
         }
     }
 
-    // In a real scenario, this reads from parsed Cap'n proto binaries
-    fn add_mock_data(&mut self) {
-        self.items = vec![
-            TelemetryItem {
-                match_id: "m_1001".to_string(),
-                event_type: "matchCreated".to_string(),
-                timestamp: 1710000000,
-            },
-            TelemetryItem {
-                match_id: "m_1001".to_string(),
-                event_type: "matchJoined".to_string(),
-                timestamp: 1710000010,
-            },
-            TelemetryItem {
-                match_id: "m_1002".to_string(),
-                event_type: "matchCreated".to_string(),
-                timestamp: 1710000015,
-            },
-            TelemetryItem {
-                match_id: "m_1001".to_string(),
-                event_type: "settlementSubmitted".to_string(),
-                timestamp: 1710000040,
-            },
-        ];
+    /// No mock data in Alpha release.
+    fn load_blank(&mut self) {
+        self.items = vec![];
     }
+// load_blank()
 
     pub fn next(&mut self) {
+        if self.items.is_empty() { return; }
         let i = match self.state.selected() {
             Some(i) => {
                 if i >= self.items.len() - 1 {
@@ -116,7 +97,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new();
-    app.add_mock_data();
+    app.load_blank();
 
     // run app
     let res = run_app(&mut terminal, app);

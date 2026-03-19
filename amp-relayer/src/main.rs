@@ -1,11 +1,18 @@
 use std::env;
-use std::net::SocketAddr;
 use std::sync::Arc;
+use std::net::SocketAddr;
 
 use anyhow::Result;
 use ethers::prelude::*;
-use serde::{Deserialize, Serialize};
 use tracing::{info, error};
+use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
+use futures::{FutureExt, StreamExt};
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+/// Auto-generated modules from Cap'n Proto schema
+pub mod relayer_capnp {
+    include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs"));
+}
 
 abigen!(
     AMPSettlementContract,
@@ -16,35 +23,21 @@ abigen!(
     AMPRegistryContract,
     "../contracts/out/AMPRegistry.sol/AMPRegistry.json"
 );
-use warp::{Filter, Reply, Rejection};
 
-#[derive(Debug, Deserialize)]
-struct SubmitOutcomeRequest {
-    match_id: String,
-    outcome: u8,
-    transcript_hash: String,
-    signature: String,
-}
-
-#[derive(Debug, Serialize)]
-struct SubmitOutcomeResponse {
-    tx_hash: String,
-    status: String,
-    match_id: String,
-}
-
+/// State shared across RPC requests.
 #[derive(Clone)]
-struct AppState {
+struct RelayerState {
     settlement: AMPSettlementContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
     registry: AMPRegistryContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
+    master_client: Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
 }
+// RelayerState
 
 /// Derives a custodial wallet for a specific game_id from the master key.
 fn derive_custodial_signer(master_key: &LocalWallet, game_id: u64, chain_id: u64) -> LocalWallet {
     let mut bytes = [0u8; 32];
     bytes.copy_from_slice(&master_key.signer().to_bytes());
     
-    // Hash the master key with game_id to derive a unique child key
     let mut data = Vec::with_capacity(40);
     data.extend_from_slice(&bytes);
     data.extend_from_slice(&game_id.to_be_bytes());
@@ -52,238 +45,246 @@ fn derive_custodial_signer(master_key: &LocalWallet, game_id: u64, chain_id: u64
     let derived_key = ethers::utils::keccak256(data);
     LocalWallet::from_bytes(&derived_key).unwrap().with_chain_id(chain_id)
 }
+// derive_custodial_signer(master_key, game_id, chain_id)
 
 /// Ensures the custodial wallet has enough gas, topping up from the master if needed.
 async fn ensure_gas(
     custodial_addr: Address,
-    state: &AppState,
-    master_client: &SignerMiddleware<Provider<Http>, LocalWallet>,
+    state: &RelayerState,
 ) -> Result<()> {
-    let balance = state.settlement.client().get_balance(custodial_addr, None).await?;
-    let threshold = ethers::utils::parse_ether(0.05)?; // 0.05 AVAX threshold
+    let balance = state.master_client.provider().get_balance(custodial_addr, None).await?;
+    let threshold = ethers::utils::parse_ether(0.05)?; 
     
     if balance < threshold {
-        let topup = ethers::utils::parse_ether(0.2)?; // Top up with 0.2 AVAX
+        let topup = ethers::utils::parse_ether(0.2)?; 
         info!("Custodial wallet {} low on gas ({:?}). Topping up...", custodial_addr, balance);
         
         let tx = TransactionRequest::new()
             .to(custodial_addr)
             .value(topup);
             
-        master_client.send_transaction(tx, None).await?.await?;
+        state.master_client.send_transaction(tx, None).await?.await?;
         info!("Top-up successful for {}", custodial_addr);
     }
     
     Ok(())
 }
+// ensure_gas(custodial_addr, state)
 
-async fn handle_submit_outcome(
-    req: SubmitOutcomeRequest,
-    state: Arc<AppState>,
-    master_client: Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
-) -> Result<impl Reply, Rejection> {
-    info!("Received submit-outcome request for match {}", req.match_id);
-
-    let match_id_parsed = if req.match_id.starts_with("match-") {
-        U256::from_big_endian(&ethers::utils::keccak256(req.match_id.as_bytes()))
-    } else {
-        U256::from_dec_str(&req.match_id).unwrap_or(U256::zero())
-    };
-
-    // 1. Resolve game_id for this match
-    let (game_id, _, _, _, _, _) = match state.registry.matches(match_id_parsed).call().await {
-        Ok(m) => m,
-        Err(e) => {
-            error!("Failed to fetch match info: {:?}", e);
-            return Ok(warp::reply::json(&SubmitOutcomeResponse {
-                tx_hash: "".to_string(),
-                status: format!("error fetching match: {:?}", e),
-                match_id: req.match_id,
-            }));
-        }
-    };
-
-    // 2. Get custodial signer
-    let chain_id = master_client.signer().chain_id();
-    let custodial_wallet = derive_custodial_signer(master_client.signer(), game_id.as_u64(), chain_id);
-    let custodial_addr = custodial_wallet.address();
-
-    // 3. Ensure gas for custodial wallet
-    if let Err(e) = ensure_gas(custodial_addr, &state, &master_client).await {
-        error!("Gas funding failed: {:?}", e);
-    }
-
-    // 4. Create client for custodial signer
-    let provider = master_client.provider().clone();
-    let custodial_client = SignerMiddleware::new(provider, custodial_wallet);
-    let settlement_custodial = AMPSettlementContract::new(state.settlement.address(), Arc::new(custodial_client));
-
-    let transcript_hash_clean = req.transcript_hash.trim_start_matches("0x");
-    let signature_clean = req.signature.trim_start_matches("0x");
-
-    let transcript_hash_bytes = hex::decode(transcript_hash_clean).unwrap_or_default();
-    let signature_bytes = hex::decode(signature_clean).unwrap_or_default();
-    
-    let mut t_hash = [0u8; 32];
-    if transcript_hash_bytes.len() == 32 {
-        t_hash.copy_from_slice(&transcript_hash_bytes);
-    }
-
-    let result = AsyncResult {
-        match_id: match_id_parsed,
-        outcome: req.outcome,
-        transcript_hash: t_hash,
-        signature: Bytes::from(signature_bytes),
-    };
-
-    info!("Using custodial wallet {} for game_id {}", custodial_addr, game_id);
-
-    match settlement_custodial.submit_async_result(match_id_parsed, result).send().await {
-        Ok(pending_tx) => {
-            let tx_hash = format!("{:?}", pending_tx.tx_hash());
-            info!("Submitted tx {} for match {}", tx_hash, req.match_id);
-            Ok(warp::reply::json(&SubmitOutcomeResponse {
-                tx_hash,
-                status: "submitted".to_string(),
-                match_id: req.match_id,
-            }))
-        }
-        Err(e) => {
-            error!("Failed to submit tx: {:?}", e);
-            Ok(warp::reply::json(&SubmitOutcomeResponse {
-                tx_hash: "".to_string(),
-                status: format!("error: {:?}", e),
-                match_id: req.match_id,
-            }))
-        }
-    }
+struct RelayerImpl {
+    state: RelayerState,
 }
+// RelayerImpl
 
-async fn handle_get_custodial_address(
-    game_id: u64,
-    master_client: Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
-) -> Result<impl Reply, Rejection> {
-    let chain_id = master_client.signer().chain_id();
-    let wallet = derive_custodial_signer(master_client.signer(), game_id, chain_id);
-    Ok(warp::reply::json(&serde_json::json!({
-        "game_id": game_id,
-        "custodial_address": format!("{:?}", wallet.address())
-    })))
-}
+impl relayer_capnp::relayer_service::Server for RelayerImpl {
+    /// Queries the on-chain admin for a given game ID.
+    fn get_game_admin(
+        &mut self,
+        params: relayer_capnp::relayer_service::GetGameAdminParams,
+        mut results: relayer_capnp::relayer_service::GetGameAdminResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let game_id = capnp_rpc::pry!(params.get()).get_game_id();
+        let state = self.state.clone();
 
-async fn handle_get_game_admin(
-    game_id: u64,
-    state: Arc<AppState>,
-) -> Result<impl Reply, Rejection> {
-    info!("Querying admin for game {}", game_id);
-    
-    // Call the AMPRegistry contract (linked in state.settlement?)
-    // Wait, state.settlement is AMPSettlement. I need AMPRegistry.
-    // I specify the registry in the deployment, but AMPSettlement has a reference to it?
-    // Let's check AMPSettlement.sol or just add registry to AppState.
-    
-    // Actually, I can use the registry address from env.
-    let registry_addr = env::var("CONTRACT_REGISTRY")
-        .unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string())
-        .parse::<Address>()
-        .expect("Invalid registry address");
-    
-    // We need the registry contract abigen or just call it manually.
-    // For simplicity, let's assume we can get it from the settlement contract if it's there,
-    // or just abigen it here too.
-    
-    // I'll add the registry to AppState and main.
-    
-    match state.registry.games(U256::from(game_id)).call().await {
-        Ok(game_data) => {
-            let admin_addr = format!("{:?}", game_data.0); // games(id).admin is the first return val
-            Ok(warp::reply::json(&serde_json::json!({
-                "game_id": game_id,
-                "admin": admin_addr
-            })))
-        }
-        Err(e) => {
-            error!("Failed to query registry: {:?}", e);
-            Ok(warp::reply::json(&serde_json::json!({
-                "error": format!("{:?}", e)
-            })))
-        }
+        capnp::capability::Promise::from_future(async move {
+            match state.registry.games(U256::from(game_id)).call().await {
+                Ok(game_data) => {
+                    results.get().set_admin(game_data.0.as_bytes());
+                    Ok(())
+                }
+                Err(e) => Err(capnp::Error::failed(format!("Registry query failed: {:?}", e))),
+            }
+        })
     }
-}
+    // get_game_admin(params, results)
 
-async fn handle_health() -> Result<impl Reply, Rejection> {
-    Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
+    /// Returns the derived custodial address for a game ID.
+    fn get_custodial_address(
+        &mut self,
+        params: relayer_capnp::relayer_service::GetCustodialAddressParams,
+        mut results: relayer_capnp::relayer_service::GetCustodialAddressResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let game_id = capnp_rpc::pry!(params.get()).get_game_id();
+        let chain_id = self.state.master_client.signer().chain_id();
+        let wallet = derive_custodial_signer(self.state.master_client.signer(), game_id, chain_id);
+        
+        results.get().set_address(wallet.address().as_bytes());
+        capnp::capability::Promise::ok(())
+    }
+    // get_custodial_address(params, results)
+
+    /// Submits a match outcome to the blockchain.
+    fn submit_outcome(
+        &mut self,
+        params: relayer_capnp::relayer_service::SubmitOutcomeParams,
+        mut results: relayer_capnp::relayer_service::SubmitOutcomeResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let params_reader = capnp_rpc::pry!(params.get());
+        let match_id_bytes = capnp_rpc::pry!(params_reader.get_match_id()).to_vec();
+        let outcome = params_reader.get_outcome();
+        let transcript_hash_bytes = capnp_rpc::pry!(params_reader.get_transcript_hash()).to_vec();
+        let signature_bytes = capnp_rpc::pry!(params_reader.get_signature()).to_vec();
+
+        let state = self.state.clone();
+
+        capnp::capability::Promise::from_future(async move {
+            let match_id_parsed = if match_id_bytes.len() == 32 {
+                U256::from_big_endian(&match_id_bytes)
+            } else {
+                let s = std::str::from_utf8(&match_id_bytes).unwrap_or("");
+                U256::from_dec_str(s).unwrap_or(U256::zero())
+            };
+
+            let (game_id, _, _, _, _, _) = state.registry.matches(match_id_parsed).call().await
+                .map_err(|e| capnp::Error::failed(format!("Match lookup failed: {:?}", e)))?;
+
+            let chain_id = state.master_client.signer().chain_id();
+            let custodial_wallet = derive_custodial_signer(state.master_client.signer(), game_id.as_u64(), chain_id);
+            let custodial_addr = custodial_wallet.address();
+
+            ensure_gas(custodial_addr, &state).await
+                .map_err(|e| capnp::Error::failed(format!("Gas funding failed: {:?}", e)))?;
+
+            let provider = state.master_client.provider().clone();
+            let custodial_client = SignerMiddleware::new(provider, custodial_wallet);
+            let settlement_custodial = AMPSettlementContract::new(state.settlement.address(), Arc::new(custodial_client));
+
+            let mut t_hash = [0u8; 32];
+            if transcript_hash_bytes.len() == 32 {
+                t_hash.copy_from_slice(&transcript_hash_bytes);
+            }
+
+            let async_result = AsyncResult {
+                match_id: match_id_parsed,
+                outcome,
+                transcript_hash: t_hash,
+                signature: Bytes::from(signature_bytes),
+            };
+
+            info!("Submitting outcome for match {} using custodial wallet {}", match_id_parsed, custodial_addr);
+
+            match settlement_custodial.submit_async_result(match_id_parsed, async_result).send().await {
+                Ok(pending_tx) => {
+                    results.get().set_tx_hash(pending_tx.tx_hash().as_bytes());
+                    Ok(())
+                }
+                Err(e) => Err(capnp::Error::failed(format!("Transaction failed: {:?}", e))),
+            }
+        })
+    }
+    // submit_outcome(params, results)
 }
+// relayer_capnp::relayer_service::Server for RelayerImpl
+
+async fn run_cli_mode(args: Vec<String>) -> Result<()> {
+    let rpc_addr = env::var("RPC_PORT").map(|p| format!("127.0.0.1:{}", p))
+        .unwrap_or_else(|_| "127.0.0.1:50052".to_string());
+
+    if args[1] == "query-custodial" {
+        let game_id: u64 = args[2].parse()?;
+        let stream = tokio::net::TcpStream::connect(&rpc_addr).await?;
+        let (reader, writer) = stream.into_split();
+        let network = twoparty::VatNetwork::new(
+            reader.compat(),
+            writer.compat_write(),
+            rpc_twoparty_capnp::Side::Client,
+            Default::default(),
+        );
+        let mut rpc_system = RpcSystem::new(Box::new(network), None);
+        let client: relayer_capnp::relayer_service::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+        
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async move {
+            tokio::task::spawn_local(rpc_system);
+            let mut req = client.get_custodial_address_request();
+            req.get().set_game_id(game_id);
+            let res = req.send().promise.await?;
+            println!("0x{}", hex::encode(res.get()?.get_address()?));
+            Ok::<(), anyhow::Error>(())
+        }).await?;
+    } else if args[1] == "query-admin" {
+        let game_id: u64 = args[2].parse()?;
+        let stream = tokio::net::TcpStream::connect(&rpc_addr).await?;
+        let (reader, writer) = stream.into_split();
+        let network = twoparty::VatNetwork::new(
+            reader.compat(),
+            writer.compat_write(),
+            rpc_twoparty_capnp::Side::Client,
+            Default::default(),
+        );
+        let mut rpc_system = RpcSystem::new(Box::new(network), None);
+        let client: relayer_capnp::relayer_service::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+        
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async move {
+            tokio::task::spawn_local(rpc_system);
+            let mut req = client.get_game_admin_request();
+            req.get().set_game_id(game_id);
+            let res = req.send().promise.await?;
+            println!("0x{}", hex::encode(res.get()?.get_admin()?));
+            Ok::<(), anyhow::Error>(())
+        }).await?;
+    }
+    Ok(())
+}
+// run_cli_mode(args)
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
     tracing_subscriber::fmt::init();
- 
     dotenv::dotenv().ok();
- 
-    let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
-    let addr: SocketAddr = format!("0.0.0.0:{}", port)
-        .parse()
-        .expect("Invalid port");
- 
+
+    let args: Vec<String> = env::args().collect();
+    if args.len() >= 3 {
+        return run_cli_mode(args).await;
+    }
+
+    let rpc_port = env::var("RPC_PORT").unwrap_or_else(|_| "50052".to_string());
+    let addr: SocketAddr = format!("0.0.0.0:{}", rpc_port).parse()?;
+
     let fuji_rpc = env::var("FUJI_RPC_URL").unwrap_or_else(|_| "http://localhost:8545".to_string());
-    let provider = Provider::<Http>::try_from(fuji_rpc.clone()).expect("Failed creating provider");
- 
-    let relayer_key = env::var("RELAYER_PRIVATE_KEY").unwrap_or_else(|_| "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".to_string());
-    let wallet: LocalWallet = relayer_key.parse().expect("Invalid private key");
-    let chain_id = provider.get_chainid().await.unwrap_or(U256::from(31337)).as_u64();
+    let provider = Provider::<Http>::try_from(fuji_rpc)?;
+
+    let relayer_key = env::var("RELAYER_PRIVATE_KEY")?;
+    let wallet: LocalWallet = relayer_key.parse()?;
+    let chain_id = provider.get_chainid().await?.as_u64();
     let wallet = wallet.with_chain_id(chain_id);
- 
+
     let master_client = Arc::new(SignerMiddleware::new(provider, wallet));
- 
-    let settlement_address = env::var("CONTRACT_SETTLEMENT")
-        .unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string())
-        .parse::<Address>()
-        .expect("Invalid settlement address");
-    
-    let registry_address = env::var("CONTRACT_REGISTRY")
-        .unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string())
-        .parse::<Address>()
-        .expect("Invalid registry address");
- 
+    let settlement_address = env::var("CONTRACT_SETTLEMENT")? .parse::<Address>()?;
+    let registry_address = env::var("CONTRACT_REGISTRY")? .parse::<Address>()?;
+
     let settlement = AMPSettlementContract::new(settlement_address, master_client.clone());
     let registry = AMPRegistryContract::new(registry_address, master_client.clone());
- 
-    let state = Arc::new(AppState { settlement, registry });
- 
-    let state_filter = warp::any().map(move || Arc::clone(&state));
-    let master_client_filter = warp::any().map(move || Arc::clone(&master_client));
- 
-    let submit_outcome = warp::path!("submit-outcome")
-        .and(warp::post())
-        .and(warp::body::json())
-        .and(state_filter.clone())
-        .and(master_client_filter.clone())
-        .and_then(handle_submit_outcome);
- 
-    let get_custodial_address = warp::path!("custodial-address" / u64)
-        .and(warp::get())
-        .and(master_client_filter.clone())
-        .and_then(handle_get_custodial_address);
 
-    let get_game_admin = warp::path!("game-admin" / u64)
-        .and(warp::get())
-        .and(state_filter.clone())
-        .and_then(handle_get_game_admin);
- 
-    let health = warp::path!("health")
-        .and(warp::get())
-        .and_then(handle_health);
- 
-    let routes = submit_outcome
-        .or(get_custodial_address)
-        .or(get_game_admin)
-        .or(health)
-        .with(warp::cors().allow_any_origin());
- 
-    info!("AMP Relayer starting on {}", addr);
-    warp::serve(routes).run(addr).await;
- 
+    let state = RelayerState { settlement, registry, master_client };
+    let relayer_impl = RelayerImpl { state };
+    let relayer_client: relayer_capnp::relayer_service::Client = capnp_rpc::new_client(relayer_impl);
+
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    info!("AMP Relayer (Cap'n Proto RPC) listening on {}", addr);
+
+    let local = tokio::task::LocalSet::new();
+    local.run_until(async move {
+        loop {
+            let (stream, _) = listener.accept().await?;
+            stream.set_nodelay(true)?;
+            let (reader, writer) = stream.into_split();
+            
+            let network = twoparty::VatNetwork::new(
+                reader.compat(),
+                writer.compat_write(),
+                rpc_twoparty_capnp::Side::Server,
+                Default::default(),
+            );
+
+            let rpc_system = RpcSystem::new(Box::new(network), Some(relayer_client.clone().client));
+            tokio::task::spawn_local(rpc_system.map(|_| ()));
+        }
+        #[allow(unreachable_code)]
+        Ok::<(), anyhow::Error>(())
+    }).await?;
+
     Ok(())
 }
+// main()

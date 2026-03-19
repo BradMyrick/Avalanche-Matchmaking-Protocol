@@ -72,12 +72,15 @@ dependencies = [
  "capnp-rpc",
  "capnpc",
  "dotenv",
+ "ethers-core",
  "futures-util",
  "hex",
  "serde",
  "serde_json",
  "tokio",
  "tokio-util",
+ "tracing",
+ "tracing-subscriber",
  "warp",
 ]
 
@@ -86,16 +89,19 @@ name = "amp-relayer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "capnp",
+ "capnp-rpc",
+ "capnpc",
  "dotenv",
  "ethers",
+ "futures",
  "hex",
  "serde",
- "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
- "warp",
 ]
 
 [[package]]

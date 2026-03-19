@@ -1,25 +1,25 @@
-# AMP Telemetry Receiver
+# AMP Telemetry
 
-A lightweight Cap'n Proto RPC server that receives `TelemetryEvent` emissions from AMP Matchmaker sessions and outputs them as JSON traces for analysis.
+The **AMP Telemetry** service is a high-throughput binary logging system for the AMP protocol. It receives packed Cap'n Proto telemetry events from the AMP Server and persists them to a binary log file.
 
-## Usage
+## 🚀 Features
+- **Pure Cap'n Proto RPC**: Binary receiver on port 4317.
+- **Packed Binary Persistence**: Efficiently stores events in a length-prefixed packed format (`telemetry.bin`).
+- **Low Overhead**: Zero JSON encoding/decoding during the hot path.
+- **Export to JSON**: Built-in CLI for exporting binary logs to JSON for analysis.
 
-Start the receiver (listens on `127.0.0.1:4317` by default):
+## 🛠 Usage
+
+### Start Receiver
 ```bash
-cargo run
+# Listen on 127.0.0.1:4317, log to telemetry.bin
+cargo run -- bin 127.0.0.1:4317 telemetry.bin
 ```
 
-When an AMP client emits a telemetry event via the `MatchSession::emitTelemetry` capability, this service will output a JSON trace span to `stdout`.
+### Export to JSON
+```bash
+cargo run -- --export telemetry.bin > traces.json
+```
 
-## Integrating with Trace Viewer
-
-The [Trace Viewer](../trace-viewer/README.md) visualizes the text output of this service.
-
-1. Capture the output of `amp-telemetry` to a file:
-   ```bash
-   cargo run > my_traces.log
-   ```
-2. Open `../trace-viewer/index.html` in your browser.
-3. Click "Load Trace File" and select `my_traces.log`.
-
-*(Note: In the MVP `test_mvp.sh` script, the output is automatically piped to `telemetry.log` which can be directly loaded into the viewer).*
+## 🏗 Architecture
+The receiver implements the `TelemetryReceiver` interface (see `amp_telemetry.capnp`). It is designed to be a "dumb" sink for high-volume game events, ensuring the matchmaker is never blocked by telemetry processing.

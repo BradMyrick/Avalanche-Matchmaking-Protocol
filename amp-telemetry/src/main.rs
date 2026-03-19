@@ -13,28 +13,25 @@ use tokio_util::compat::TokioAsyncReadCompatExt;
 use amp_telemetry::amp_telemetry_capnp::TelemetryEventType;
 use amp_telemetry::amp_telemetry_capnp::telemetry_receiver;
 
-/// Wraps a buffered file writer behind a Mutex so the Cap'n Proto RPC handler
-/// can append packed messages from any spawned task.
+/// Implementation of the TelemetryReceiver service.
+/// Persists incoming telemetry events to a packed binary log file.
 struct TelemetryReceiverImpl {
     log_writer: Arc<Mutex<BufWriter<std::fs::File>>>,
 }
+// TelemetryReceiverImpl
 
 impl telemetry_receiver::Server for TelemetryReceiverImpl {
+    /// Appends a telemetry event to the persistent binary log.
     fn log_event(
         &mut self,
         params: telemetry_receiver::LogEventParams,
         mut _results: telemetry_receiver::LogEventResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
-        // Read the incoming message and re-serialize as a packed Cap'n Proto
-        // frame directly to the log file. This avoids any intermediate text
-        // encoding — the on-disk format IS Cap'n Proto packed binary.
         let params_reader = match params.get() {
             Ok(p) => p,
             Err(e) => return capnp::capability::Promise::err(e),
         };
 
-        // Build a new standalone message containing just the event, so the
-        // log file is a sequence of independent packed messages.
         let event_reader = match params_reader.get_event() {
             Ok(e) => e,
             Err(e) => return capnp::capability::Promise::err(e),
@@ -43,8 +40,6 @@ impl telemetry_receiver::Server for TelemetryReceiverImpl {
         let mut out_msg = capnp::message::Builder::new_default();
         out_msg.set_root(event_reader).unwrap();
 
-        // Write length-prefixed packed message to the log file.
-        // Frame format: [4-byte LE payload length][packed capnp bytes]
         let mut packed_buf: Vec<u8> = Vec::new();
         serialize_packed::write_message(&mut packed_buf, &out_msg).unwrap();
 
@@ -54,7 +49,6 @@ impl telemetry_receiver::Server for TelemetryReceiverImpl {
         writer.write_all(&packed_buf).unwrap();
         writer.flush().unwrap();
 
-        // Also print a human-readable line to stdout for operator visibility
         let match_id = match event_reader.get_match_id() {
             Ok(data) => hex::encode(data),
             Err(_) => "unknown".to_string(),
@@ -72,9 +66,11 @@ impl telemetry_receiver::Server for TelemetryReceiverImpl {
 
         capnp::capability::Promise::ok(())
     }
+    // log_event(params, results)
 }
+// telemetry_receiver::Server for TelemetryReceiverImpl
 
-/// Read a binary log file and print each event as a JSON object to stdout.
+/// Exports the binary log file to a JSON array for external processing.
 fn export_json(path: &str) -> Result<()> {
     let mut file = std::fs::File::open(path)?;
     let mut stdout = std::io::stdout().lock();
@@ -82,7 +78,6 @@ fn export_json(path: &str) -> Result<()> {
     let mut first = true;
 
     loop {
-        // Read 4-byte LE length prefix
         let mut len_buf = [0u8; 4];
         match file.read_exact(&mut len_buf) {
             Ok(()) => {}
@@ -91,7 +86,6 @@ fn export_json(path: &str) -> Result<()> {
         }
         let len = u32::from_le_bytes(len_buf) as usize;
 
-        // Read the packed message bytes
         let mut msg_buf = vec![0u8; len];
         file.read_exact(&mut msg_buf)?;
 
@@ -122,7 +116,6 @@ fn export_json(path: &str) -> Result<()> {
         }
         first = false;
 
-        // Write a compact JSON object — the trace-viewer already handles this format
         write!(
             stdout,
             "  {{\"match_id\":\"{}\",\"game_id\":{},\"event_type\":\"{:?}\",\"timestamp\":{},\"verifier_id\":\"{}\",\"event_data\":\"{}\"}}",
@@ -134,25 +127,24 @@ fn export_json(path: &str) -> Result<()> {
     stdout.flush()?;
     Ok(())
 }
+// export_json(path)
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     let args: Vec<String> = std::env::args().collect();
 
-    // ── Export mode: `amp-telemetry --export telemetry.bin` ──────────
     if args.len() >= 3 && args[1] == "--export" {
         return export_json(&args[2]);
     }
 
-    // ── Server mode ─────────────────────────────────────────────────
     let addr_str = args.get(1).map(|s| s.as_str()).unwrap_or("127.0.0.1:4317");
     let log_path = args.get(2).map(|s| s.as_str()).unwrap_or("telemetry.bin");
 
     let addr = addr_str
         .to_socket_addrs()?
         .next()
-        .expect("could not parse address");
+        .ok_or_else(|| anyhow::anyhow!("Invalid address"))?;
 
     let log_file = std::fs::OpenOptions::new()
         .create(true)
@@ -161,7 +153,7 @@ async fn main() -> Result<()> {
     let log_writer = Arc::new(Mutex::new(BufWriter::new(log_file)));
 
     let receiver: telemetry_receiver::Client = capnp_rpc::new_client(TelemetryReceiverImpl {
-        log_writer: log_writer.clone(),
+        log_writer,
     });
 
     let listener = TcpListener::bind(&addr).await?;
@@ -171,25 +163,23 @@ async fn main() -> Result<()> {
     );
 
     let local = LocalSet::new();
-    local
-        .run_until(async move {
-            loop {
-                if let Ok((stream, _)) = listener.accept().await {
-                    stream.set_nodelay(true).unwrap();
-                    let (reader, writer) = stream.compat().split();
-                    let network = twoparty::VatNetwork::new(
-                        reader,
-                        writer,
-                        rpc_twoparty_capnp::Side::Server,
-                        Default::default(),
-                    );
-                    let rpc_system =
-                        RpcSystem::new(Box::new(network), Some(receiver.clone().client));
-                    tokio::task::spawn_local(rpc_system);
-                }
+    local.run_until(async move {
+        loop {
+            if let Ok((stream, _)) = listener.accept().await {
+                stream.set_nodelay(true).unwrap_or(());
+                let (reader, writer) = stream.compat().split();
+                let network = twoparty::VatNetwork::new(
+                    reader,
+                    writer,
+                    rpc_twoparty_capnp::Side::Server,
+                    Default::default(),
+                );
+                let rpc_system = RpcSystem::new(Box::new(network), Some(receiver.clone().client));
+                tokio::task::spawn_local(rpc_system);
             }
-        })
-        .await;
+        }
+    }).await;
 
     Ok(())
 }
+// main()

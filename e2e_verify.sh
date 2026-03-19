@@ -45,135 +45,96 @@ TELEMETRY_PID=$!
 sleep 2
 cd ..
 
-# 4. Start Relayer
-echo "[4/6] Starting Relayer..."
+# 4. Start Relayer (RPC)
+echo "[4/6] Starting Relayer (Cap'n Proto RPC)..."
 cd amp-relayer
 export CONTRACT_REGISTRY=$REGISTRY_ADDR
 export CONTRACT_SETTLEMENT=$SETTLEMENT_ADDR
 export FUJI_RPC_URL=http://localhost:8545
 export RELAYER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-cargo build
-cargo run > relayer.log 2>&1 &
+export RPC_PORT=50052
+cargo run --bin amp-relayer > ../relayer.log 2>&1 &
 RELAYER_PID=$!
-sleep 3
+sleep 5
 cd ..
 
-# 5. Start AMP-Server
-echo "[5/6] Starting AMP Server..."
+# 5. Start AMP-Server (RPC)
+echo "[5/6] Starting AMP Server (Cap'n Proto RPC)..."
 cd amp-server
-export RELAYER_URL=http://localhost:3000
-export TELEMETRY_ADDR=127.0.0.1:4317
+export RELAYER_RPC_ADDR="localhost:50052"
+export TELEMETRY_ADDR="127.0.0.1:4317"
 export VERIFIER_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-cargo build
-cargo run > server.log 2>&1 &
+export AMP_ADDR="0.0.0.0:50051"
+cargo run --bin AMP-Server > ../server.log 2>&1 &
 SERVER_PID=$!
 sleep 5
 cd ..
 
-# 6. Run a mock client test (or use cast to verify state)
-echo "[6/6] Verifying E2E Flow..."
+# 6. Start Demo Gateway (JSON -> RPC bridge)
+echo "[6/6] Starting Demo Gateway (JSON Bridge)..."
+cd amp-demo-gateway
+export AMP_ADDR="127.0.0.1:50051"
+export AMP_HTTP_ADDR="0.0.0.0:50053"
+cargo run --bin amp-demo-gateway > ../gateway.log 2>&1 &
+GATEWAY_PID=$!
+sleep 5
+cd ..
 
-# In a real test, we'd use the SDK. Here we'll simulate a login and outcome submission.
-# Since we updated the server to verify gameId, we'll check if it's running.
-if curl -s http://localhost:3000/health | grep -q "OK"; then
-    echo "Relayer is healthy."
-else
-    echo "Relayer Health Check Failed!"
-    cat amp-relayer/relayer.log
-    kill $ANVIL_PID $TELEMETRY_PID $RELAYER_PID $SERVER_PID
-    exit 1
-fi
+echo "Architecture check: Relayer(50052) <- Server(50051) <- Gateway(50053)"
 
-# Test Game Admin endpoint
-ADMIN_CHECK=$(curl -s http://localhost:3000/game-admin/$GAME_ID)
-if echo $ADMIN_CHECK | grep -qi "$ADMIN_ADDR"; then
-    echo "Relayer correctly reported game admin: $ADMIN_ADDR"
-else
-    echo "Relayer Admin Check Failed! Result: $ADMIN_CHECK"
-    kill $ANVIL_PID $TELEMETRY_PID $RELAYER_PID $SERVER_PID
-    exit 1
-fi
+# [7/7] Testing Match Settlement Flow
+echo "[7/7] Testing Match Settlement Flow..."
 
-# 7. Test Custodial Wallet & Gas Funding (Relayer -> Anvil)
-echo "[7/7] Testing Custodial Wallet & Gas Funding via Relayer..."
-
-# 7.1 Query Custodial Address for Game 0
-CUSTODIAL_INFO=$(curl -s http://localhost:3000/custodial-address/$GAME_ID)
-CUSTODIAL_ADDR=$(echo $CUSTODIAL_INFO | grep -oE "0x[0-9a-fA-F]{40}")
+# Query custodial address via Relayer RPC CLI
+CUSTODIAL_ADDR=$(cd amp-relayer && cargo run --bin amp-relayer -- query-custodial $GAME_ID 2>/dev/null | tail -n 1)
 echo "Game $GAME_ID Custodial Wallet: $CUSTODIAL_ADDR"
 
-# 7.2 Authorize Custodial Wallet as Verifier
-echo "Authorizing custodial wallet on-chain..."
+if [[ ! "$CUSTODIAL_ADDR" =~ ^0x[0-9a-fA-F]{40}$ ]]; then
+    echo "ERROR: Failed to query custodial address via RPC CLI"
+    kill $ANVIL_PID $TELEMETRY_PID $RELAYER_PID $SERVER_PID $GATEWAY_PID
+    exit 1
+fi
+
+# Authorize Custodial Wallet as Verifier
+echo "Authorizing custodial wallet as verifier..."
 cast send $REGISTRY_ADDR "updateGameVerifiers(uint256,address[])" $GAME_ID "[$CUSTODIAL_ADDR]" --rpc-url http://localhost:8545 --private-key $PRIVATE_KEY > /dev/null
 
-# 7.3 Create Match
-MATCH_TX=$(cast send $REGISTRY_ADDR "createMatch(uint256,uint256)" $GAME_ID 0 --rpc-url http://localhost:8545 --private-key $PRIVATE_KEY)
+# Create & Join Match
+echo "Creating/Joining Match..."
 MATCH_ID=0
-
-# 7.4 Join Match
+MATCH_TX=$(cast send $REGISTRY_ADDR "createMatch(uint256,uint256)" $GAME_ID 0 --rpc-url http://localhost:8545 --private-key $PRIVATE_KEY > /dev/null)
 PLAYER_B_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
 cast send $REGISTRY_ADDR "joinMatch(uint256)" $MATCH_ID --rpc-url http://localhost:8545 --private-key $PLAYER_B_KEY > /dev/null
 
-# 7.5 Prepare Result Signature (Signed by Master Admin Key for simplicity, Relayer handles it)
-# Note: The Relayer still needs the verifier's signature if we want it to call our verifier code,
-# BUT the Relayer *is* the verifier here. The signature passed to submit-outcome is what the 
-# Relayer's custodial wallet uses to sign the on-chain tx.
-# Wait! In AMPSettlement.sol, the signature in AsyncResult is WHAT IS VERIFIED ON-CHAIN.
-# So the signature must be by the CUSTODIAL WALLET.
+# Submit via Demo Gateway (triggers the full Cap'n Proto flow)
+TRANSCRIPT_HASH="0x0000000000000000000000000000000000000000000000000000000000000000"
+echo "Submitting outcome via Demo Gateway -> AMP Server -> Relayer..."
+SUBMIT_RES=$(curl -s -X POST http://localhost:50053/demo-submit \
+     -H "Content-Type: application/json" \
+     -d "{\"match_id\": \"$MATCH_ID\", \"outcome\": 1, \"transcript_hash\": \"$TRANSCRIPT_HASH\"}")
 
-# We need the signature to be by the CUSTODIAL WALLET.
-# Since we know the derivation logic, we can sign it in the script too for verification.
-# Or better: let's use the ADMIN key for now as it's already a verifier? 
-# No, the user wants the custodial wallet to be the one signing.
+echo "Gateway Response: $SUBMIT_RES"
 
-# Let's derive the custodial key in bash if possible? No.
-# Instead, the Relayer could provide a signing helper for tests, but let's stick to the flow.
-# Let's add the ADMIN_ADDR back as a verifier too so we can sign with what we have.
-echo "Authorizing Admin and Custodial as Verifiers..."
-cast send $REGISTRY_ADDR "updateGameVerifiers(uint256,address[])" $GAME_ID "[$ADMIN_ADDR, $CUSTODIAL_ADDR]" --rpc-url http://localhost:8545 --private-key $PRIVATE_KEY > /dev/null
+echo "Waiting for Relayer to settle on-chain..."
+sleep 20
 
-OUTCOME=1 # WIN_A
-T_HASH="0x0000000000000000000000000000000000000000000000000000000000000000"
-MSG_HEX=$(cast abi-encode "f(uint256,uint256,bytes32)" $MATCH_ID $OUTCOME $T_HASH)
-HASH=$(cast keccak $MSG_HEX)
-# Sign with Admin Key (authorized as verifier)
-SIG=$(cast wallet sign $HASH --private-key $PRIVATE_KEY)
-
-# 7.6 Submit to Relayer
-SUBMIT_RESULT=$(curl -s -X POST http://localhost:3000/submit-outcome \
-  -H "Content-Type: application/json" \
-  -d "{\"match_id\": \"$MATCH_ID\", \"outcome\": $OUTCOME, \"transcript_hash\": \"$T_HASH\", \"signature\": \"$SIG\"}")
-
-echo "Relayer Submission Result: $SUBMIT_RESULT"
-
-if echo $SUBMIT_RESULT | grep -q "submitted"; then
-    TX_HASH=$(echo $SUBMIT_RESULT | grep -oE "0x[0-9a-fA-F]{64}")
-    echo "Relayer submitted transaction via custodial wallet: $TX_HASH"
+# Verify State (MatchStatus 2 = SETTLED)
+STATUS=$(cast call $REGISTRY_ADDR "matches(uint256)" $MATCH_ID --rpc-url http://localhost:8545 | head -n 1)
+if [[ "$STATUS" == *"2"* ]]; then
+    echo "SUCCESS: Match $MATCH_ID settled on-chain!"
     
-    # Wait for tx to be mined
-    sleep 2
-    
-    # Check custodial wallet balance to verify auto-funding
+    # Check gas top-up
     BALANCE=$(cast balance $CUSTODIAL_ADDR --rpc-url http://localhost:8545)
-    echo "Custodial wallet balance after completion: $(cast --from-wei $BALANCE) AVAX"
-
-    # Verify match state (state 2 = SETTLED)
-    if cast call $REGISTRY_ADDR "matches(uint256)" $MATCH_ID --rpc-url http://localhost:8545 | grep -q "2"; then
-        echo "Match $MATCH_ID correctly settled via Custodial Wallet!"
-    else
-        echo "Match settlement check failed!"
-        kill $ANVIL_PID $TELEMETRY_PID $RELAYER_PID $SERVER_PID
-        exit 1
-    fi
+    echo "Final Custodial Balance: $(cast --from-wei $BALANCE) AVAX"
 else
-    echo "Relayer Outcome Submission Failed!"
-    kill $ANVIL_PID $TELEMETRY_PID $RELAYER_PID $SERVER_PID
+    echo "FAILURE: Match status is not SETTLED (status: $STATUS)"
+    kill $ANVIL_PID $TELEMETRY_PID $RELAYER_PID $SERVER_PID $GATEWAY_PID
     exit 1
 fi
 
 echo "=========================================="
-echo " E2E Verification Successful!"
+echo " ALPHA E2E VERIFICATION SUCCESSFUL!"
 echo "=========================================="
 
-kill $ANVIL_PID $TELEMETRY_PID $RELAYER_PID $SERVER_PID
+kill $ANVIL_PID $TELEMETRY_PID $RELAYER_PID $SERVER_PID $GATEWAY_PID
 exit 0

@@ -1,8 +1,27 @@
-# AMP - Avalanche Matchmaking Protocol
+# AMP Protocol - Alpha Release
 
-**AMP** is a capability-based matchmaking protocol and off-chain verifier network designed to secure high-frequency Web3 game state without sacrificing sub-millisecond latency.
+The AMP Protocol is a high-performance, capability-based matchmaking and settlement layer for gaming on Avalanche.
 
-By removing the reliance on centralized trust, AMP ensures fair play and irrefutable payouts for competitive Avalanche games. The protocol pairs players, verifies deterministic game transcripts off-chain, and commits settled outcomes directly to Avalanche.
+## 🚀 Alpha Features
+- **Pure Cap'n Proto RPC**: High-performance, low-latency internal communication.
+- **Custodial Wallets**: Automatic signer derivation and gas funding for every game studio.
+- **On-Chain Verification**: Real-time validation of game registry and verifier permissions.
+- **Binary Telemetry**: Efficient binary logging of match events.
+
+## 🏗 Architecture
+AMP uses a capability-based security model. Once a client logs in, they receive a `UserSession` capability, which allows them to request matches. Upon match assignment, they receive a `MatchSession` which is the ONLY way to emit events or submit telemetry for that specific match.
+
+- **AMP Server**: The matchmaker and game session coordinator.
+- **AMP Relayer**: The bridge to Avalanche, handling custodial signers and gas auto-funding.
+- **AMP Telemetry**: A binary logging service for high-throughput game analytics.
+
+## 🛠 Setup & Verification
+Run the following scripts to build and verify the entire stack against a local Anvil node:
+1. `./mvp_setup.sh` - Installs dependencies and builds all components.
+2. `./e2e_verify.sh` - Runs the full end-to-end verification suite.
+
+## 📄 License
+This protocol is licensed under the MIT License.
 
 ---
 
@@ -11,23 +30,6 @@ By removing the reliance on centralized trust, AMP ensures fair play and irrefut
 For full technical documentation, architecture deep-dives, integration guides, and contract references, please visit our official documentation site:
 
 ### 👉 [https://docs.page/BradMyrick/Avax-Build-Games-2026](https://docs.page/BradMyrick/Avax-Build-Games-2026)
-
----
-
-## 🚀 Quick Start (Local MVP)
-
-You can run the full AMP MVP locally against Anvil to verify the entire flow end-to-end.
-
-```bash
-# 1. Dependency check & setup
-./mvp_dependency_checker.sh
-./mvp_setup.sh
-
-# 2. Run the end-to-end local test
-./test_mvp.sh
-```
-
-For detailed instructions on running the MVP and integrating the SDKs, see the [Getting Started](https://docs.page/BradMyrick/Avax-Build-Games-2026/) section in our documentation.
 
 ---
 
