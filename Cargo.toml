@@ -1,7 +1,9 @@
 [workspace]
+resolver = "3"
 members = [
     "amp-telemetry",
     "amp-server",
     "amp-relayer",
     "amp-demo-gateway",
+    "trace-viewer",
 ]
