@@ -59,14 +59,15 @@ impl telemetry_receiver::Server for TelemetryReceiverImpl {
             Ok(data) => hex::encode(data),
             Err(_) => "unknown".to_string(),
         };
+        let game_id = event_reader.get_game_id();
         let ev_type = event_reader
             .get_event_type()
             .unwrap_or(TelemetryEventType::Unknown);
         let ts = event_reader.get_timestamp();
 
         eprintln!(
-            "[telemetry] ts={} type={:?} match={}",
-            ts, ev_type, match_id
+            "[telemetry] ts={} type={:?} match={} game={}",
+            ts, ev_type, match_id, game_id
         );
 
         capnp::capability::Promise::ok(())
@@ -102,6 +103,7 @@ fn export_json(path: &str) -> Result<()> {
             Ok(d) => hex::encode(d),
             Err(_) => String::new(),
         };
+        let game_id = event.get_game_id();
         let verifier_id = match event.get_verifier_id() {
             Ok(d) => hex::encode(d),
             Err(_) => String::new(),
@@ -123,8 +125,8 @@ fn export_json(path: &str) -> Result<()> {
         // Write a compact JSON object — the trace-viewer already handles this format
         write!(
             stdout,
-            "  {{\"match_id\":\"{}\",\"event_type\":\"{:?}\",\"timestamp\":{},\"verifier_id\":\"{}\",\"event_data\":\"{}\"}}",
-            match_id, ev_type, ts, verifier_id, event_data
+            "  {{\"match_id\":\"{}\",\"game_id\":{},\"event_type\":\"{:?}\",\"timestamp\":{},\"verifier_id\":\"{}\",\"event_data\":\"{}\"}}",
+            match_id, game_id, ev_type, ts, verifier_id, event_data
         )?;
     }
 

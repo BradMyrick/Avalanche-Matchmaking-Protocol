@@ -107,6 +107,7 @@ async fn notify_relayer(match_id: &str, outcome: u8, transcript_hash: &[u8], sig
 struct MatchSessionImpl {
     match_id: String,
     _player_id: String,
+    game_id: u64,
 }
 
 impl match_session::Server for MatchSessionImpl {
@@ -162,15 +163,55 @@ impl match_session::Server for MatchSessionImpl {
 
     fn emit_telemetry(
         &mut self,
-        _params: match_session::EmitTelemetryParams,
+        params: match_session::EmitTelemetryParams,
         _results: match_session::EmitTelemetryResults,
     ) -> Promise<(), ::capnp::Error> {
-        Promise::ok(())
+        let params_reader = capnp_rpc::pry!(params.get());
+        let event_reader = capnp_rpc::pry!(params_reader.get_event());
+        
+        let event_type = event_reader.get_event_type().unwrap();
+        let timestamp = event_reader.get_timestamp();
+        let event_data = event_reader.get_event_data().unwrap_or(&[]).to_vec();
+        
+        let game_id = self.game_id;
+        let match_id = self.match_id.clone();
+
+        Promise::from_future(async move {
+            // Forward to amp-telemetry service
+            let telemetry_addr = env::var("TELEMETRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4317".to_string());
+            if let Ok(stream) = tokio::net::TcpStream::connect(&telemetry_addr).await {
+                let (read_half, write_half) = stream.into_split();
+                let network = twoparty::VatNetwork::new(
+                    read_half.compat(),
+                    write_half.compat_write(),
+                    rpc_twoparty_capnp::Side::Client,
+                    Default::default(),
+                );
+                
+                let mut rpc_system = RpcSystem::new(Box::new(network), None);
+                let receiver: amp_telemetry_capnp::telemetry_receiver::Client = 
+                    rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+                
+                tokio::task::spawn_local(rpc_system);
+
+                let mut req = receiver.log_event_request();
+                let mut ev = req.get().init_event();
+                ev.set_match_id(match_id.as_bytes());
+                ev.set_game_id(game_id);
+                ev.set_event_type(event_type);
+                ev.set_timestamp(timestamp);
+                ev.set_event_data(&event_data);
+
+                let _ = req.send().promise.await;
+            }
+            Ok(())
+        })
     }
 }
 
 struct UserSessionImpl {
     player_id: String,
+    game_id: u64,
 }
 
 impl user_session::Server for UserSessionImpl {
@@ -180,15 +221,17 @@ impl user_session::Server for UserSessionImpl {
         mut results: user_session::RequestMatchResults,
     ) -> Promise<(), ::capnp::Error> {
         let req = capnp_rpc::pry!(capnp_rpc::pry!(params.get()).get_req());
-        let game_id_bytes = capnp_rpc::pry!(req.get_game_id());
-        let game_id = String::from_utf8_lossy(game_id_bytes).to_string();
+        let _req_game_id_bytes = capnp_rpc::pry!(req.get_game_id());
+        
+        let game_id = self.game_id;
+        let game_id_str = game_id.to_string();
         let player_id_clone = self.player_id.clone();
 
         Promise::from_future(async move {
             let (tx, rx) = oneshot::channel();
             let mut queue = MATCH_QUEUE.lock().await;
 
-            if let Some(pos) = queue.iter().position(|e| e.game_id == game_id) {
+            if let Some(pos) = queue.iter().position(|e| e.game_id == game_id_str) {
                 let entry = queue.remove(pos);
                 let match_id = format!("match-{}", Uuid::new_v4());
 
@@ -202,6 +245,7 @@ impl user_session::Server for UserSessionImpl {
                 let session = capnp_rpc::new_client(MatchSessionImpl {
                     match_id,
                     _player_id: player_id_clone,
+                    game_id,
                 });
                 results.get().set_session(session);
 
@@ -209,7 +253,7 @@ impl user_session::Server for UserSessionImpl {
             } else {
                 queue.push(QueueEntry {
                     player_id: player_id_clone.clone(),
-                    game_id: game_id.clone(),
+                    game_id: game_id_str.clone(),
                     sender: tx,
                 });
                 drop(queue);
@@ -222,6 +266,7 @@ impl user_session::Server for UserSessionImpl {
                     let session = capnp_rpc::new_client(MatchSessionImpl {
                         match_id: assign_match_id,
                         _player_id: player_id_clone,
+                        game_id,
                     });
                     results.get().set_session(session);
 
@@ -241,10 +286,12 @@ impl user_session::Server for UserSessionImpl {
         let match_id_bytes = capnp_rpc::pry!(capnp_rpc::pry!(params.get()).get_match_id());
         let match_id = String::from_utf8_lossy(match_id_bytes).to_string();
         let player_id_clone = self.player_id.clone();
+        let game_id = self.game_id;
 
         let session = capnp_rpc::new_client(MatchSessionImpl {
             match_id,
             _player_id: player_id_clone,
+            game_id,
         });
         results.get().set_session(session);
 
@@ -260,14 +307,43 @@ impl game_session_service::Server for GameSessionServiceImpl {
         params: game_session_service::LoginParams,
         mut results: game_session_service::LoginResults,
     ) -> Promise<(), ::capnp::Error> {
-        let sig = capnp_rpc::pry!(capnp_rpc::pry!(params.get()).get_signed_challenge());
-        let player_id = String::from_utf8_lossy(sig).to_string();
-        println!("Player {} logged in", player_id);
+        let params_reader = capnp_rpc::pry!(params.get());
+        let game_id = params_reader.get_game_id();
+        let sig_bytes = capnp_rpc::pry!(params_reader.get_signed_challenge());
+        
+        // In a real implementation, we would:
+        // 1. Get the admin address for gameId from the relayer.
+        // 2. Verify the signature against a challenge/nonce.
+        // For the MVP end-to-end, we'll implement a basic check or just log it properly.
+        
+        let player_id = String::from_utf8_lossy(sig_bytes).to_string();
+        println!("Game {} login request from player {}", game_id, player_id);
 
-        let session = capnp_rpc::new_client(UserSessionImpl { player_id });
-        results.get().set_session(session);
+        Promise::from_future(async move {
+            // Verify with relayer
+            let relayer_url = env::var("RELAYER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+            let client = reqwest::Client::new();
+            
+            let admin_res = match client.get(format!("{}/game-admin/{}", relayer_url, game_id)).send().await {
+                Ok(res) => res.json::<serde_json::Value>().await.ok(),
+                Err(_) => None,
+            };
 
-        Promise::ok(())
+            if let Some(admin_addr) = admin_res.and_then(|v| v["admin"].as_str().map(|s| s.to_string())) {
+                println!("Verified game {} admin is {}", game_id, admin_addr);
+                // In alpha, we accept the login if we found an admin. 
+                // Full signature verification would happen here.
+                
+                let session = capnp_rpc::new_client(UserSessionImpl { 
+                    player_id,
+                    game_id,
+                });
+                results.get().set_session(session);
+                Ok(())
+            } else {
+                Err(::capnp::Error::failed(format!("Unauthorized: Game {} not found or has no admin", game_id)))
+            }
+        })
     }
 }
 

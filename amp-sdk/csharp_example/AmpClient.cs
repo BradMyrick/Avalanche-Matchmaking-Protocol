@@ -30,9 +30,9 @@ namespace AmpSdkExample
         /// Connects to the matchmaker and performs the initial login handshake.
         /// Demonstrates how a capability-based session starts.
         /// </summary>
-        public async Task<bool> ConnectAsync(byte[] playerSignature)
+        public async Task<bool> ConnectAsync(ulong gameId, byte[] playerSignature)
         {
-            Console.WriteLine($"[AmpClient] Connecting to matchmaker at {_serverAddress}...");
+            Console.WriteLine($"[AmpClient] Connecting to matchmaker at {_serverAddress} for game {gameId}...");
             
             try
             {
@@ -44,7 +44,7 @@ namespace AmpSdkExample
                 _sessionService = _rpcClient.GetMain<IGameSessionService>();
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                _userSession = await _sessionService.Login(playerSignature, cts.Token);
+                _userSession = await _sessionService.Login(gameId, playerSignature, cts.Token);
                 return _userSession != null;
             }
             catch (System.Exception ex)

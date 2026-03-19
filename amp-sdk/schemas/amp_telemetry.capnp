@@ -19,10 +19,11 @@ enum TelemetryEventType {
 
 struct AmpTelemetryEvent {
     matchId         @0 :AmpId;
-    eventType       @1 :TelemetryEventType;
-    timestamp       @2 :TimeStamp;    # Expected to hold block number or precise timestamp
-    verifierId      @3 :Address;      # Optional: address of verifier node if applicable
-    eventData       @4 :Data;         # Arbitrary metric data encoded depending on eventType
+    gameId          @1 :UInt64;
+    eventType       @2 :TelemetryEventType;
+    timestamp       @3 :TimeStamp;    # Expected to hold block number or precise timestamp
+    verifierId      @4 :Address;      # Optional: address of verifier node if applicable
+    eventData       @5 :Data;         # Arbitrary metric data encoded depending on eventType
 }
 
 # The Receiver interface that the `amp-telemetry` service provides

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 
 namespace AmpSdkExample
@@ -12,7 +12,8 @@ namespace AmpSdkExample
             {
                 using var client = new AmpClient(serverUrl);
                 var dummySig = new byte[] { 0x05, 0x06, 0x07, 0x08 };
-                if (await client.ConnectAsync(dummySig))
+                ulong gameId = 0; // Use game 0 as registered in e2e_verify.sh
+                if (await client.ConnectAsync(gameId, dummySig))
                 {
                     Console.WriteLine("[Player B] Connected to Matchmaker. Requesting match...");
                     await client.RequestMatchAsync(gameIdStr);
@@ -35,7 +36,8 @@ namespace AmpSdkExample
 
                 // 1. Connect and login via signature
                 var pseudoSignature = new byte[] { 0x01, 0x02, 0x03 };
-                bool connected = await client.ConnectAsync(pseudoSignature);
+                ulong gameId = 0;
+                bool connected = await client.ConnectAsync(gameId, pseudoSignature);
                 if (!connected)
                 {
                     Console.WriteLine("Failed to connect.");
