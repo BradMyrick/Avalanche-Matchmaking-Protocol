@@ -11,6 +11,7 @@ use std::env;
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
 use tracing::info;
+use serde::Serialize;
 
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use uuid::Uuid;
@@ -69,6 +70,40 @@ async fn verify_and_sign(_match_id: &str, outcome: u8, transcript_hash: &[u8]) -
     Ok(signature.to_vec())
 }
 
+#[derive(Serialize)]
+struct RelayPayload {
+    match_id: String,
+    outcome: u8,
+    transcript_hash: String,
+    signature: String,
+}
+
+async fn notify_relayer(match_id: &str, outcome: u8, transcript_hash: &[u8], signature: &[u8]) {
+    let relayer_url = env::var("RELAYER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let payload = RelayPayload {
+        match_id: match_id.to_string(),
+        outcome,
+        transcript_hash: ethers_core::utils::hex::encode(transcript_hash),
+        signature: ethers_core::utils::hex::encode(signature),
+    };
+    
+    let client = reqwest::Client::new();
+    match client.post(format!("{}/submit-outcome", relayer_url))
+        .json(&payload)
+        .send()
+        .await 
+    {
+        Ok(res) => {
+            if !res.status().is_success() {
+                tracing::error!("Relayer returned error: {:?}", res.status());
+            } else {
+                tracing::info!("Successfully queued outcome to relayer for {}", match_id);
+            }
+        }
+        Err(e) => tracing::error!("Failed to notify relayer: {:?}", e),
+    }
+}
+
 struct MatchSessionImpl {
     match_id: String,
     _player_id: String,
@@ -95,6 +130,13 @@ impl match_session::Server for MatchSessionImpl {
             match verify_and_sign(&match_id, outcome_val, &r_hash).await {
                 Ok(sig) => {
                     results.get().set_signature(&sig);
+                    
+                    // Spawn task to notify relayer in the background
+                    let m_id = match_id.clone();
+                    tokio::spawn(async move {
+                        notify_relayer(&m_id, outcome_val, &r_hash, &sig).await;
+                    });
+                    
                     Ok(())
                 }
                 Err(e) => Err(::capnp::Error::failed(format!("Verifier error: {}", e))),
@@ -231,6 +273,8 @@ impl game_session_service::Server for GameSessionServiceImpl {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    dotenv::dotenv().ok();
+
     //TODO: check this
     // Telemetry relies on the MatchSession capnp interface now.
 

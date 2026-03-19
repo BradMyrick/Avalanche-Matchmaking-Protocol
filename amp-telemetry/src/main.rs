@@ -135,6 +135,7 @@ fn export_json(path: &str) -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    dotenv::dotenv().ok();
     let args: Vec<String> = std::env::args().collect();
 
     // ── Export mode: `amp-telemetry --export telemetry.bin` ──────────

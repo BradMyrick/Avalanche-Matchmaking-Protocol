@@ -35,3 +35,36 @@ services:
     depends_on:
       - anvil
       - amp-telemetry
+      - amp-relayer
+
+  amp-demo-gateway:
+    image: rust:latest
+    working_dir: /app/amp-demo-gateway
+    volumes:
+      - .:/app
+    command: "cargo run"
+    environment:
+      - AMP_HTTP_ADDR=0.0.0.0:50052
+      - AMP_ADDR=amp-server:50051
+      - CARGO_TARGET_DIR=/tmp/target
+    ports:
+      - "50052:50052"
+    depends_on:
+      - amp-server
+
+  amp-relayer:
+    image: rust:latest
+    working_dir: /app/amp-relayer
+    volumes:
+      - .:/app
+    command: "cargo run"
+    environment:
+      - PORT=3000
+      - FUJI_RPC_URL=http://anvil:8545
+      - RELAYER_PRIVATE_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - CONTRACT_SETTLEMENT=0xecD9C6C1727d610A7C0Aeb3a37A6278049791a24
+      - CARGO_TARGET_DIR=/tmp/target
+    ports:
+      - "3000:3000"
+    depends_on:
+      - anvil

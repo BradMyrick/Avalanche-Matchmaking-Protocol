@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "amp-telemetry",
+    "amp-server",
+    "amp-relayer",
+    "amp-demo-gateway",
+]
