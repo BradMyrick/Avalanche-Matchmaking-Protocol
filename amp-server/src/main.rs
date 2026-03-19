@@ -43,6 +43,9 @@ lazy_static! {
 }
 
 /// Represents a player in the matchmaking queue.
+use std::sync::atomic::{AtomicU64, Ordering};
+static NEXT_MATCH_ID: AtomicU64 = AtomicU64::new(0);
+
 struct QueueEntry {
     player_id: String,
     game_id: String,
@@ -248,7 +251,7 @@ impl user_session::Server for UserSessionImpl {
 
             if let Some(pos) = queue.iter().position(|e| e.game_id == game_id_str) {
                 let entry = queue.remove(pos);
-                let match_id = format!("match-{}", Uuid::new_v4());
+                let match_id = NEXT_MATCH_ID.fetch_add(1, Ordering::SeqCst).to_string();
 
                 let _ = entry.sender.send((match_id.clone(), player_id_clone.clone()));
 
@@ -320,9 +323,9 @@ impl game_session_service::Server for GameSessionServiceImpl {
     ) -> Promise<(), ::capnp::Error> {
         let params_reader = pry!(params.get());
         let game_id = params_reader.get_game_id();
-        let sig_bytes = pry!(params_reader.get_signed_challenge());
+        let sig_bytes = pry!(params_reader.get_signed_challenge()).to_vec();
         
-        let player_id = String::from_utf8_lossy(sig_bytes).to_string();
+        let player_id = String::from_utf8_lossy(&sig_bytes).to_string();
 
         Promise::from_future(async move {
             let relayer_rpc_addr = env::var("RELAYER_RPC_ADDR").unwrap_or_else(|_| "localhost:50052".to_string());
@@ -359,7 +362,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
                 ethers_core::types::U256::from(game_id).to_big_endian(&mut challenge_bytes);
                 let message_hash = ethers_core::utils::hash_message(ethers_core::utils::keccak256(&challenge_bytes));
                 
-                let signature = ethers_signers::Signature::try_from(sig_bytes)
+                let signature = ethers_core::types::Signature::try_from(sig_bytes.as_slice())
                     .map_err(|e| ::capnp::Error::failed(format!("Invalid signature format: {:?}", e)))?;
                 
                 if let Ok(recovered_addr) = signature.recover(message_hash) {
