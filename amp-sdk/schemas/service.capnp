@@ -16,9 +16,10 @@ using AmpTelemetry = import "amp_telemetry.capnp";
 interface GameSessionService {
     # The entry point for any client connecting to the system.
     
-    login @0 (signedChallenge :Signature) -> (session :UserSession);
-    # Authenticates the user. The signature must verify against a challenge (e.g. nonce).
-    # Returns a UserSession capability which holds the user's identity context.
+    login @0 (gameId :UInt64, signedChallenge :Signature) -> (session :UserSession);
+    # Authenticates the user for a specific game. 
+    # The signature must verify against a challenge (e.g. nonce) for the game's admin address.
+    # Returns a UserSession capability which holds the user's identity and game context.
 }
 
 interface UserSession {

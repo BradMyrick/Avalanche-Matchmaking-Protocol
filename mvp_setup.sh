@@ -13,7 +13,9 @@ echo "=========================================="
 # 1. Install Foundry dependencies and build contracts
 echo "[1/4] Building Smart Contracts..."
 cd contracts
-forge install OpenZeppelin/openzeppelin-contracts --no-git
+if [ ! -d "lib/openzeppelin-contracts" ]; then
+    forge install OpenZeppelin/openzeppelin-contracts --no-git
+fi
 forge clean
 forge build
 cd ..
