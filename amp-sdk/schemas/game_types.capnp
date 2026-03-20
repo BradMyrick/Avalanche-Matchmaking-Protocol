@@ -1,4 +1,8 @@
-@0xa1b2c3d4e5f60002;
+@0xbd245c6130b9589d;
+
+using Go = import "go.capnp";
+$Go.package("generated");
+$Go.import("amp-sdk/go/generated");
 
 using Rust = import "rust.capnp";
 $Rust.parentModule("game_types_capnp");

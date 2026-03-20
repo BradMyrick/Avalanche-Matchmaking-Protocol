@@ -84,11 +84,11 @@ cd ..
 
 # 7. Build C++ SDK Example
 echo "[7/8] Building C++ SDK Example..."
-cd amp-sdk/cpp_example
+cd amp-sdk/examples/cpp
 mkdir -p build && cd build
 cmake .. > /dev/null 2>&1
 make -j > /dev/null 2>&1
-cd ../../..
+cd ../../../..
 
 # 8. Run Multi-Match Flow
 echo "[8/8] Running Multi-Match Verification Flow..."
@@ -120,15 +120,15 @@ curl -s -X POST http://localhost:50053/demo-submit \
 # Match 1: C++ SDK
 echo "Testing Match 1 via C++ Native SDK..."
 export AMP_ADDR="127.0.0.1:50051"
-./amp-sdk/cpp_example/build/amp_test > cpp_test.log 2>&1 &
+./amp-sdk/examples/cpp/build/amp_test > cpp_test.log 2>&1 &
 CPP_PID=$!
 
 # Match 2: C# SDK
 echo "Testing Match 2 via C# .NET SDK..."
-cd amp-sdk/csharp_example
-dotnet run > ../../csharp_test.log 2>&1 &
+cd amp-sdk/examples/csharp
+dotnet run > ../../../csharp_test.log 2>&1 &
 CS_PID=$!
-cd ../..
+cd ../../../
 
 echo "Waiting for matches to settle..."
 sleep 25

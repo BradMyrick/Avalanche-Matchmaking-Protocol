@@ -57,14 +57,15 @@ out/
 lib/
 
 # --- cpp ---
-amp-sdk/cpp_example/build/
+amp-sdk/examples/cpp/build/
 
-# --- Generated Schemas ---
+# --- Generated Schemas (Legacy) ---
 amp-sdk/schemas/generated/
+dist/
 
 # --- C# ---
-amp-sdk/csharp_example/bin/
-amp-sdk/csharp_example/obj/
+amp-sdk/examples/csharp/bin/
+amp-sdk/examples/csharp/obj/
  
 build/
 

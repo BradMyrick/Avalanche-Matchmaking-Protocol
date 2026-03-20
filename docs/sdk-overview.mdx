@@ -1,31 +1,35 @@
 # SDK Overview
 
-AMP provides lightweight, high-performance SDKs for C++ and C# (Unity). These SDKs handle the complexities of Cap'n Proto RPC, capability management, and cryptographic signing so you can focus on building your game.
+AMP provides lightweight, high-performance SDKs for multiple languages. These SDKs handle the complexities of Cap'n Proto RPC, capability management, and cryptographic signing so you can focus on building your game.
 
 ## Supported Platforms
 
-| Language | Engine | Status | Repository |
+| Language | Typical Use Case | Status | Directory |
 | :--- | :--- | :--- | :--- |
-| **C++** | Unreal / Custom | Beta | `amp-sdk-cpp` |
-| **C#** | Unity / Godot | Beta | `amp-sdk-csharp` |
-| **Go** | Server-side / CLI | Alpha | `amp-sdk-go` |
+| **C++** | Unreal / Custom Engines | Beta | `amp-sdk/cpp` |
+| **C#** | Unity / Godot | Beta | `amp-sdk/csharp` |
+| **Go** | Server-side / CLI | Beta | `amp-sdk/go` |
+| **Python** | Data / AI / Research | Alpha | `amp-sdk/python` |
+| **Rust** | Performance Tools | Alpha | `amp-sdk/rust` |
 
 ---
 
 ## Installation
 
-### Unity (C#)
-1.  Download the `AMP.unitypackage` from the [Releases](https://github.com/BradMyrick/Avax-Build-Games-2026/releases) page.
-2.  Import it into your project.
-3.  Add the `AMPManager` prefab to your initial scene.
+The AMP SDK folder is organized by language, with generated bindings and examples for each.
+
+### Unity / .NET (C#)
+1.  Import the files from `amp-sdk/csharp/generated` into your project.
+2.  Consult the example in `amp-sdk/examples/csharp`.
 
 ### Native C++
-1.  Clone the SDK repository: `git clone https://github.com/BradMyrick/amp-sdk-cpp`.
-2.  Include the headers using CMake:
-    ```cmake
-    add_subdirectory(amp-sdk-cpp)
-    target_link_libraries(MyGame PRIVATE amp::sdk)
-    ```
+1.  Include the headers from `amp-sdk/cpp/generated`.
+2.  Use the `CMakeLists.txt` provided in `amp-sdk/examples/cpp` as a reference.
+
+### Other Languages
+- **Go**: Use the generated code in `amp-sdk/go/generated`.
+- **Python**: Use the schemas in `amp-sdk/python/generated` with `pycapnp`.
+- **Rust**: Use the library in `amp-sdk/rust`.
 
 ---
 

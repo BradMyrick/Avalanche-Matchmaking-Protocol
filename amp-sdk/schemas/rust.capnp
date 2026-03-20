@@ -1,4 +1,8 @@
-@0x9263cc22fa3ef040;
+@0xa32f5e91e36709d2;
+
+using Go = import "go.capnp";
+$Go.package("generated");
+$Go.import("amp-sdk/go/generated");
 
 # This file tells the Rust code generator how to name the generated files.
 # It is typically imported and used via the annotation.

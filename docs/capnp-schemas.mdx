@@ -47,9 +47,18 @@ AMP uses **Canonical Schemas** for the core protocol, but allows developers to d
 
 ## Compiling Schemas
 
-If you are a developer extending AMP, you can compile your custom `.capnp` files using the `capnpc` tool:
+The AMP SDK includes a helper script to generate bindings for all supported languages (C++, C#, Go, Python, Rust):
+
+```bash
+./amp-sdk/generate_bindings.sh
+```
+
+This will populate the `amp-sdk/<lang>/generated` directories with the appropriate source files.
+
+If you are adding custom `.capnp` files, you can compile them individually using the `capnpc` tool:
 
 ```bash
 capnpc -oc++ my_game_events.capnp
 capnpc -ocsharp my_game_events.capnp
+capnpc -ogo my_game_events.capnp
 ```

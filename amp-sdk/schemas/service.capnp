@@ -1,4 +1,8 @@
-@0xa1b2c3d4e5f60003;
+@0xf3a510e30737976e;
+
+using Go = import "go.capnp";
+$Go.package("generated");
+$Go.import("amp-sdk/go/generated");
 
 using Rust = import "rust.capnp";
 $Rust.parentModule("service_capnp");
