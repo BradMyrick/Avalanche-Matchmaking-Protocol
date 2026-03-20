@@ -1,4 +1,8 @@
-@0xbd672871f1169798;
+@0xd47a28e3519c3621;
+
+using Go = import "go.capnp";
+$Go.package("generated");
+$Go.import("amp-sdk/go/generated");
 
 interface RelayerService {
     getGameAdmin @0 (gameId :UInt64) -> (admin :Data);

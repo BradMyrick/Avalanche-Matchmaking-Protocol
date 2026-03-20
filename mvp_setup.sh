@@ -33,21 +33,19 @@ cd ..
 echo "[3/4] Building C++ and C# SDKs..."
 
 # C++ SDK
-cd amp-sdk/cpp_example
+cd amp-sdk/examples/cpp
 mkdir -p build && cd build
 cmake ..
 make
-cd ../../..
+cd ../../../
 
 # C# Schemas and SDK
-cd amp-sdk/schemas
-mkdir -p generated/csharp
-DOTNET_ROLL_FORWARD=Major capnp compile -I/usr/local/include -ocsharp:generated/csharp *.capnp
-cd ../..
+# We now use the unified generate_bindings.sh script
+./amp-sdk/generate_bindings.sh
 
-cd amp-sdk/csharp_example
+cd amp-sdk/examples/csharp
 dotnet build
-cd ../..
+cd ../../../
 
 
 
