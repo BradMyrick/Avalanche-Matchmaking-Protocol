@@ -2,10 +2,9 @@
 set -e
 
 # 1. Setup PATH so we can find 'go', 'capnp', etc.
-export PATH="/usr/local/go/bin:/home/kodr/local/bin:/home/kodr/.dotnet:/home/kodr/.dotnet/tools:/home/kodr/tools/cmake-3.28.1-linux-x86_64/bin:$PATH"
+# We include the absolute Go bin path to ensure capnpc-go is found.
+export PATH="/usr/local/go/bin:/home/kodr/local/bin:/home/kodr/.dotnet:/home/kodr/.dotnet/tools:/home/kodr/tools/cmake-3.28.1-linux-x86_64/bin:/home/kodr/go/bin:$PATH"
 export DOTNET_ROOT="/home/kodr/.dotnet"
-export GOPATH="$(go env GOPATH)"
-export PATH="$PATH:$GOPATH/bin"
 
 # 2. Configuration
 REPO_ROOT="/home/kodr/Repos/Avax-Build-Games-2026"
