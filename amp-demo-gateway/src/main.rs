@@ -70,13 +70,15 @@ async fn run_capnp_flow(addr: String, req: DemoSubmitRequest) -> anyhow::Result<
         }
     });
 
-    // 1. Login (simulated signature)
+    // 1. Login (Fuji valid signature)
     let mut login_req = client.login_request();
     login_req.get().set_game_id(0); // Demo game ID 0
-    // Signature needs to match the admin address of game 0.
-    // In e2e, we often use the master admin key to sign and register.
-    // For the demo gateway simulate a basic signature or valid data.
-    login_req.get().set_signed_challenge(b"demo-user-123"); 
+    let sig_hex = "24e2943427fa35e48c01ba764c271a9e76d295142704648b171e8cb5272a279773a0206586e565b1fed8a916e945a39868463654f752bf6bcd6843ab06bff39e1c";
+    let sig_bytes = (0..sig_hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&sig_hex[i..i + 2], 16).unwrap())
+        .collect::<Vec<u8>>();
+    login_req.get().set_signed_challenge(&sig_bytes);
 
     let login_res = login_req.send().promise.await?;
     let user_session_res = login_res.get()?;

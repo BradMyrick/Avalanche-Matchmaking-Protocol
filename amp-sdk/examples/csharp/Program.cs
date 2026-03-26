@@ -5,13 +5,21 @@ namespace AmpSdkExample
 {
     class Program
     {
+        private static byte[] HexToBytes(string hex) {
+            byte[] bytes = new byte[hex.Length / 2];
+            for (int i = 0; i < bytes.Length; i++) {
+                bytes[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+            }
+            return bytes;
+        }
+
         static async Task RunOpponent(string serverUrl, string gameIdStr)
         {
             await Task.Delay(500); // Wait half a second for player A to connect
             try
             {
                 using var client = new AmpClient(serverUrl);
-                var dummySig = new byte[] { 0x05, 0x06, 0x07, 0x08 };
+                var dummySig = HexToBytes("24e2943427fa35e48c01ba764c271a9e76d295142704648b171e8cb5272a279773a0206586e565b1fed8a916e945a39868463654f752bf6bcd6843ab06bff39e1c");
                 ulong gameId = 0; // Use game 0 as registered in e2e_verify.sh
                 if (await client.ConnectAsync(gameId, dummySig))
                 {
@@ -35,7 +43,7 @@ namespace AmpSdkExample
                 using var client = new AmpClient(serverUrl);
 
                 // 1. Connect and login via signature
-                var pseudoSignature = new byte[] { 0x01, 0x02, 0x03 };
+                var pseudoSignature = HexToBytes("24e2943427fa35e48c01ba764c271a9e76d295142704648b171e8cb5272a279773a0206586e565b1fed8a916e945a39868463654f752bf6bcd6843ab06bff39e1c");
                 ulong gameId = 0;
                 bool connected = await client.ConnectAsync(gameId, pseudoSignature);
                 if (!connected)

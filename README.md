@@ -16,9 +16,17 @@ AMP uses a capability-based security model. Once a client logs in, they receive 
 - **AMP Telemetry**: A binary logging service for high-throughput game analytics.
 
 ## 🛠 Setup & Verification
-Run the following scripts to build and verify the entire stack against a local Anvil node:
-1. `./mvp_setup.sh` - Installs dependencies and builds all components.
-2. `./e2e_verify.sh` - Runs the full end-to-end verification suite.
+Run the following to build and verify the entire stack against the Avalanche Fuji testnet:
+
+**Prerequisites:**
+- [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/)
+- [Foundry](https://book_getfoundry.sh/) (for `cast` commands)
+- .NET 8 SDK (for C# example)
+- Python 3 with `requests` (for Python example)
+
+**Run the Demo:**
+1. Configure your `.env` (see `.env.example`).
+2. Run `./Demo.sh` - This will start the backend via Docker, setup on-chain state, and run triple-SDK examples.
 
 ## 📄 License
 This protocol is licensed under the MIT License.

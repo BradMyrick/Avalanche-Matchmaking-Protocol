@@ -1,7 +1,8 @@
 #include "AmpClient.hpp"
 #include <iomanip>
 #include <iostream>
-
+#include <vector>
+#include <string>
 #include <thread>
 #include <unistd.h>
 
@@ -16,10 +17,23 @@ void printHex(const std::string &prefix, const std::vector<uint8_t> &data) {
   std::cout << std::dec << std::endl;
 }
 
+std::vector<uint8_t> getFujiSignature() {
+    std::string hex = "24e2943427fa35e48c01ba764c271a9e76d295142704648b171e8cb5272a279773a0206586e565b1fed8a916e945a39868463654f752bf6bcd6843ab06bff39e1c";
+    std::vector<uint8_t> bytes;
+    for (unsigned int i = 0; i < hex.length(); i += 2) {
+        std::string byteString = hex.substr(i, 2);
+        uint8_t byte = (uint8_t) strtol(byteString.c_str(), NULL, 16);
+        bytes.push_back(byte);
+    }
+    return bytes;
+}
+
+static std::string g_addr = "127.0.0.1:50051";
+
 void runOpponent() {
   usleep(500000); // Wait half a second for player A to connect
-  amp::AmpClient client2("127.0.0.1:50051");
-  std::vector<uint8_t> dummySig2 = {0x05, 0x06, 0x07, 0x08};
+  amp::AmpClient client2(g_addr);
+  std::vector<uint8_t> dummySig2 = getFujiSignature(); 
   if (client2.connect(dummySig2)) {
     std::cout << "[Player B] Connected to Matchmaker. Requesting match..."
               << std::endl;
@@ -27,12 +41,13 @@ void runOpponent() {
   }
 }
 
-int main() {
-  std::cout << "Starting AMP C++ Native Engine SDK Test..." << std::endl;
+int main(int argc, char** argv) {
+  if (argc > 1) g_addr = argv[1];
+  std::cout << "Starting AMP C++ Native Engine SDK Test on " << g_addr << "..." << std::endl;
 
-  amp::AmpClient client("127.0.0.1:50051");
+  amp::AmpClient client(g_addr);
   std::cout << "[Player A] Connecting to Matchmaker..." << std::endl;
-  std::vector<uint8_t> dummySig = {0x01, 0x02, 0x03, 0x04};
+  std::vector<uint8_t> dummySig = getFujiSignature();
   if (!client.connect(dummySig)) {
     std::cerr << "Failed to connect to matchmaker." << std::endl;
     return 1;
