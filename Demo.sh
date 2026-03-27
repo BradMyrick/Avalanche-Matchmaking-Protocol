@@ -26,51 +26,43 @@ if ! docker ps > /dev/null 2>&1; then
     DOCKER_CMD="sudo docker compose"
 fi
 
-$DOCKER_CMD up -d
-echo "Waiting for services to initialize (Building and Installing dependencies)..."
-
-wait_for_port() {
-    local port=$1
-    local name=$2
-    echo "Waiting for $name on port $port..."
-    while ! nc -z localhost $port >/dev/null 2>&1; do
-        sleep 5
-    done
-    echo "$name is READY."
-}
-
-wait_for_port 50052 "Relayer"
-wait_for_port 50051 "Server"
-wait_for_port 50053 "Gateway"
+echo "=================================================="
+echo " AMP PROTOCOL - LIVE MATCH SETTLEMENT DEMO"
+echo "=================================================="
+$DOCKER_CMD up -d > /dev/null
+echo "Backend Services: STARTED"
 
 echo "--------------------------------------------------"
-echo " [DEMO] PREPARING ON-CHAIN STATE..."
+echo " [PREP] INITIALIZING ON-CHAIN STATE..."
 echo "--------------------------------------------------"
-./scripts/setup_fuji.sh
+./scripts/setup_fuji.sh > /dev/null
+echo "Fuji Testnet State: INITIALIZED"
 
 echo "--------------------------------------------------"
-echo " [DEMO] RUNNING MULTI-SDK MATCH FLOW (DOCKER)"
+echo " [MATCH] STARTING MULTI-SDK WORKLOADS"
 echo "--------------------------------------------------"
 # Start the demo-clients container and wait for it to exit
 $DOCKER_CMD up demo-clients --exit-code-from demo-clients
 
-echo "--------------------------------------------------"
-echo " [DEMO] VERIFYING ON-CHAIN SETTLEMENT"
-echo "--------------------------------------------------"
-echo "Waiting for Settlement Transactions to clear..."
+echo ""
+echo "=================================================="
+echo " [FINAL] VERIFYING ON-CHAIN SETTLEMENT"
+echo "=================================================="
+echo "Settlement Transactions: PROCESSING..."
 sleep 20
 
 for i in {0..2}; do
     STATUS=$(cast call $AMP_REGISTRY_ADDRESS "matches(uint256)" $i --rpc-url $FUJI_RPC_URL | head -n 1)
     if [[ "$STATUS" == *"2"* ]]; then
-        echo "SUCCESS: Match $i settled on-chain!"
-        echo "View on Snowtrace: https://testnet.snowtrace.io/address/$AMP_REGISTRY_ADDRESS"
+        echo "Match $i: SETTLED (Registry: $AMP_REGISTRY_ADDRESS)"
+        echo "   -> https://testnet.snowtrace.io/address/$AMP_REGISTRY_ADDRESS"
     else
-        echo "FAILURE: Match $i status is not SETTLED (current status code: $STATUS)"
+        echo "Match $i: FAILED (Current Status: $STATUS)"
         exit 1
     fi
 done
 
-echo "--------------------------------------------------"
-echo " DEMO COMPLETED - ALL MATCHES SETTLED"
-echo "--------------------------------------------------"
+echo ""
+echo "=================================================="
+echo " DEMO COMPLETED SUCCESSFULLY"
+echo "=================================================="

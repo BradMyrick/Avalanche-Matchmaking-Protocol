@@ -6,7 +6,7 @@ services:
     volumes:
       - .:/app
     command: >
-      sh -c "apt-get update && apt-get install -y capnproto cmake libssl-dev pkg-config && cargo run --bin amp-telemetry"
+      sh -c "apt-get update && apt-get install -y libssl-dev && /app/target/release/amp-telemetry"
     environment:
       - CARGO_TARGET_DIR=/tmp/target
     ports:
@@ -18,8 +18,8 @@ services:
     volumes:
       - .:/app
     command: >
-      sh -c "apt-get update && apt-get install -y capnproto cmake libssl-dev pkg-config netcat-openbsd && 
-             cargo run"
+      sh -c "apt-get update && apt-get install -y libssl-dev netcat-openbsd && 
+             /app/target/release/amp-relayer"
     environment:
       - FUJI_RPC_URL=${FUJI_RPC_URL}
       - RELAYER_PRIVATE_KEY=${RELAYER_PRIVATE_KEY}
@@ -38,10 +38,10 @@ services:
     volumes:
       - .:/app
     command: >
-      sh -c "apt-get update && apt-get install -y capnproto cmake libssl-dev pkg-config netcat-openbsd && 
+      sh -c "apt-get update && apt-get install -y libssl-dev netcat-openbsd && 
              echo 'Waiting for Relayer...' &&
              until nc -z amp-relayer 50052; do sleep 2; done &&
-             cargo run"
+             /app/target/release/AMP-Server"
     environment:
       - AMP_ADDR=0.0.0.0:50051
       - VERIFIER_KEY=${VERIFIER_KEY}
@@ -60,10 +60,10 @@ services:
     volumes:
       - .:/app
     command: >
-      sh -c "apt-get update && apt-get install -y capnproto cmake libssl-dev pkg-config netcat-openbsd && 
+      sh -c "apt-get update && apt-get install -y libssl-dev netcat-openbsd && 
              echo 'Waiting for Server...' &&
              until nc -z amp-server 50051; do sleep 2; done &&
-             cargo run"
+             /app/target/release/amp-demo-gateway"
     environment:
       - AMP_HTTP_ADDR=${AMP_HTTP_ADDR}
       - AMP_ADDR=${AMP_ADDR}
@@ -85,11 +85,8 @@ services:
       - AMP_REGISTRY_ADDRESS=${AMP_REGISTRY_ADDRESS}
     # Wait for gateway to be ready, then run all 3 SDKs
     command: >
-      sh -c "apt-get update && apt-get install -y capnproto cmake libcapnp-dev python3 python3-requests build-essential pkg-config netcat-openbsd && 
-             dotnet tool install -g capnpc-csharp || true &&
-             export PATH=\"\${PATH}:\${HOME}/.dotnet/tools\" &&
-             mkdir -p /app/amp-sdk/schemas/generated/csharp &&
-             DOTNET_ROLL_FORWARD=Major capnp compile -I/app/amp-sdk/schemas --src-prefix=/app/amp-sdk/schemas -ocsharp:/app/amp-sdk/schemas/generated/csharp /app/amp-sdk/schemas/*.capnp &&
+      sh -c "apt-get update -qq && apt-get install -y -qq python3-requests netcat-openbsd libcapnp-dev > /dev/null && 
+             export PATH=\"\${PATH}:/root/.dotnet/tools\" &&
              /app/scripts/run_clients_docker.sh"
     depends_on:
       - amp-demo-gateway

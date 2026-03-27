@@ -49,7 +49,7 @@ namespace AmpSdkExample
                 if (!connected)
                 {
                     Console.WriteLine("Failed to connect.");
-                    return;
+                    Environment.Exit(1);
                 }
                 Console.WriteLine("[Player A] Connected & Logged in to AMP matchmaker.");
 

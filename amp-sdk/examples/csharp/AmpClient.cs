@@ -32,26 +32,37 @@ namespace AmpSdkExample
         /// </summary>
         public async Task<bool> ConnectAsync(ulong gameId, byte[] playerSignature)
         {
-            Console.WriteLine($"[AmpClient] Connecting to matchmaker at {_serverAddress} for game {gameId}...");
-            
-            try
+            int maxRetries = 5;
+            for (int i = 0; i < maxRetries; i++)
             {
-                var parts = _serverAddress.Split(':');
-                var host = parts[0];
-                var port = parts.Length > 1 ? int.Parse(parts[1]) : 50051;
+                try
+                {
+                    Console.WriteLine($"[AmpClient] Connecting to matchmaker at {_serverAddress} (Attempt {i+1}/{maxRetries})...");
+                    var parts = _serverAddress.Split(':');
+                    var host = parts[0];
+                    var port = parts.Length > 1 ? int.Parse(parts[1]) : 50051;
 
-                _rpcClient = new TcpRpcClient(host, port);
-                _sessionService = _rpcClient.GetMain<IGameSessionService>();
+                    // Resolve to IPv4 to prevent issues with IPv6 shadowing in Docker
+                    var addresses = System.Net.Dns.GetHostAddresses(host);
+                    var ipv4 = System.Linq.Enumerable.FirstOrDefault(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                    if (ipv4 != null) host = ipv4.ToString();
 
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                _userSession = await _sessionService.Login(gameId, playerSignature, cts.Token);
-                return _userSession != null;
+                    _rpcClient = new TcpRpcClient(host, port);
+                    _sessionService = _rpcClient.GetMain<IGameSessionService>();
+
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    _userSession = await _sessionService.Login(gameId, playerSignature, cts.Token);
+                    
+                    if (_userSession != null) return true;
+                }
+                catch (System.Exception ex)
+                {
+                    Console.WriteLine($"[AmpClient] Connect Attempt {i+1} Failed: {ex.Message}");
+                    _rpcClient?.Dispose();
+                    if (i < maxRetries - 1) await Task.Delay(2000);
+                }
             }
-            catch (System.Exception ex)
-            {
-                Console.WriteLine($"[AmpClient] Connect Error: {ex.Message}");
-                return false;
-            }
+            return false;
         }
 
         public async Task<string> RequestMatchAsync(string gameId)
