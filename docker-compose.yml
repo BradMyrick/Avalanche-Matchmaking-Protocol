@@ -1,39 +1,56 @@
 version: "3.9"
 services:
-  anvil:
-    image: ghcr.io/foundry-rs/foundry:latest
-    command: "anvil --host 0.0.0.0"
-    ports:
-      - "8545:8545"
-
   amp-telemetry:
     image: rust:latest
     working_dir: /app/amp-telemetry
     volumes:
       - .:/app
-    command: "cargo run --bin amp-telemetry"
+    command: >
+      sh -c "apt-get update && apt-get install -y libssl-dev && /app/target/release/amp-telemetry"
     environment:
-      # Isolate the target dir to avoid host conflicts
       - CARGO_TARGET_DIR=/tmp/target
     ports:
       - "4317:4317"
+
+  amp-relayer:
+    image: rust:latest
+    working_dir: /app/amp-relayer
+    volumes:
+      - .:/app
+    command: >
+      sh -c "apt-get update && apt-get install -y libssl-dev netcat-openbsd && 
+             /app/target/release/amp-relayer"
+    environment:
+      - FUJI_RPC_URL=${FUJI_RPC_URL}
+      - RELAYER_PRIVATE_KEY=${RELAYER_PRIVATE_KEY}
+      - CONTRACT_REGISTRY=${CONTRACT_REGISTRY}
+      - CONTRACT_SETTLEMENT=${CONTRACT_SETTLEMENT}
+      - RPC_PORT=${RPC_PORT}
+      - CARGO_TARGET_DIR=/tmp/target
+    ports:
+      - "${RPC_PORT}:${RPC_PORT}"
     depends_on:
-      - anvil
+      - amp-telemetry
 
   amp-server:
     image: rust:latest
     working_dir: /app/amp-server
     volumes:
       - .:/app
-    command: "cargo run"
+    command: >
+      sh -c "apt-get update && apt-get install -y libssl-dev netcat-openbsd && 
+             echo 'Waiting for Relayer...' &&
+             until nc -z amp-relayer 50052; do sleep 2; done &&
+             /app/target/release/AMP-Server"
     environment:
       - AMP_ADDR=0.0.0.0:50051
-      - VERIFIER_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - VERIFIER_KEY=${VERIFIER_KEY}
+      - RELAYER_RPC_ADDR=${RELAYER_RPC_ADDR}
+      - TELEMETRY_ADDR=${TELEMETRY_ADDR}
       - CARGO_TARGET_DIR=/tmp/target
     ports:
       - "50051:50051"
     depends_on:
-      - anvil
       - amp-telemetry
       - amp-relayer
 
@@ -42,29 +59,34 @@ services:
     working_dir: /app/amp-demo-gateway
     volumes:
       - .:/app
-    command: "cargo run"
+    command: >
+      sh -c "apt-get update && apt-get install -y libssl-dev netcat-openbsd && 
+             echo 'Waiting for Server...' &&
+             until nc -z amp-server 50051; do sleep 2; done &&
+             /app/target/release/amp-demo-gateway"
     environment:
-      - AMP_HTTP_ADDR=0.0.0.0:50052
-      - AMP_ADDR=amp-server:50051
+      - AMP_HTTP_ADDR=${AMP_HTTP_ADDR}
+      - AMP_ADDR=${AMP_ADDR}
       - CARGO_TARGET_DIR=/tmp/target
     ports:
-      - "50052:50052"
+      - "50053:50053"
     depends_on:
       - amp-server
 
-  amp-relayer:
-    image: rust:latest
-    working_dir: /app/amp-relayer
+  demo-clients:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    working_dir: /app
     volumes:
       - .:/app
-    command: "cargo run"
     environment:
-      - PORT=3000
-      - FUJI_RPC_URL=http://anvil:8545
-      - RELAYER_PRIVATE_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-      - CONTRACT_SETTLEMENT=0xecD9C6C1727d610A7C0Aeb3a37A6278049791a24
-      - CARGO_TARGET_DIR=/tmp/target
-    ports:
-      - "3000:3000"
+      - AMP_ADDR=amp-server:50051
+      - AMP_HTTP_ADDR=http://amp-demo-gateway:50053
+      - FUJI_RPC_URL=${FUJI_RPC_URL}
+      - AMP_REGISTRY_ADDRESS=${AMP_REGISTRY_ADDRESS}
+    # Wait for gateway to be ready, then run all 3 SDKs
+    command: >
+      sh -c "apt-get update -qq && apt-get install -y -qq python3-requests netcat-openbsd libcapnp-dev > /dev/null && 
+             export PATH=\"\${PATH}:/root/.dotnet/tools\" &&
+             /app/scripts/run_clients_docker.sh"
     depends_on:
-      - anvil
+      - amp-demo-gateway
