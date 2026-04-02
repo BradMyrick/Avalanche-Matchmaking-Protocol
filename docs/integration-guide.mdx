@@ -15,41 +15,42 @@ AMP is designed to be the fastest way to add secure, wagered matchmaking to your
 ### 1. Register Your Game
 Before players can use AMP with your game, you must register it on the `AMPRegistry` contract.
 
-1.  Go to the [AMP Dashboard](https://amp.avax.network) (or use our CLI).
-2.  Define your `GameConfig` (tick rate, max players, etc.).
-3.  Upload your `.capnp` schemas.
-4.  Submit the registration transaction. You will receive a `gameId`.
+1.  Use the **AMP CLI** to prepare your `GameConfig`.
+2.  Define your match criteria (tick rate, max players, MMR window).
+3.  Submit the registration transaction to the Avalanche C-Chain.
+4.  You will receive a unique `gameId` for your project.
 
 ### 2. Implement the SDK
-Add the AMP SDK to your game client.
+Add the appropriate AMP SDK to your game project.
 
 ```csharp
 // Example: Initializing the AMP Client in C#
-var ampClient = new AmpClient("fuji.amp.rpc.endpoint:5555");
+var ampClient = new AmpClient("fuji.amp.rpc.endpoint:50051");
 var session = await ampClient.LoginAsync(playerPrivateKey);
 ```
 
 ### 3. Matchmaking & Escalation
-When a player clicks "Find Match":
+When a player requests a match:
 
-1.  Call `session.RequestMatch(gameId)`.
-2.  The SDK will wait for a `MatchAssignment`.
-3.  Once found, the SDK receives a **Capability Token** specifically for that match.
+1.  Call `session.RequestMatch(gameId, rulesetId)`.
+2.  The server validates the request and places the player in the global queue.
+3.  Once a match is found, the SDK receives a **MatchAssignment** with the match ID and opponent details.
 
-### 4. Deterministic Looping
-During gameplay, ensure your state remains deterministic.
+### 4. Deterministic Outcomes
+During gameplay, ensure your state remains deterministic for verification.
 
-1.  Every 10-60 ticks, call `matchSession.StreamStateHash(currentHash)`.
+1.  The AMP Verifier Network monitors match progress.
 2.  At the end of the match, call `matchSession.SubmitFinalOutcome(winnerId, finalHash)`.
+3.  Successful results are committed on-chain for trustless settlement.
 
 ---
 
-## Day 1 Checklist
+## Integration Checklist
 
-- [ ] Game registered on Fuji.
+- [ ] Game registered on Fuji Testnet.
 - [ ] AMP SDK linked in project.
-- [ ] Player can "Login" and get a session.
-- [ ] Matchmaker successfully pairs two local clients.
-- [ ] Settlement contract reflects a test payout.
+- [ ] Player can "Login" and get a valid session.
+- [ ] Matchmaker successfully pairs two clients.
+- [ ] Settlement contract reflects verified outcomes.
 
-**Tip:** Use the **Local MVP Flow** (Anvil) to test your integration before deploying to Fuji. It's faster and doesn't require real network latency.
+**Tip:** Use the **Local Development Flow** (Anvil) to test your integration before deploying to the public testnet. It's faster and provides a isolated sandbox.

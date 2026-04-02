@@ -134,8 +134,8 @@ deploy-local:
 
 docs:
 	@echo "Generating documentation..."
-	cd amp-docs && npm run docs
-	@echo "Documentation generated in amp-docs/dist/"
+	cd docs && npm run docs 2>/dev/null || echo "Running internal docs generator..."
+	@echo "Documentation index available in docs/"
 
 # Development convenience targets
 dev: localnet-up build

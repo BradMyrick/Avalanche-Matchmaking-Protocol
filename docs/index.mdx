@@ -1,5 +1,14 @@
 # AMP – Avalanche Matchmaking Protocol
 
+![AMP Hero Banner](images/hero_banner.png)
+
+> [!NOTE]
+> **Avalanche Build Games 2026 Merit Award**  
+> ![AMP Grant Badge](images/grant_badge.png)  
+> We are proud to announce that the **Avalanche Matchmaking Protocol** was awarded a **$15,000.00 Merit Grant** for finishing in the **top 20 projects** in the prestigious **Avalanche Build Games 2026** competition.
+
+---
+
 AMP is a capability-based matchmaking protocol and off-chain verifier network designed to secure high-frequency Web3 game state without sacrificing sub-millisecond latency.
 
 By removing the reliance on centralized trust and spoofable shared tokens, AMP ensures fair play and irrefutable payouts for competitive Avalanche games. The protocol pairs players, verifies deterministic game transcripts off-chain, and commits settled outcomes directly to Avalanche.
@@ -22,31 +31,15 @@ AMP smart contracts are currently deployed on the Avalanche Fuji Testnet. You ca
 
 ---
 
-## MVP Quickstart (Local)
+## Integration Highlights
 
-You can run the full AMP MVP locally against Anvil to verify the entire flow end-to-end, without needing real Fuji testnet tokens.
+AMP provides native SDKs for all major game engines and languages:
 
-From the repository root:
-
-```bash
-# 1. Check dependencies (Foundry, Rust, Go, etc.)
-./mvp_dependency_checker.sh
-
-# 2. Setup the local Anvil node and build tools
-./mvp_setup.sh
-
-# 3. Run the end-to-end local test
-./test_mvp.sh
-```
-
-### What happens in `test_mvp.sh`?
-
-1. Starts **Anvil** locally.
-2. Deploys `AMPRegistry` and `AMPSettlement` contracts to Anvil.
-3. Starts the Rust `amp-telemetry` receiver for logging.
-4. Starts the Rust `amp-server` (matchmaker & verifier).
-5. Runs the **Multi-Language SDK Proofs** (simulated players using C++, C#, and Go).
-6. Validates the transcript, generates the verifier attestation, and settles the match on-chain.
+- **C++**: High-performance Unreal Engine integration.
+- **C#**: Native Unity support with full .NET 8 compatibility.
+- **Go**: Server-to-server matchmaking for high-frequency game backends.
+- **Python**: Easy scripting for AI agents and match simulations.
+- **Rust**: The core protocol and verifier implementation.
 
 ---
 
@@ -55,7 +48,6 @@ From the repository root:
 Navigate through the sidebar to learn more about how AMP works and how to integrate it into your game:
 
 - **Core Concept & Architecture**: Learn about the high-level design, trust model, and match transcripts.
-- **Integration & SDK**: End-to-end guides for integrating AMP into your game using our **Native C++, C#, Go, and Python SDKs**.
+- **Integration & SDK**: End-to-end guides for integrating AMP into your game using our native SDKs.
 - **Verifier & Infra**: Details on running verifiers and the settlement attestation process.
-- **GTM & Ecosystem**: Our business model, vision, and roadmap for AMP on Avalanche.
-- **Reference**: Smart contract references and Glossary.
+- **Reference**: Smart contract references, Glossary, and FAQ.

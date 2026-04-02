@@ -4,9 +4,9 @@ use std::net::SocketAddr;
 
 use anyhow::Result;
 use ethers::prelude::*;
-use tracing::{info, error};
+use tracing::info;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
-use futures::{FutureExt, StreamExt};
+use futures::FutureExt;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Auto-generated modules from Cap'n Proto schema
