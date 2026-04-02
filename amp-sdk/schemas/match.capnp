@@ -49,6 +49,14 @@ struct PlayerInfo {
     playerWallet    @2 :Address; # The wallet that will sign verify moves
     elo             @3 :Elo;
     region          @4 :Region;
+    # Enhanced fields for FlexMatch-style system
+    profileId       @5 :AmpId;       # Reference to full PlayerProfile
+    teamId          @6 :AmpId;       # Current party/team ID (if any)
+    loadoutId       @7 :AmpId;       # Active loadout ID
+    mmrRating       @8 :Float32;     # Current MMR (Match Making Rating)
+    mmrUncertainty  @9 :Float32;     # Rating confidence (TrueSkill/Glicko)
+    isReady         @10 :Bool;       # Ready status for match
+    preferences     @11 :Data;       # Serialized player preferences
 }
 
 # Match Request
@@ -58,6 +66,12 @@ struct GameMatchRequest {
     stake           @2 :PaymentInfo;
     playerInfo      @3 :PlayerInfo;
     optionalConfig  @4 :Data;      # Game-specific config blob (serialized Cap'n Proto)
+    # Enhanced fields for FlexMatch-style system
+    ruleSetId       @5 :AmpId;     # Reference to MatchmakingRuleSet
+    matchType       @6 :MatchType; # turnBased or realTime
+    queuePriority   @7 :UInt8;     # Queue priority (0-255)
+    creationTime    @8 :TimeStamp; # When request was created
+    timeoutMs       @9 :UInt64;    # Max wait time in milliseconds
 }
 
 # Match Assignment
@@ -66,9 +80,16 @@ struct MatchAssignment {
     opponents       @1 :List(PlayerInfo);
     gameConfig      @2 :GameCore.MatchConfig;      # Snapshot of agreed configuration
     assignedVerifier @3 :Address;  # The public key/address of the Verifier node
-    
+    # Enhanced fields for FlexMatch-style system
+    serverAddress   @4 :Text;      # Game server IP/URL
+    serverPort      @5 :UInt16;    # Game server port
+    connectionToken @6 :Data;      # Authentication token for game server
+    region          @7 :Region;    # Assigned region for match
+    ruleSetId       @8 :AmpId;     # Rule set used for matchmaking
+    matchQuality    @9 :Float32;   # Match quality score (0.0-1.0)
+    assignmentTime  @10 :TimeStamp;# When match was assigned
     # Capability for the match session will be defined in service.capnp
-    # session         @4 :MatchSession; 
+    # session         @11 :MatchSession; 
 }
 
 # Outcome
@@ -98,4 +119,39 @@ struct MatchTranscript {
     matchId         @0 :AmpId;
     events          @1 :List(GameCore.GameEvent);   # Serialized GameEvents
     finalStateHash  @2 :Data;
+}
+
+# Matchmaking Queue Statistics
+struct QueueStatistics {
+    gameId          @0 :AmpId;
+    ruleSetId       @1 :AmpId;
+    playersInQueue  @2 :UInt32;
+    estimatedWaitMs @3 :UInt64;
+    avgQueueTimeMs  @4 :UInt64;
+    matchesPerHour  @5 :UInt32;
+    successRate     @6 :Float32;    # % of successful matches
+    avgMatchQuality @7 :Float32;    # Average match quality score
+    regionBreakdown @8 :List(RegionStats);
+}
+
+struct RegionStats {
+    region          @0 :Region;
+    playerCount     @1 :UInt32;
+    avgLatencyMs    @2 :UInt32;
+}
+
+# Time Range for queries
+struct TimeRange {
+    startTime       @0 :TimeStamp;
+    endTime         @1 :TimeStamp;
+}
+
+# Team/Party Structure
+struct TeamInfo {
+    teamId          @0 :AmpId;
+    name            @1 :Text;
+    members         @2 :List(PlayerInfo);
+    captainId       @3 :AmpId;
+    rating          @4 :Float32;    # Team MMR
+    formationTime   @5 :TimeStamp;
 }

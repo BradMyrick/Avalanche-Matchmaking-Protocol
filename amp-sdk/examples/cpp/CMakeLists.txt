@@ -23,6 +23,12 @@ set(SCHEMA_FILES
     ${SDK_ROOT}/schemas/amp_telemetry.capnp
     ${SDK_ROOT}/schemas/game_types.capnp
     ${SDK_ROOT}/schemas/match.capnp
+    ${SDK_ROOT}/schemas/player_profile.capnp
+    ${SDK_ROOT}/schemas/matchmaking_rules.capnp
+    ${SDK_ROOT}/schemas/game_registry.capnp
+    ${SDK_ROOT}/schemas/inventory.capnp
+    ${SDK_ROOT}/schemas/tournament.capnp
+    ${SDK_ROOT}/schemas/security.capnp
     ${SDK_ROOT}/schemas/service.capnp
 )
 

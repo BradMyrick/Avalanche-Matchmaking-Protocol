@@ -17,6 +17,12 @@ using Signature = Match.Signature;
 using GameCore = import "game_core.capnp";
 using AmpTelemetry = import "amp_telemetry.capnp";
 
+using PlayerProfile = import "player_profile.capnp";
+using MatchmakingRules = import "matchmaking_rules.capnp";
+using Inventory = import "inventory.capnp";
+using Tournament = import "tournament.capnp";
+using Security = import "security.capnp";
+
 interface GameSessionService {
     # The entry point for any client connecting to the system.
     
@@ -65,4 +71,84 @@ interface MatchListener {
     # Called when the match is officially settled on-chain or by the verifier.
     
     onOpponentDisconnected @1 ();
+}
+
+# Extended Services for Avalanche Matchmaking Protocol
+interface ExtendedPlayerService extends(PlayerProfile.PlayerProfileService) {
+    # Extended player service with additional functionality
+}
+
+interface ExtendedMatchmakingService extends(MatchmakingRules.MatchmakingRuleService) {
+    # Extended matchmaking service with additional functionality
+}
+
+interface ExtendedInventoryService extends(Inventory.InventoryService) {
+    # Extended inventory service with additional functionality
+}
+
+interface ExtendedTournamentService extends(Tournament.TournamentService) {
+    # Extended tournament service with additional functionality
+}
+
+interface ExtendedSecurityService extends(Security.SecurityService) {
+    # Extended security service with additional functionality
+}
+
+interface ProtocolRegistryService {
+    # Service registry for protocol discovery and versioning
+    
+    registerGame @0 (gameInfo :GameRegistrationInfo, signature :Signature) -> (gameId :Match.AmpId);
+    # Register a new game with the protocol
+    
+    getServiceEndpoints @1 (serviceType :ServiceType) -> (endpoints :List(ServiceEndpoint));
+    # Get endpoints for specific service types
+    
+    getProtocolVersion @2 () -> (version :ProtocolVersion);
+    # Get current protocol version information
+}
+
+struct GameRegistrationInfo {
+    name            @0 :Text;
+    description     @1 :Text;
+    developer       @2 :Text;
+    website         @3 :Text;
+    supportedRegions @4 :List(Match.Region);
+    gameModes       @5 :List(GameModeInfo);
+    adminAddress    @6 :Match.Address;
+}
+
+struct GameModeInfo {
+    modeId          @0 :Match.AmpId;
+    name            @1 :Text;
+    description     @2 :Text;
+    minPlayers      @3 :UInt8;
+    maxPlayers      @4 :UInt8;
+    defaultRuleSet  @5 :Match.AmpId;
+}
+
+struct ServiceEndpoint {
+    serviceType     @0 :ServiceType;
+    url             @1 :Text;
+    chainId         @2 :UInt64;
+    version         @3 :Text;
+    loadBalancer    @4 :Text;
+}
+
+enum ServiceType {
+    matchmaking     @0;
+    playerProfiles  @1;
+    inventory       @2;
+    tournaments     @3;
+    security        @4;
+    telemetry       @5;
+    gameSession     @6;
+}
+
+struct ProtocolVersion {
+    major           @0 :UInt16;
+    minor           @1 :UInt16;
+    patch           @2 :UInt16;
+    supported       @3 :Bool;        # If client version is supported
+    minRequired     @4 :Bool;        # If client must upgrade
+    changelog       @5 :Text;
 }

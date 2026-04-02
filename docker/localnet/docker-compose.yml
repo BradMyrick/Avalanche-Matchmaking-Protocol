@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  avalanche:
+    image: avaplatform/avalanchego:latest
+    container_name: avalanche_localnet
+    ports:
+      - "9650:9650"
+      - "9651:9651"
+    volumes:
+      - ./config:/root/.avalanchego
+    command: |
+      /avalanchego/avalanchego
+      --http-host=0.0.0.0
+      --api-admin-enabled=true
+      --staking-enabled=false
+      --network-id=local
+      --chain-config-dir=/root/.avalanchego/chains
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9650/ext/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  amp-core:
+    build:
+      context: ../../amp-core
+      dockerfile: Dockerfile
+    container_name: amp_core
+    depends_on:
+      avalanche:
+        condition: service_healthy
+    ports:
+      - "9660:9660"
+    volumes:
+      - ../../amp-core:/app
+    environment:
+      - AVALANCHE_RPC_URL=http://avalanche:9650
+      - AMP_CHAIN_ID=amp-12345
+    command: ["/app/amp-core"]
+
+  # Example matchmaking service
+  matchmaking-example:
+    build:
+      context: ../../amp-examples/basic-matchmaking
+      dockerfile: Dockerfile
+    container_name: matchmaking_example
+    depends_on:
+      - amp-core
+    ports:
+      - "9670:9670"
+    environment:
+      - AMP_RPC_URL=http://amp-core:9660
+    command: ["npm", "start"]
+
+volumes:
+  avalanche_data:
+    driver: local

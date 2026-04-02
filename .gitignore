@@ -56,12 +56,20 @@ cache/
 out/
 lib/
 
-# --- cpp ---
-amp-sdk/examples/cpp/build/
+# ---- SDK Generated Bindings ----
+amp-sdk/cpp/generated/
+amp-sdk/csharp/generated/
+amp-sdk/go/generated/
+amp-sdk/python/generated/
+amp-sdk/rust/src/*.rs
 
-# --- Generated Schemas (Legacy) ---
-amp-sdk/schemas/generated/
+# --- Build Artifacts ---
+amp-sdk/examples/cpp/build/
+amp-sdk/examples/csharp/bin/
+amp-sdk/examples/csharp/obj/
 dist/
+build/
+.cache/
 
 # --- C# ---
 amp-sdk/examples/csharp/bin/
