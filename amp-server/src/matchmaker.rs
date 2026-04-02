@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_match_quality_perfect() {
-        use futures::FutureExt;
+        use futures_util::FutureExt;
         use tokio::sync::oneshot;
         let ruleset = StoredRuleSet {
             max_skill_diff: 300.0,

@@ -43,6 +43,7 @@ fn main() {
         .file(schema_dir.join("inventory.capnp"))
         .file(schema_dir.join("tournament.capnp"))
         .file(schema_dir.join("security.capnp"))
+        .file(schema_dir.join("rust.capnp"))
         .run()
         .expect("Failed to compile Cap'n Proto schemas. Is 'capnp' installed and in your PATH?");
 }
