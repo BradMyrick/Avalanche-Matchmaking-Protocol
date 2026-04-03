@@ -26,6 +26,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}/inventory.capnp", schema_dir_str);
     println!("cargo:rerun-if-changed={}/tournament.capnp", schema_dir_str);
     println!("cargo:rerun-if-changed={}/security.capnp", schema_dir_str);
+    println!("cargo:rerun-if-changed={}/rust.capnp", schema_dir_str);
 
     capnpc::CompilerCommand::new()
         .src_prefix(schema_dir_str)
@@ -43,6 +44,7 @@ fn main() {
         .file(schema_dir.join("inventory.capnp"))
         .file(schema_dir.join("tournament.capnp"))
         .file(schema_dir.join("security.capnp"))
+        .file(schema_dir.join("rust.capnp"))
         .run()
         .expect("Failed to compile Cap'n Proto schemas. Is 'capnp' installed and in your PATH?");
 }
