@@ -1,0 +1,26 @@
+{
+  "name": "Avalanche Matchmaking Protocol",
+  "description": "Any Engine. Any Language. Scale your game effortlessly with decentralized matchmaking.",
+  "logo": "https://avatars.githubusercontent.com/u/10452331?s=200&v=4",
+  "theme": "#E84142",
+  "sidebar": {
+    "Overview": [
+      "index",
+      "architecture",
+      "sdk-overview"
+    ],
+    "Guides": [
+      "integration-guide",
+      "match-transcripts",
+      "running-a-verifier"
+    ],
+    "Reference": [
+      "verifier-architecture",
+      "capnp-schemas",
+      "contracts-reference",
+      "roadmap",
+      "faq",
+      "glossary"
+    ]
+  }
+}

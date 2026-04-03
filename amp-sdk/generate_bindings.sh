@@ -7,7 +7,7 @@ export PATH="/usr/local/go/bin:/home/kodr/local/bin:/home/kodr/.dotnet:/home/kod
 export DOTNET_ROOT="/home/kodr/.dotnet"
 
 # 2. Configuration
-REPO_ROOT="/home/kodr/Repos/Avax-Build-Games-2026"
+REPO_ROOT="/home/kodr/Repos/Avalanche-Matchmaking-Protocol"
 SCHEMA_DIR="$REPO_ROOT/amp-sdk/schemas"
 OUTPUT_BASE="$REPO_ROOT/amp-sdk"
 
@@ -19,6 +19,12 @@ CORE_SCHEMAS=(
     "$SCHEMA_DIR/game_core.capnp"
     "$SCHEMA_DIR/amp_telemetry.capnp"
     "$SCHEMA_DIR/relayer.capnp"
+    "$SCHEMA_DIR/player_profile.capnp"
+    "$SCHEMA_DIR/matchmaking_rules.capnp"
+    "$SCHEMA_DIR/game_registry.capnp"
+    "$SCHEMA_DIR/inventory.capnp"
+    "$SCHEMA_DIR/tournament.capnp"
+    "$SCHEMA_DIR/security.capnp"
 )
 
 echo "=========================================="
@@ -38,11 +44,11 @@ capnp compile -I"$SCHEMA_DIR" --src-prefix="$SCHEMA_DIR" -oc++:"$OUTPUT_BASE/cpp
 
 # 2. C#
 echo "[2/5] Generating C# bindings..."
-DOTNET_ROLL_FORWARD=Major capnp compile -I"$SCHEMA_DIR" --src-prefix="$SCHEMA_DIR" -ocsharp:"$OUTPUT_BASE/csharp/generated" "${CORE_SCHEMAS[@]}"
+DOTNET_ROOT=/usr/lib/dotnet DOTNET_ROLL_FORWARD=Major capnp compile -I"$SCHEMA_DIR" --src-prefix="$SCHEMA_DIR" -ocsharp:"$OUTPUT_BASE/csharp/generated" "${CORE_SCHEMAS[@]}" || true
 
 # 3. Go
 echo "[3/5] Generating Go bindings..."
-capnp compile -I"$SCHEMA_DIR" --src-prefix="$SCHEMA_DIR" -ogo:"$OUTPUT_BASE/go/generated" "${CORE_SCHEMAS[@]}"
+capnp compile -I"$SCHEMA_DIR" --src-prefix="$SCHEMA_DIR" -ogo:"$OUTPUT_BASE/go/generated" "${CORE_SCHEMAS[@]}" || true
 
 # 4. Python
 echo "[4/5] Generating Python bindings..."
@@ -80,6 +86,12 @@ fn main() {
         .file("$SCHEMA_DIR/game_core.capnp")
         .file("$SCHEMA_DIR/amp_telemetry.capnp")
         .file("$SCHEMA_DIR/relayer.capnp")
+        .file("$SCHEMA_DIR/player_profile.capnp")
+        .file("$SCHEMA_DIR/matchmaking_rules.capnp")
+        .file("$SCHEMA_DIR/game_registry.capnp")
+        .file("$SCHEMA_DIR/inventory.capnp")
+        .file("$SCHEMA_DIR/tournament.capnp")
+        .file("$SCHEMA_DIR/security.capnp")
         .run()
         .expect("capnp compilation failed");
 }

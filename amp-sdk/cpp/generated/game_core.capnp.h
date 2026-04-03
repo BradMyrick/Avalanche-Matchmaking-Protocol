@@ -11,7 +11,7 @@
 
 #ifndef CAPNP_VERSION
 #error "CAPNP_VERSION is not defined, is capnp/generated-header-support.h missing?"
-#elif CAPNP_VERSION != 1000001
+#elif CAPNP_VERSION != 1002000
 #error "Version mismatch between generated code and library headers.  You must use the same version of the Cap'n Proto compiler and library."
 #endif
 
@@ -21,9 +21,9 @@ CAPNP_BEGIN_HEADER
 namespace capnp {
 namespace schemas {
 
-CAPNP_DECLARE_SCHEMA(bd0584aee30eb59f);
-CAPNP_DECLARE_SCHEMA(82dcfa892cbade38);
-CAPNP_DECLARE_SCHEMA(beca4c67b1c0ad05);
+CAPNP_DECLARE_SCHEMA(ee648d69b5f2594c);
+CAPNP_DECLARE_SCHEMA(ecb2685cef27197b);
+CAPNP_DECLARE_SCHEMA(fbb0e0e0fa8b6c36);
 
 }  // namespace schemas
 }  // namespace capnp
@@ -37,7 +37,7 @@ struct MatchConfig {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(bd0584aee30eb59f, 2, 2)
+    CAPNP_DECLARE_STRUCT_HEADER(ee648d69b5f2594c, 2, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -52,7 +52,7 @@ struct InputFrame {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(82dcfa892cbade38, 2, 2)
+    CAPNP_DECLARE_STRUCT_HEADER(ecb2685cef27197b, 2, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -67,7 +67,7 @@ struct GameEvent {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(beca4c67b1c0ad05, 2, 3)
+    CAPNP_DECLARE_STRUCT_HEADER(fbb0e0e0fa8b6c36, 2, 3)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE

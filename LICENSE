@@ -1,0 +1,30 @@
+AMP (Avalanche Matchmaking Protocol) Non-Commercial Source License
+Version 1.0, April 2026
+
+Copyright (c) 2026 Brad Myrick
+
+TERMS AND CONDITIONS
+
+1. Grant of License
+Subject to the terms and conditions of this License, the Copyright Holder hereby grants you a world-wide, royalty-free, non-exclusive license to use, study, copy, and modify the software source code for non-commercial purposes only.
+
+2. Non-Commercial Use Only
+"Non-commercial purposes" means use that is not intended for or directed toward commercial advantage or monetary compensation. This includes, but is not limited to:
+    a. Personal projects and experimentation.
+    b. Educational use in a classroom or academic setting.
+    c. Open-source projects that do not generate revenue or fees.
+
+3. Commercial Use Prohibited
+Any commercial use of this software is strictly prohibited without a separate, written commercial license agreement from the Copyright Holder. Commercial use includes, but is not limited to:
+    a. Using the software as part of a for-profit game, service, or product.
+    b. Charging fees for access to services powered by this software.
+    c. Using the software within a commercial entity for business operations.
+
+4. Attribution
+Redistributions of the source code or binary forms must retain the above copyright notice, this list of conditions, and the following disclaimer.
+
+5. No Warranty
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For commercial licensing inquiries, please contact the repository owner at:
+https://github.com/bradmyrick

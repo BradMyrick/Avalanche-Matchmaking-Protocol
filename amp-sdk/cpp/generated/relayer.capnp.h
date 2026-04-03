@@ -11,7 +11,7 @@
 
 #ifndef CAPNP_VERSION
 #error "CAPNP_VERSION is not defined, is capnp/generated-header-support.h missing?"
-#elif CAPNP_VERSION != 1000001
+#elif CAPNP_VERSION != 1002000
 #error "Version mismatch between generated code and library headers.  You must use the same version of the Cap'n Proto compiler and library."
 #endif
 
@@ -21,13 +21,13 @@ CAPNP_BEGIN_HEADER
 namespace capnp {
 namespace schemas {
 
-CAPNP_DECLARE_SCHEMA(88be01dcb8afca6a);
-CAPNP_DECLARE_SCHEMA(f3931fa09328b174);
-CAPNP_DECLARE_SCHEMA(be9bcd5307780616);
-CAPNP_DECLARE_SCHEMA(b5d2c3c59b28c8a9);
-CAPNP_DECLARE_SCHEMA(99ac6bbbb4a50a56);
-CAPNP_DECLARE_SCHEMA(cfc2a733c69b8675);
-CAPNP_DECLARE_SCHEMA(8c4ede972ef795c5);
+CAPNP_DECLARE_SCHEMA(bf96a8ce004be5ba);
+CAPNP_DECLARE_SCHEMA(9cd876bec863912d);
+CAPNP_DECLARE_SCHEMA(95ff7bc19beed23a);
+CAPNP_DECLARE_SCHEMA(dc996087776f548b);
+CAPNP_DECLARE_SCHEMA(dadee121559729fd);
+CAPNP_DECLARE_SCHEMA(c344a2b6a3339ab6);
+CAPNP_DECLARE_SCHEMA(d34678a07ecb91c0);
 
 }  // namespace schemas
 }  // namespace capnp
@@ -50,7 +50,7 @@ struct RelayerService {
 
   #if !CAPNP_LITE
   struct _capnpPrivate {
-    CAPNP_DECLARE_INTERFACE_HEADER(88be01dcb8afca6a)
+    CAPNP_DECLARE_INTERFACE_HEADER(bf96a8ce004be5ba)
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
   };
   #endif  // !CAPNP_LITE
@@ -64,7 +64,7 @@ struct RelayerService::GetGameAdminParams {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(f3931fa09328b174, 1, 0)
+    CAPNP_DECLARE_STRUCT_HEADER(9cd876bec863912d, 1, 0)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -79,7 +79,7 @@ struct RelayerService::GetGameAdminResults {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(be9bcd5307780616, 0, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(95ff7bc19beed23a, 0, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -94,7 +94,7 @@ struct RelayerService::GetCustodialAddressParams {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(b5d2c3c59b28c8a9, 1, 0)
+    CAPNP_DECLARE_STRUCT_HEADER(dc996087776f548b, 1, 0)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -109,7 +109,7 @@ struct RelayerService::GetCustodialAddressResults {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(99ac6bbbb4a50a56, 0, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(dadee121559729fd, 0, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -124,7 +124,7 @@ struct RelayerService::SubmitOutcomeParams {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(cfc2a733c69b8675, 1, 3)
+    CAPNP_DECLARE_STRUCT_HEADER(c344a2b6a3339ab6, 1, 3)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -139,7 +139,7 @@ struct RelayerService::SubmitOutcomeResults {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(8c4ede972ef795c5, 0, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(d34678a07ecb91c0, 0, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE

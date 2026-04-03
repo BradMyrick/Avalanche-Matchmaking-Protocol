@@ -1,0 +1,23 @@
+{
+  "state": {
+    "type": "memory"
+  },
+  "snowman": {
+    "blockCacheSize": 8192,
+    "blockCacheVerifierSize": 8192
+  },
+  "vm": {
+    "gossipAcceptedFrontierSize": 8192,
+    "gossipOnAcceptSize": 8192,
+    "registers": {
+      "consolidatedTx": {
+        "index": 0,
+        "fee": 0
+      }
+    }
+  },
+  "chain": {
+    "fee": 0,
+    "minFee": 0
+  }
+}

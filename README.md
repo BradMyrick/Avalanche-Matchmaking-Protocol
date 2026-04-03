@@ -1,48 +1,68 @@
-# AMP Protocol - Alpha Release
+# Avalanche Matchmaking Protocol (AMP)
 
-The AMP Protocol is a high-performance, capability-based matchmaking and settlement layer for gaming on Avalanche.
+![AMP Hero Banner](docs/images/hero_banner.png)
 
-## 🚀 Alpha Features
-- **Pure Cap'n Proto RPC**: High-performance, low-latency internal communication.
-- **Custodial Wallets**: Automatic signer derivation and gas funding for every game studio.
-- **On-Chain Verification**: Real-time validation of game registry and verifier permissions.
-- **Binary Telemetry**: Efficient binary logging of match events.
+### Any Engine. Any Language. Trustless Settlement.
 
-## 🏗 Architecture
-AMP uses a capability-based security model. Once a client logs in, they receive a `UserSession` capability, which allows them to request matches. Upon match assignment, they receive a `MatchSession` which is the ONLY way to emit events or submit telemetry for that specific match.
-
-- **AMP Server**: The matchmaker and game session coordinator.
-- **AMP Relayer**: The bridge to Avalanche, handling custodial signers and gas auto-funding.
-- **AMP Telemetry**: A binary logging service for high-throughput game analytics.
-
-## 🛠 Setup & Verification
-Run the following to build and verify the entire stack against the Avalanche Fuji testnet:
-
-**Prerequisites:**
-- [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/)
-- [Foundry](https://book_getfoundry.sh/) (for `cast` commands)
-- .NET 8 SDK (for C# example)
-- Python 3 with `requests` (for Python example)
-
-**Run the Demo:**
-1. Configure your `.env` (see `.env.example`).
-2. Run `./Demo.sh` - This will start the backend via Docker, setup on-chain state, and run triple-SDK examples.
-
-## 📄 License
-This protocol is licensed under the MIT License.
+AMP is a decentralized, high-performance matchmaking protocol built on Avalanche. It provides game developers with enterprise-grade matchmaking capabilities—similar to AWS FlexMatch—but with the added security and transparency of on-chain verifiers and cryptographically settled outcomes.
 
 ---
 
-## 📖 Documentation
+## 🏆 Award Winning Technology
 
-For full technical documentation, architecture deep-dives, integration guides, and contract references, please visit our official documentation site:
+![AMP Grant Badge](docs/images/grant_badge.png)
 
-### 👉 [https://docs.page/BradMyrick/Avax-Build-Games-2026](https://docs.page/BradMyrick/Avax-Build-Games-2026)
+AMP was awarded a **$15,000.00 Merit Grant** for placing in the **top 20 projects** of the **Avalanche Build Games 2026**. This recognition highlights our commitment to building the future of competitive gaming on the Avalanche C-Chain.
 
 ---
 
-## 🔗 Project Links
+## Key Features
 
-*   **[Demo Website](./demo-website/README.md)**: Visualizing the match flow.
-*   **[Trace Viewer](./trace-viewer/README.md)**: UI for parsing `amp-telemetry` JSON traces.
-*   **[GitHub Repository](https://github.com/BradMyrick/Avax-Build-Games-2026)**: Source code and issue tracking.
+*   **⚡ Sub-Millisecond Latency**: Powered by Cap'n Proto RPC, ensuring that matchmaking doesn't slow down your game's real-time action.
+*   **🛡️ Trustless Settlement**: Off-chain verifiers process deterministic match transcripts and commit outcome attestations directly to Avalanche smart contracts.
+*   **📊 MMR & Glicko-2 Support**: Advanced player skill tracking built directly into the SDKs for fair and balanced matches.
+*   **🌍 Region-Aware Matching**: Intelligent player grouping based on geographic latency to minimize lag.
+*   **🔗 Unified Schema**: A single Cap'n Proto schema source generates native bindings for **Go, Rust, C++, C#, and Python**.
+
+---
+
+## Architecture Overview
+
+AMP consists of three primary layers:
+
+1.  **On-Chain (Solatify/Foundry)**: `AMPRegistry` and `AMPSettlement` contracts handle game registration and prize escrow/payouts.
+2.  **Verifier Network (Rust)**: High-performance nodes that perform matchmaking and validate match transcripts.
+3.  **Client SDKs**: Native libraries for Unity (C#), Unreal (C++), Go, and Python to easily integrate AMP into any game engine.
+
+```
+AMP/
+├── amp-core/          # Core protocol logic and VM
+├── amp-server/        # Matchmaker & Verifier implementation
+├── amp-sdk/           # Multi-language SDKs & Schemas
+├── amp-relayer/       # On-chain settlement bridge
+└── amp-telemetry/     # Match state and performance monitoring
+```
+
+---
+
+## Getting Started
+
+Visit our [Full Documentation](https://docs.page/BradMyrick/Avax-Build-Games-2026) for comprehensive integration guides, API references, and architecture details.
+
+### Native Integration
+
+AMP provides dedicated SDKs to simplify the integration of complex matchmaking into your game project:
+
+```bash
+# Example: Adding the Go SDK
+go get github.com/avalanche-matchmaking-protocol/amp-sdk/go
+```
+
+---
+
+## License
+
+AMP is licensed under the **AMP Non-Commercial Source License**.  
+Personal and educational use is permitted for free. **Commercial use requires a separate license agreement.**
+
+See the [LICENSE](LICENSE) file for the full terms or contact the repository owner for commercial inquiries.
