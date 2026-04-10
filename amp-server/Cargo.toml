@@ -8,20 +8,21 @@ tokio = { version = "1.0", features = ["full"] }
 capnp = "0.19"
 capnp-rpc = "0.19"
 ethers-core = "2.0"
-tokio-util = { version = "0.7.18", features = ["compat"] }
+tokio-util = { version = "0.7", features = ["compat", "rt"] }
 anyhow = "1.0.100"
 uuid = { version = "1.20.0", features = ["v4"] }
 futures-util = "0.3.32"
 ethers-signers = "2.0.14"
 lazy_static = "1.5.0"
-ws_stream_tungstenite = "0.15.0"
-async-tungstenite = { version = "0.29", features = ["tokio-runtime"] }
 amp-telemetry = { path = "../amp-telemetry" }
 tracing = "0.1.44"
 tracing-subscriber = "0.3"
-reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+bincode = "1.3"
+sled = "0.34"
+thiserror = "2"
+hex = "0.4"
 dotenv = "0.15"
+
 [build-dependencies]
 capnpc = "0.19"
