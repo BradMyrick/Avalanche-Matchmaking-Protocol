@@ -4,8 +4,11 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+#[allow(dead_code)]
 const CF_PLAYERS: &str = "players";
+#[allow(dead_code)]
 const CF_RULESETS: &str = "rulesets";
+#[allow(dead_code)]
 const CF_MATCHES: &str = "matches";
 
 #[derive(Clone)]
@@ -33,6 +36,7 @@ impl Persistence {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn load<T: DeserializeOwned>(
         &self,
         cf: &str,
@@ -45,6 +49,7 @@ impl Persistence {
         }
     }
 
+    #[allow(dead_code)]
     pub fn delete(&self, cf: &str, key: &str) -> Result<()> {
         let tree = self.db.open_tree(cf)?;
         tree.remove(key.as_bytes())?;

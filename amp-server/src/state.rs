@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 
 use crate::persistence::Persistence;
 
@@ -347,6 +347,7 @@ pub struct QueueEntry {
     pub game_id: String,
     pub ruleset_id: String,
     pub mmr: f32,
+    #[allow(dead_code)]
     pub mmr_uncertainty: f32,
     pub region: String,
     pub preferred_role: String,
@@ -418,34 +419,36 @@ impl InnerState {
     }
 
     pub fn persist_player(&self, id: &str, profile: &StoredPlayerProfile) {
-        if let Some(ref p) = self.persistence {
-            if let Err(e) = p.save("players", id, profile) {
-                warn!(target: "persist", "Failed to persist player {}: {}", id, e);
-            }
+        if let Some(ref p) = self.persistence
+            && let Err(e) = p.save("players", id, profile)
+        {
+            warn!(target: "persist", "Failed to persist player {}: {}", id, e);
         }
     }
 
+    #[allow(dead_code)]
     pub fn persist_ruleset(&self, id: &str, ruleset: &StoredRuleSet) {
-        if let Some(ref p) = self.persistence {
-            if let Err(e) = p.save("rulesets", id, ruleset) {
-                warn!(target: "persist", "Failed to persist ruleset {}: {}", id, e);
-            }
+        if let Some(ref p) = self.persistence
+            && let Err(e) = p.save("rulesets", id, ruleset)
+        {
+            warn!(target: "persist", "Failed to persist ruleset {}: {}", id, e);
         }
     }
 
     pub fn persist_match(&self, id: &str, m: &ActiveMatch) {
-        if let Some(ref p) = self.persistence {
-            if let Err(e) = p.save("matches", id, m) {
-                warn!(target: "persist", "Failed to persist match {}: {}", id, e);
-            }
+        if let Some(ref p) = self.persistence
+            && let Err(e) = p.save("matches", id, m)
+        {
+            warn!(target: "persist", "Failed to persist match {}: {}", id, e);
         }
     }
 
+    #[allow(dead_code)]
     pub fn delete_match(&self, id: &str) {
-        if let Some(ref p) = self.persistence {
-            if let Err(e) = p.delete("matches", id) {
-                warn!(target: "persist", "Failed to delete match {}: {}", id, e);
-            }
+        if let Some(ref p) = self.persistence
+            && let Err(e) = p.delete("matches", id)
+        {
+            warn!(target: "persist", "Failed to delete match {}: {}", id, e);
         }
     }
 }

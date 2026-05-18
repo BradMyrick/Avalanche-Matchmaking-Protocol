@@ -28,4 +28,9 @@ struct MatchResult {
     std::string opponent_id;
 };
 
+struct VerifierResult {
+    std::string match_id;
+    std::vector<uint8_t> signature;
+};
+
 } // namespace amp

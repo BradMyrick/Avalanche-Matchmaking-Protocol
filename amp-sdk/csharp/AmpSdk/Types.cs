@@ -25,4 +25,9 @@ public record MatchResult {
     public string OpponentId { get; init; } = "";
 }
 
+public record VerifierResult {
+    public string MatchId { get; init; } = "";
+    public byte[] Signature { get; init; } = Array.Empty<byte>();
+}
+
 }

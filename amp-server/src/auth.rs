@@ -1,21 +1,22 @@
+use crate::state::now_ns;
 use anyhow::{Context, Result};
-use ethers_core::types::{Address, Signature, H256};
+use ethers_core::types::{Address, H256, Signature};
 use ethers_core::utils::hash_message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::warn;
 
-use crate::state::now_ns;
-
+#[allow(dead_code)]
 const CHALLENGE_TTL_NS: u64 = 300_000_000_000;
 
+#[allow(dead_code)]
 pub struct AuthChallenge {
     pub message: Vec<u8>,
     pub created_at: u64,
     pub game_id: u64,
 }
 
+#[allow(dead_code)]
 pub struct AuthService {
     challenges: Arc<RwLock<HashMap<String, AuthChallenge>>>,
 }
@@ -27,6 +28,7 @@ impl AuthService {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn create_challenge(&self, game_id: u64) -> Vec<u8> {
         let nonce = uuid::Uuid::new_v4().to_string();
         let message = format!("AMP_AUTH:{}:{}", game_id, nonce);
@@ -57,10 +59,12 @@ impl AuthService {
         Ok(address)
     }
 
+    #[allow(dead_code)]
     pub async fn cleanup_expired(&self) {
         let now = now_ns();
         let mut challenges = self.challenges.write().await;
-        challenges.retain(|_, c| now.saturating_sub(c.created_at) < CHALLENGE_TTL_NS);
+        challenges
+            .retain(|_, c| now.saturating_sub(c.created_at) < CHALLENGE_TTL_NS);
     }
 }
 

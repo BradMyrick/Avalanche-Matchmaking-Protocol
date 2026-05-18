@@ -10,11 +10,10 @@ documentation = "https://docs.amp.avalanche.dev"
 
 [features]
 default = ["serde"]
-wasm = ["capnp-wasm", "js-sys", "web-sys"]
 
 [dependencies]
 capnp = "0.19"
-capnpc = "0.19"
+capnp-rpc = "0.19"
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
 thiserror = "1.0"
@@ -22,14 +21,9 @@ async-trait = "0.1"
 tracing = "0.1"
 bytes = "1.5"
 hex = "0.4"
-
-# Avalanche dependencies
-avalanche-types = { git = "https://github.com/ava-labs/avalanche-types-rs", optional = true }
-
-# For WASM support
-capnp-wasm = { version = "0.19", optional = true }
-js-sys = { version = "0.3", optional = true }
-web-sys = { version = "0.3", optional = true }
+tokio = { version = "1.35", features = ["net", "rt", "macros", "time", "io-util"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+futures = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1.35", features = ["full"] }

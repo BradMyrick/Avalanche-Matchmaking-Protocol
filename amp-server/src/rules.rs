@@ -1,9 +1,8 @@
 use crate::state::{
-    now_ms, AvoidanceParams, ConnectionQualityParams, InventoryParams,
-    LanguageParams, LatencyParams, MatchQualityDetail, PartyParams,
-    PreferenceParams, QueueEntry, RecentMatchesParams, RegionParams,
-    RuleParams, RuleType, ScheduleParams, SkillDecayParams, SkillParams,
-    StoredBackfillPolicy, StoredRule, StoredRuleSet, TeamBalanceParams,
+    AvoidanceParams, ConnectionQualityParams, LanguageParams, LatencyParams,
+    MatchQualityDetail, PreferenceParams, QueueEntry, RegionParams, RuleParams,
+    RuleType, SkillDecayParams, SkillParams, StoredBackfillPolicy, StoredRule,
+    StoredRuleSet, TeamBalanceParams, now_ms,
 };
 
 pub struct RuleEvaluationResult {
@@ -55,17 +54,18 @@ pub fn evaluate_rules(
         total_weight += rule.weight;
     }
 
-    if let Some(ref backfill) = ruleset.backfill {
-        if backfill.enabled && max_queue_duration > backfill.max_time_ms {
-            apply_backfill(
-                &mut quality,
-                backfill,
-                entry_a,
-                entry_b,
-                effective_skill_diff,
-            );
-            hard_pass = true;
-        }
+    if let Some(ref backfill) = ruleset.backfill
+        && backfill.enabled
+        && max_queue_duration > backfill.max_time_ms
+    {
+        apply_backfill(
+            &mut quality,
+            backfill,
+            entry_a,
+            entry_b,
+            effective_skill_diff,
+        );
+        hard_pass = true;
     }
 
     if total_weight > 0.0 {
@@ -85,11 +85,12 @@ fn compute_effective_skill_diff(
 ) -> f32 {
     let base = ruleset.max_skill_diff;
     for rule in &ruleset.rules {
-        if let RuleParams::Skill(sp) = &rule.params {
-            if sp.time_decay && sp.decay_rate > 0.0 {
-                let minutes = queue_duration_ms as f32 / 60_000.0;
-                return base + sp.decay_rate * minutes * base;
-            }
+        if let RuleParams::Skill(sp) = &rule.params
+            && sp.time_decay
+            && sp.decay_rate > 0.0
+        {
+            let minutes = queue_duration_ms as f32 / 60_000.0;
+            return base + sp.decay_rate * minutes * base;
         }
     }
     base
@@ -154,7 +155,7 @@ fn evaluate_single_rule(
 }
 
 fn evaluate_skill(
-    params: &SkillParams,
+    _params: &SkillParams,
     a: &QueueEntry,
     b: &QueueEntry,
     effective_max: f32,

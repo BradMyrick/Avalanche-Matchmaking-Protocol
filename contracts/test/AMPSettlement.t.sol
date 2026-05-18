@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.33;
 
 import "forge-std/Test.sol";
 import "../src/AMPSettlement.sol";
 import "../src/AMPRegistry.sol";
 import "../src/AMPTypes.sol";
+import "openzeppelin-contracts/contracts/utils/Pausable.sol";
 
 contract AMPSettlementTest is Test {
     AMPRegistry public registry;
@@ -12,6 +13,7 @@ contract AMPSettlementTest is Test {
     address public admin = address(0x10);
     address public playerA = address(0x20);
     address public playerB = address(0x30);
+    address public nonPlayer = address(0x50);
     uint256 public verifierPrivKey = 0x1234;
     address public verifierPubKey;
 
@@ -19,18 +21,14 @@ contract AMPSettlementTest is Test {
         registry = new AMPRegistry(address(0));
         settlement = new AMPSettlement(address(registry), address(0));
         registry.setSettlement(address(settlement));
-
         verifierPubKey = vm.addr(verifierPrivKey);
-
         vm.deal(playerA, 10 ether);
         vm.deal(playerB, 10 ether);
     }
 
-    function testFullAsyncFlow() public {
-        // 1. Register Game
+    function _setupAsyncGameAndMatch() internal returns (uint256 matchId) {
         address[] memory verifiers = new address[](1);
         verifiers[0] = verifierPubKey;
-
         vm.prank(admin);
         uint256 gameId = registry.registerGame(
             AMPTypes.SettlementMode.ASYNC_VERIFIER,
@@ -39,68 +37,63 @@ contract AMPSettlementTest is Test {
             address(0),
             address(0)
         );
-
-        // 2. Create Match
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 1 ether}(gameId, 1 ether);
-
-        // 3. Join Match
+        matchId = registry.createMatch{value: 1 ether}(gameId, 1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 1 ether}(matchId);
-
-        // 4. Verifier signs outcome
-        AMPTypes.OutcomeCode outcome = AMPTypes.OutcomeCode.WIN_A;
-        bytes32 transcriptHash = bytes32(uint256(0x5678));
-
-        bytes32 structHash = keccak256(abi.encode(matchId, outcome, transcriptHash));
-        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", structHash));
-
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(verifierPrivKey, digest);
-        bytes memory signature = abi.encodePacked(r, s, v);
-
-        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
-            matchId: matchId,
-            outcome: outcome,
-            transcriptHash: transcriptHash,
-            signature: signature
-        });
-
-        // 5. Submit Async Result
-        uint256 playerABalanceBefore = playerA.balance;
-        uint256 playerBBalanceBefore = playerB.balance;
-        uint256 feeBalanceBefore = registry.feeBalances(address(0));
-
-        settlement.submitAsyncResult(matchId, result);
-
-        // 6. Verify Settlement
-        (, AMPTypes.OutcomeCode actualOutcome, , ) = settlement.settlements(matchId);
-        assertEq(uint(actualOutcome), uint(outcome));
-
-        // Payout: Total pool = 2 ether. Fee = 1% = 0.02 ether. Payout = 1.98 ether.
-        assertEq(playerA.balance, playerABalanceBefore + 1.98 ether);
-        assertEq(playerB.balance, playerBBalanceBefore); // B lost
-        assertEq(registry.feeBalances(address(0)), feeBalanceBefore + 0.02 ether);
     }
 
-    function testResolveDispute() public {
+    function _signResult(
+        uint256 matchId,
+        AMPTypes.OutcomeCode outcome,
+        bytes32 transcriptHash,
+        uint256 privKey
+    ) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(matchId, outcome, transcriptHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _setupRTGameAndMatch() internal returns (uint256 matchId) {
         address[] memory verifiers = new address[](1);
         verifiers[0] = verifierPubKey;
-
         vm.prank(admin);
         uint256 gameId = registry.registerGame(
             AMPTypes.SettlementMode.RT_HASH_AGREE,
             verifiers,
             1 ether,
             address(0),
-            admin // admin is arbiter
+            admin
         );
-
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 1 ether}(gameId, 1 ether);
-
+        matchId = registry.createMatch{value: 1 ether}(gameId, 1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 1 ether}(matchId);
+    }
 
+    function testFullAsyncFlow() public {
+        uint256 matchId = _setupAsyncGameAndMatch();
+        AMPTypes.OutcomeCode outcome = AMPTypes.OutcomeCode.WIN_A;
+        bytes32 transcriptHash = bytes32(uint256(0x5678));
+        bytes memory signature = _signResult(matchId, outcome, transcriptHash, verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId,
+            outcome: outcome,
+            transcriptHash: transcriptHash,
+            signature: signature
+        });
+        uint256 playerABalanceBefore = playerA.balance;
+        uint256 feeBalanceBefore = registry.feeBalances(address(0));
+        settlement.submitAsyncResult(matchId, result);
+        (, AMPTypes.OutcomeCode actualOutcome, , ) = settlement.settlements(matchId);
+        assertEq(uint(actualOutcome), uint(outcome));
+        assertEq(playerA.balance, playerABalanceBefore + 1.98 ether);
+        assertEq(registry.feeBalances(address(0)), feeBalanceBefore + 0.02 ether);
+    }
+
+    function testResolveDispute() public {
+        uint256 matchId = _setupRTGameAndMatch();
         AMPTypes.RealTimeHashResult memory resultA = AMPTypes.RealTimeHashResult({
             matchId: matchId,
             outcome: AMPTypes.OutcomeCode.WIN_A,
@@ -111,18 +104,194 @@ contract AMPSettlementTest is Test {
             outcome: AMPTypes.OutcomeCode.WIN_B,
             transcriptHash: bytes32(uint256(2))
         });
-
         vm.prank(playerA);
         settlement.submitRealTimeHashResult(matchId, resultA);
-
         vm.prank(playerB);
         settlement.submitRealTimeHashResult(matchId, resultB);
-
         uint256 playerBBalanceBefore = playerB.balance;
-        
         vm.prank(admin);
         settlement.resolveDispute(matchId, AMPTypes.OutcomeCode.WIN_B);
-
         assertEq(playerB.balance, playerBBalanceBefore + 1.98 ether);
+        (, AMPTypes.OutcomeCode outcome, , ) = settlement.settlements(matchId);
+        assertEq(uint(outcome), uint(AMPTypes.OutcomeCode.WIN_B));
+    }
+
+    function testDrawOutcome() public {
+        uint256 matchId = _setupAsyncGameAndMatch();
+        AMPTypes.OutcomeCode outcome = AMPTypes.OutcomeCode.DRAW;
+        bytes32 transcriptHash = bytes32(uint256(0xabcd));
+        bytes memory signature = _signResult(matchId, outcome, transcriptHash, verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId,
+            outcome: outcome,
+            transcriptHash: transcriptHash,
+            signature: signature
+        });
+        uint256 balanceA = playerA.balance;
+        uint256 balanceB = playerB.balance;
+        settlement.submitAsyncResult(matchId, result);
+        assertEq(playerA.balance, balanceA + 0.99 ether);
+        assertEq(playerB.balance, balanceB + 0.99 ether);
+    }
+
+    function testCancelledOutcome() public {
+        uint256 matchId = _setupAsyncGameAndMatch();
+        AMPTypes.OutcomeCode outcome = AMPTypes.OutcomeCode.CANCELLED;
+        bytes32 transcriptHash = bytes32(uint256(0xef01));
+        bytes memory signature = _signResult(matchId, outcome, transcriptHash, verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId,
+            outcome: outcome,
+            transcriptHash: transcriptHash,
+            signature: signature
+        });
+        uint256 balanceA = playerA.balance;
+        uint256 balanceB = playerB.balance;
+        settlement.submitAsyncResult(matchId, result);
+        assertEq(playerA.balance, balanceA + 1 ether);
+        assertEq(playerB.balance, balanceB + 1 ether);
+        assertEq(registry.feeBalances(address(0)), 0);
+    }
+
+    function testInvalidVerifierSignature() public {
+        uint256 matchId = _setupAsyncGameAndMatch();
+        uint256 wrongPrivKey = 0xdeadbeef;
+        bytes memory signature = _signResult(matchId, AMPTypes.OutcomeCode.WIN_A, bytes32(uint256(0x11)), wrongPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.WIN_A,
+            transcriptHash: bytes32(uint256(0x11)),
+            signature: signature
+        });
+        vm.expectRevert("Invalid verifier signature");
+        settlement.submitAsyncResult(matchId, result);
+    }
+
+    function testWrongMode() public {
+        uint256 matchId = _setupRTGameAndMatch();
+        bytes memory signature = _signResult(matchId, AMPTypes.OutcomeCode.WIN_A, bytes32(0), verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.WIN_A,
+            transcriptHash: bytes32(0),
+            signature: signature
+        });
+        vm.expectRevert("Wrong mode");
+        settlement.submitAsyncResult(matchId, result);
+    }
+
+    function testRTAgreementSuccess() public {
+        uint256 matchId = _setupRTGameAndMatch();
+        AMPTypes.RealTimeHashResult memory resultA = AMPTypes.RealTimeHashResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.WIN_A,
+            transcriptHash: bytes32(uint256(0xabc))
+        });
+        AMPTypes.RealTimeHashResult memory resultB = AMPTypes.RealTimeHashResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.WIN_A,
+            transcriptHash: bytes32(uint256(0xabc))
+        });
+        uint256 balanceA = playerA.balance;
+        vm.prank(playerA);
+        settlement.submitRealTimeHashResult(matchId, resultA);
+        vm.prank(playerB);
+        settlement.submitRealTimeHashResult(matchId, resultB);
+        (, AMPTypes.OutcomeCode outcome, , ) = settlement.settlements(matchId);
+        assertEq(uint(outcome), uint(AMPTypes.OutcomeCode.WIN_A));
+        assertEq(playerA.balance, balanceA + 1.98 ether);
+    }
+
+    function testRTNotPlayer() public {
+        uint256 matchId = _setupRTGameAndMatch();
+        AMPTypes.RealTimeHashResult memory result = AMPTypes.RealTimeHashResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.WIN_A,
+            transcriptHash: bytes32(uint256(0x1))
+        });
+        vm.prank(nonPlayer);
+        vm.expectRevert("Not a player");
+        settlement.submitRealTimeHashResult(matchId, result);
+    }
+
+    function testDisputeNotArbiter() public {
+        uint256 matchId = _setupRTGameAndMatch();
+        AMPTypes.RealTimeHashResult memory resultA = AMPTypes.RealTimeHashResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.WIN_A,
+            transcriptHash: bytes32(uint256(1))
+        });
+        AMPTypes.RealTimeHashResult memory resultB = AMPTypes.RealTimeHashResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.WIN_B,
+            transcriptHash: bytes32(uint256(2))
+        });
+        vm.prank(playerA);
+        settlement.submitRealTimeHashResult(matchId, resultA);
+        vm.prank(playerB);
+        settlement.submitRealTimeHashResult(matchId, resultB);
+        vm.prank(nonPlayer);
+        vm.expectRevert("Not arbiter");
+        settlement.resolveDispute(matchId, AMPTypes.OutcomeCode.WIN_A);
+    }
+
+    function testFeeZeroPercent() public {
+        settlement.updateProtocolFeeBps(0);
+        uint256 matchId = _setupAsyncGameAndMatch();
+        AMPTypes.OutcomeCode outcome = AMPTypes.OutcomeCode.WIN_A;
+        bytes32 transcriptHash = bytes32(uint256(0x5678));
+        bytes memory signature = _signResult(matchId, outcome, transcriptHash, verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId,
+            outcome: outcome,
+            transcriptHash: transcriptHash,
+            signature: signature
+        });
+        uint256 balanceA = playerA.balance;
+        settlement.submitAsyncResult(matchId, result);
+        assertEq(playerA.balance, balanceA + 2 ether);
+        assertEq(registry.feeBalances(address(0)), 0);
+    }
+
+    function testFeeInvalidBps() public {
+        vm.expectRevert("Invalid bps");
+        settlement.updateProtocolFeeBps(10001);
+    }
+
+    function testUpdateFeeRecipient() public {
+        address newRecipient = address(0x8888);
+        settlement.updateProtocolFeeRecipient(newRecipient);
+        assertEq(settlement.protocolFeeRecipient(), newRecipient);
+    }
+
+    function testPauseBlocksSubmit() public {
+        uint256 matchId = _setupAsyncGameAndMatch();
+        settlement.pause();
+        AMPTypes.OutcomeCode outcome = AMPTypes.OutcomeCode.WIN_A;
+        bytes32 transcriptHash = bytes32(uint256(0x5678));
+        bytes memory signature = _signResult(matchId, outcome, transcriptHash, verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId,
+            outcome: outcome,
+            transcriptHash: transcriptHash,
+            signature: signature
+        });
+        vm.expectRevert(abi.encodeWithSelector(Pausable.EnforcedPause.selector));
+        settlement.submitAsyncResult(matchId, result);
+    }
+
+    function testMatchIdMismatch() public {
+        uint256 matchId = _setupAsyncGameAndMatch();
+        AMPTypes.OutcomeCode outcome = AMPTypes.OutcomeCode.WIN_A;
+        bytes32 transcriptHash = bytes32(uint256(0x5678));
+        bytes memory signature = _signResult(999, outcome, transcriptHash, verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: 999,
+            outcome: outcome,
+            transcriptHash: transcriptHash,
+            signature: signature
+        });
+        vm.expectRevert("Match ID mismatch");
+        settlement.submitAsyncResult(matchId, result);
     }
 }

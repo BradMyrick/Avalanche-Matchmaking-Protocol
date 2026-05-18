@@ -4,17 +4,14 @@ pragma solidity ^0.8.33;
 import "./AMPTypes.sol";
 import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 import "openzeppelin-contracts/contracts/metatx/ERC2771Context.sol";
+import "openzeppelin-contracts/contracts/utils/Pausable.sol";
 
-/**
- * @title AMPRegistry
- * @notice Handles registration of games and creation/joining of match instances.
- */
-contract AMPRegistry is ERC2771Context {
+contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     using SafeERC20 for IERC20;
 
     address public settlement;
-    address payable public immutable owner;
     uint256 public nextGameId;
     uint256 public nextMatchId;
 
@@ -31,50 +28,32 @@ contract AMPRegistry is ERC2771Context {
 
     mapping(uint256 => AMPTypes.Game) public games;
     mapping(uint256 => AMPTypes.Match) public matches;
+    mapping(uint256 => mapping(address => bool)) public gameVerifiers;
 
-    event GameRegistered(
-        uint256 indexed gameId,
-        address indexed admin,
-        AMPTypes.SettlementMode mode
-    );
-    event MatchCreated(
-        uint256 indexed matchId,
-        uint256 indexed gameId,
-        address indexed playerA,
-        uint256 stakeAmount
-    );
+    event GameRegistered(uint256 indexed gameId, address indexed admin, AMPTypes.SettlementMode mode);
+    event GameVerifiersUpdated(uint256 indexed gameId);
+    event MatchCreated(uint256 indexed matchId, uint256 indexed gameId, address indexed playerA, uint256 stakeAmount);
     event MatchJoined(uint256 indexed matchId, address indexed playerB);
+    event MatchCancelled(uint256 indexed matchId, address indexed playerA, uint256 refundAmount);
+    event MatchExpired(uint256 indexed matchId);
     event FeesWithdrawn(address indexed token, uint256 amount, address indexed wallet);
+    event SettlementUpdated(address indexed settlementAddress);
 
     modifier onlySettlement() {
         require(_msgSender() == settlement, "Not settlement");
         _;
     }
 
-    modifier onlyOwner() {
-        require(_msgSender() == owner);
-        _;
-    }
+    constructor(address trustedForwarder) ERC2771Context(trustedForwarder) Ownable(_msgSender()) {}
 
-    constructor(address trustedForwarder) ERC2771Context(trustedForwarder) {
-        owner = payable(_msgSender());
-    }
-
-    /**
-     * @notice Registers a new game in the AMP protocol.
-     * @param mode Settlement mode (Async or Real-time).
-     * @param verifiers Authorized verifier addresses (for ASYNC_VERIFIER mode).
-     * @param minStake Minimum stake amount required for matches.
-     * @param stakeToken Token to be used for stakes (address(0) for AVAX).
-     * @param arbiter Address authorized to resolve RT_HASH_AGREE disputes.
-     */
     function registerGame(
         AMPTypes.SettlementMode mode,
         address[] calldata verifiers,
         uint256 minStake,
         address stakeToken,
         address arbiter
-    ) external returns (uint256 gameId) {
+    ) external whenNotPaused returns (uint256 gameId) {
+        require(verifiers.length <= 10, "Too many verifiers");
         gameId = nextGameId++;
         games[gameId] = AMPTypes.Game({
             admin: _msgSender(),
@@ -82,41 +61,39 @@ contract AMPRegistry is ERC2771Context {
             verifiers: verifiers,
             minStake: minStake,
             stakeToken: stakeToken,
-            arbiter: arbiter
+            arbiter: arbiter,
+            matchTimeout: 1 hours
         });
+        _syncVerifierMapping(gameId, verifiers);
 
         emit GameRegistered(gameId, _msgSender(), mode);
     }
 
-    /**
-     * @notice Updates the list of authorized verifiers for a game.
-     */
-    function updateGameVerifiers(
-        uint256 gameId,
-        address[] calldata verifiers
-    ) external {
+    function setMatchTimeout(uint256 gameId, uint256 timeoutSeconds) external {
         require(_msgSender() == games[gameId].admin, "Not game admin");
-        games[gameId].verifiers = verifiers;
+        require(timeoutSeconds >= 5 minutes, "Timeout too short");
+        games[gameId].matchTimeout = timeoutSeconds;
     }
 
-    /**
-     * @notice Returns the authorized verifiers for a game.
-     */
-    function getGameVerifiers(
-        uint256 gameId
-    ) external view returns (address[] memory) {
+    function updateGameVerifiers(uint256 gameId, address[] calldata verifiers) external {
+        require(_msgSender() == games[gameId].admin, "Not game admin");
+        require(verifiers.length <= 10, "Too many verifiers");
+        _clearVerifierMapping(gameId);
+        games[gameId].verifiers = verifiers;
+        _syncVerifierMapping(gameId, verifiers);
+        emit GameVerifiersUpdated(gameId);
+    }
+
+    function getGameVerifiers(uint256 gameId) external view returns (address[] memory) {
         return games[gameId].verifiers;
     }
 
-    /**
-     * @notice Creates a new match for a registered game.
-     */
     function createMatch(
         uint256 gameId,
         uint256 stakeAmount
-    ) external payable nonReentrant returns (uint256 matchId) {
+    ) external payable whenNotPaused nonReentrant returns (uint256 matchId) {
         AMPTypes.Game storage game = games[gameId];
-        
+
         uint256 actualStake;
         if (game.stakeToken == address(0)) {
             require(msg.value >= game.minStake, "Stake too low");
@@ -141,13 +118,10 @@ contract AMPRegistry is ERC2771Context {
         emit MatchCreated(matchId, gameId, _msgSender(), actualStake);
     }
 
-    /**
-     * @notice Joins an existing OPEN match.
-     */
-    function joinMatch(uint256 matchId) external payable nonReentrant {
+    function joinMatch(uint256 matchId) external payable whenNotPaused nonReentrant {
         AMPTypes.Match storage m = matches[matchId];
         require(m.state == AMPTypes.MatchState.OPEN, "Match not open");
-        
+
         AMPTypes.Game storage game = games[m.gameId];
 
         if (game.stakeToken == address(0)) {
@@ -163,34 +137,80 @@ contract AMPRegistry is ERC2771Context {
         emit MatchJoined(matchId, _msgSender());
     }
 
-    /**
-     * @notice Pays out collected fees
-     */
+    function cancelMatch(uint256 matchId) external nonReentrant whenNotPaused {
+        AMPTypes.Match storage m = matches[matchId];
+        require(m.state == AMPTypes.MatchState.OPEN, "Match not open");
+        require(_msgSender() == m.playerA, "Not player A");
+
+        m.state = AMPTypes.MatchState.SETTLED;
+
+        AMPTypes.Game storage game = games[m.gameId];
+        uint256 refund = m.stakeAmount;
+        m.stakeAmount = 0;
+
+        if (game.stakeToken == address(0)) {
+            (bool success, ) = m.playerA.call{value: refund}("");
+            require(success, "Refund failed");
+        } else {
+            IERC20(game.stakeToken).safeTransfer(m.playerA, refund);
+        }
+
+        emit MatchCancelled(matchId, m.playerA, refund);
+    }
+
+    function expireMatch(uint256 matchId) external nonReentrant {
+        AMPTypes.Match storage m = matches[matchId];
+        AMPTypes.Game storage game = games[m.gameId];
+        require(
+            m.state == AMPTypes.MatchState.OPEN || m.state == AMPTypes.MatchState.READY,
+            "Match not expirable"
+        );
+        require(block.timestamp >= m.createdAt + game.matchTimeout, "Not expired yet");
+
+        m.state = AMPTypes.MatchState.EXPIRED;
+
+        address[] memory recipients = new address[](2);
+        recipients[0] = m.playerA;
+        recipients[1] = m.playerB;
+        uint256[] memory amounts = new uint256[](2);
+
+        amounts[0] = m.stakeAmount;
+        amounts[1] = m.playerB == address(0) ? 0 : m.stakeAmount;
+
+        for (uint i = 0; i < recipients.length; i++) {
+            if (amounts[i] > 0) {
+                if (game.stakeToken == address(0)) {
+                    (bool success, ) = recipients[i].call{value: amounts[i]}("");
+                    require(success, "Refund failed");
+                } else {
+                    IERC20(game.stakeToken).safeTransfer(recipients[i], amounts[i]);
+                }
+            }
+        }
+
+        emit MatchExpired(matchId);
+    }
+
     function withdrawFees(address token) external onlyOwner nonReentrant {
         uint256 amount = feeBalances[token];
         require(amount > 0, "No fees to withdraw");
         feeBalances[token] = 0;
 
         if (token == address(0)) {
-            (bool success, ) = owner.call{value: amount}("");
+            (bool success, ) = owner().call{value: amount}("");
             require(success, "Transfer Failed");
         } else {
-            IERC20(token).safeTransfer(owner, amount);
+            IERC20(token).safeTransfer(owner(), amount);
         }
 
-        emit FeesWithdrawn(token, amount, owner);
+        emit FeesWithdrawn(token, amount, owner());
     }
 
-    /**
-     * @notice Allows owner to set the settlement contract address.
-     */
     function setSettlement(address settlementAddress) external onlyOwner {
         settlement = settlementAddress;
+        emit SettlementUpdated(settlementAddress);
     }
 
-    /**
-     * @notice Settles a match and distributes payouts. Only callable by the Settlement contract.
-     */
     function settleMatch(
         uint256 matchId,
         AMPTypes.MatchState newState,
@@ -220,5 +240,42 @@ contract AMPRegistry is ERC2771Context {
                 }
             }
         }
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function isVerifier(uint256 gameId, address addr) external view returns (bool) {
+        return gameVerifiers[gameId][addr];
+    }
+
+    function _clearVerifierMapping(uint256 gameId) internal {
+        address[] storage old = games[gameId].verifiers;
+        for (uint i = 0; i < old.length; i++) {
+            gameVerifiers[gameId][old[i]] = false;
+        }
+    }
+
+    function _syncVerifierMapping(uint256 gameId, address[] calldata verifiers) internal {
+        for (uint i = 0; i < verifiers.length; i++) {
+            gameVerifiers[gameId][verifiers[i]] = true;
+        }
+    }
+
+    function _msgSender() internal view virtual override(Context, ERC2771Context) returns (address) {
+        return ERC2771Context._msgSender();
+    }
+
+    function _msgData() internal view virtual override(Context, ERC2771Context) returns (bytes calldata) {
+        return ERC2771Context._msgData();
+    }
+
+    function _contextSuffixLength() internal view virtual override(Context, ERC2771Context) returns (uint256) {
+        return ERC2771Context._contextSuffixLength();
     }
 }

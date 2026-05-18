@@ -1,27 +1,135 @@
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
 pub mod rust_capnp {
     include!(concat!(env!("OUT_DIR"), "/rust_capnp.rs"));
 }
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
 pub mod game_types_capnp {
     include!(concat!(env!("OUT_DIR"), "/game_types_capnp.rs"));
 }
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
 pub mod game_core_capnp {
     include!(concat!(env!("OUT_DIR"), "/game_core_capnp.rs"));
 }
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
 pub mod match_capnp {
     include!(concat!(env!("OUT_DIR"), "/match_capnp.rs"));
 }
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
 pub mod amp_telemetry_capnp {
     include!(concat!(env!("OUT_DIR"), "/amp_telemetry_capnp.rs"));
 }
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
 pub mod service_capnp {
     include!(concat!(env!("OUT_DIR"), "/service_capnp.rs"));
 }
-pub mod player_profile_capnp { include!(concat!(env!("OUT_DIR"), "/player_profile_capnp.rs")); }
-pub mod matchmaking_rules_capnp { include!(concat!(env!("OUT_DIR"), "/matchmaking_rules_capnp.rs")); }
-pub mod game_registry_capnp { include!(concat!(env!("OUT_DIR"), "/game_registry_capnp.rs")); }
-pub mod inventory_capnp { include!(concat!(env!("OUT_DIR"), "/inventory_capnp.rs")); }
-pub mod tournament_capnp { include!(concat!(env!("OUT_DIR"), "/tournament_capnp.rs")); }
-pub mod security_capnp { include!(concat!(env!("OUT_DIR"), "/security_capnp.rs")); }
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod player_profile_capnp {
+    include!(concat!(env!("OUT_DIR"), "/player_profile_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod matchmaking_rules_capnp {
+    include!(concat!(env!("OUT_DIR"), "/matchmaking_rules_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod game_registry_capnp {
+    include!(concat!(env!("OUT_DIR"), "/game_registry_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod inventory_capnp {
+    include!(concat!(env!("OUT_DIR"), "/inventory_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod tournament_capnp {
+    include!(concat!(env!("OUT_DIR"), "/tournament_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod security_capnp {
+    include!(concat!(env!("OUT_DIR"), "/security_capnp.rs"));
+}
 
 struct TelemetryItem {
     match_id: String,
@@ -29,21 +137,24 @@ struct TelemetryItem {
     timestamp: u64,
 }
 
+use capnp::message::ReaderOptions;
+use capnp::serialize_packed;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
+    },
 };
 use ratatui::{
+    Frame, Terminal,
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Frame, Terminal,
 };
-use std::{error::Error, io};
-// use std::fs;
-// use capnp::serialize_packed;
+use std::{error::Error, io::Read};
 
 struct App {
     state: TableState,
@@ -58,14 +169,69 @@ impl App {
         }
     }
 
-    /// No mock data in Alpha release.
-    fn load_blank(&mut self) {
-        self.items = vec![];
+    fn load_from_file(&mut self, path: &str) {
+        let mut file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+
+        loop {
+            let mut len_buf = [0u8; 4];
+            match file.read_exact(&mut len_buf) {
+                Ok(()) => {}
+                Err(_) => break,
+            }
+            let len = u32::from_le_bytes(len_buf) as usize;
+
+            let mut msg_buf = vec![0u8; len];
+            if file.read_exact(&mut msg_buf).is_err() {
+                break;
+            }
+
+            let reader = match serialize_packed::read_message(
+                &mut msg_buf.as_slice(),
+                ReaderOptions::new(),
+            ) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+
+            let event = match reader
+                .get_root::<amp_telemetry_capnp::amp_telemetry_event::Reader<
+                '_,
+            >>() {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let match_id = match event.get_match_id() {
+                Ok(d) => hex::encode(d),
+                Err(_) => "unknown".to_string(),
+            };
+
+            let event_type = match event.get_event_type() {
+                Ok(t) => format!("{:?}", t),
+                Err(_) => "unknown".to_string(),
+            };
+
+            let timestamp = event.get_timestamp();
+
+            self.items.push(TelemetryItem {
+                match_id,
+                event_type,
+                timestamp,
+            });
+        }
+
+        if !self.items.is_empty() {
+            self.state.select(Some(0));
+        }
     }
-// load_blank()
 
     pub fn next(&mut self) {
-        if self.items.is_empty() { return; }
+        if self.items.is_empty() {
+            return;
+        }
         let i = match self.state.selected() {
             Some(i) => {
                 if i >= self.items.len() - 1 {
@@ -95,20 +261,21 @@ impl App {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // setup terminal
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
+    let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new();
-    app.load_blank();
 
-    // run app
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "telemetry.bin".to_string());
+    app.load_from_file(&path);
+
     let res = run_app(&mut terminal, app);
 
-    // restore terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -124,7 +291,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    mut app: App,
+) -> std::io::Result<()> {
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
 
@@ -203,7 +373,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         "Select an event to view details.".to_string()
     };
 
-    let p =
-        Paragraph::new(info_text).block(Block::default().title("Inspector").borders(Borders::ALL));
+    let p = Paragraph::new(info_text)
+        .block(Block::default().title("Inspector").borders(Borders::ALL));
     f.render_widget(p, rects[1]);
 }

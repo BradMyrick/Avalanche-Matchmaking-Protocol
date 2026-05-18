@@ -81,7 +81,9 @@ fn export_json(path: &str) -> Result<()> {
         let mut len_buf = [0u8; 4];
         match file.read_exact(&mut len_buf) {
             Ok(()) => {}
-            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                break;
+            }
             Err(e) => return Err(e.into()),
         }
         let len = u32::from_le_bytes(len_buf) as usize;
@@ -89,7 +91,10 @@ fn export_json(path: &str) -> Result<()> {
         let mut msg_buf = vec![0u8; len];
         file.read_exact(&mut msg_buf)?;
 
-        let reader = serialize_packed::read_message(&mut msg_buf.as_slice(), ReaderOptions::new())?;
+        let reader = serialize_packed::read_message(
+            &mut msg_buf.as_slice(),
+            ReaderOptions::new(),
+        )?;
         let event = reader
             .get_root::<amp_telemetry::amp_telemetry_capnp::amp_telemetry_event::Reader<'_>>()?;
 
@@ -152,9 +157,8 @@ async fn main() -> Result<()> {
         .open(log_path)?;
     let log_writer = Arc::new(Mutex::new(BufWriter::new(log_file)));
 
-    let receiver: telemetry_receiver::Client = capnp_rpc::new_client(TelemetryReceiverImpl {
-        log_writer,
-    });
+    let receiver: telemetry_receiver::Client =
+        capnp_rpc::new_client(TelemetryReceiverImpl { log_writer });
 
     let listener = TcpListener::bind(&addr).await?;
     eprintln!(
@@ -163,22 +167,27 @@ async fn main() -> Result<()> {
     );
 
     let local = LocalSet::new();
-    local.run_until(async move {
-        loop {
-            if let Ok((stream, _)) = listener.accept().await {
-                stream.set_nodelay(true).unwrap_or(());
-                let (reader, writer) = stream.compat().split();
-                let network = twoparty::VatNetwork::new(
-                    reader,
-                    writer,
-                    rpc_twoparty_capnp::Side::Server,
-                    Default::default(),
-                );
-                let rpc_system = RpcSystem::new(Box::new(network), Some(receiver.clone().client));
-                tokio::task::spawn_local(rpc_system);
+    local
+        .run_until(async move {
+            loop {
+                if let Ok((stream, _)) = listener.accept().await {
+                    stream.set_nodelay(true).unwrap_or(());
+                    let (reader, writer) = stream.compat().split();
+                    let network = twoparty::VatNetwork::new(
+                        reader,
+                        writer,
+                        rpc_twoparty_capnp::Side::Server,
+                        Default::default(),
+                    );
+                    let rpc_system = RpcSystem::new(
+                        Box::new(network),
+                        Some(receiver.clone().client),
+                    );
+                    tokio::task::spawn_local(rpc_system);
+                }
             }
-        }
-    }).await;
+        })
+        .await;
 
     Ok(())
 }

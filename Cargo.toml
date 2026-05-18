@@ -5,4 +5,6 @@ members = [
     "amp-server",
     "amp-relayer",
     "trace-viewer",
+    "amp-sdk/rust",
+    "amp-loadtest",
 ]
