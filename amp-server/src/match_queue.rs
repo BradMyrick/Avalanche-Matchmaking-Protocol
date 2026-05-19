@@ -66,9 +66,9 @@ impl IndexedQueue {
             let lo = mmr_search_bound(entry_a.mmr, max_diff, false);
             let hi = mmr_search_bound(entry_a.mmr, max_diff, true);
 
-            let search_start = match bucket[i + 1..].binary_search_by(|e| {
-                e.mmr.partial_cmp(&lo).unwrap_or(std::cmp::Ordering::Equal)
-            }) {
+            let search_start = match bucket[i + 1..]
+                .binary_search_by(|e| e.mmr.partial_cmp(&lo).unwrap_or(std::cmp::Ordering::Equal))
+            {
                 Ok(idx) => (i + 1) + idx,
                 Err(idx) => (i + 1) + idx,
             };
@@ -84,8 +84,7 @@ impl IndexedQueue {
                     continue;
                 }
 
-                let result =
-                    crate::rules::evaluate_rules(entry_a, candidate, ruleset);
+                let result = crate::rules::evaluate_rules(entry_a, candidate, ruleset);
                 if result.passes && result.quality.total_score > best_score {
                     best_score = result.quality.total_score;
                     best_j = Some(j);
@@ -104,9 +103,7 @@ impl IndexedQueue {
                 };
                 self.total_count -= 2;
 
-                let quality = crate::matchmaker::compute_match_quality(
-                    &entry_a, &entry_b, ruleset,
-                );
+                let quality = crate::matchmaker::compute_match_quality(&entry_a, &entry_b, ruleset);
 
                 return Some(MatchResult {
                     entry_a,
@@ -146,12 +143,7 @@ mod tests {
     use crate::state::StoredRuleSet;
     use tokio::sync::oneshot;
 
-    fn make_entry(
-        player: &str,
-        game: &str,
-        ruleset: &str,
-        mmr: f32,
-    ) -> QueueEntry {
+    fn make_entry(player: &str, game: &str, ruleset: &str, mmr: f32) -> QueueEntry {
         let (tx, _) = oneshot::channel();
         QueueEntry {
             player_id: player.into(),
@@ -199,8 +191,7 @@ mod tests {
         q.push(make_entry("p2", "g1", "r1", 1400.0));
 
         let ruleset = StoredRuleSet::default();
-        let result =
-            q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 10000, 0);
+        let result = q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 10000, 0);
 
         assert!(result.is_some());
         let _m = result.unwrap();
@@ -217,8 +208,7 @@ mod tests {
             max_skill_diff: 500.0,
             ..Default::default()
         };
-        let result =
-            q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 10000, 0);
+        let result = q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 10000, 0);
 
         assert!(result.is_none());
         assert_eq!(q.len(), 2);
@@ -231,8 +221,7 @@ mod tests {
         q.push(make_entry("p2", "g1", "r1", 1400.0));
 
         let ruleset = StoredRuleSet::default();
-        let result =
-            q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 100, 100);
+        let result = q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 100, 100);
 
         assert!(result.is_none());
     }

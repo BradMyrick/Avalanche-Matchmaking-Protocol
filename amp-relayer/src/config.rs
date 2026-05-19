@@ -27,8 +27,7 @@ impl Config {
             relayer_private_key: env::var("RELAYER_PRIVATE_KEY")?,
             contract_settlement: env::var("CONTRACT_SETTLEMENT")?,
             contract_registry: env::var("CONTRACT_REGISTRY")?,
-            db_path: env::var("RELAYER_DB_PATH")
-                .unwrap_or_else(|_| "./relayer-data".to_string()),
+            db_path: env::var("RELAYER_DB_PATH").unwrap_or_else(|_| "./relayer-data".to_string()),
             max_retries: env::var("RELAYER_MAX_RETRIES")
                 .ok()
                 .and_then(|v| v.parse().ok())

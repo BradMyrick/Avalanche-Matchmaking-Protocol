@@ -59,11 +59,8 @@ pub fn glicko2_update(
     let mu_j = (opponent_rating as f64 - 1500.0) / SCALE;
     let phi_j = opponent_rd as f64 / SCALE;
 
-    let g_phi_j = 1.0
-        / (1.0
-            + 3.0 * phi_j * phi_j
-                / (std::f64::consts::PI * std::f64::consts::PI))
-            .sqrt();
+    let g_phi_j =
+        1.0 / (1.0 + 3.0 * phi_j * phi_j / (std::f64::consts::PI * std::f64::consts::PI)).sqrt();
 
     let e = 1.0 / (1.0 + (-g_phi_j * (mu - mu_j)).exp());
 
@@ -147,22 +144,19 @@ mod tests {
 
     #[test]
     fn test_glicko2_win_increases_rating() {
-        let (new_r, _, _) =
-            glicko2_update(1500.0, 200.0, 0.06, 1400.0, 30.0, 1.0);
+        let (new_r, _, _) = glicko2_update(1500.0, 200.0, 0.06, 1400.0, 30.0, 1.0);
         assert!(new_r > 1500.0, "Win should increase rating, got {}", new_r);
     }
 
     #[test]
     fn test_glicko2_loss_decreases_rating() {
-        let (new_r, _, _) =
-            glicko2_update(1500.0, 200.0, 0.06, 1600.0, 30.0, 0.0);
+        let (new_r, _, _) = glicko2_update(1500.0, 200.0, 0.06, 1600.0, 30.0, 0.0);
         assert!(new_r < 1500.0, "Loss should decrease rating, got {}", new_r);
     }
 
     #[test]
     fn test_glicko2_draw_near_stable() {
-        let (new_r, _, _) =
-            glicko2_update(1500.0, 200.0, 0.06, 1500.0, 30.0, 0.5);
+        let (new_r, _, _) = glicko2_update(1500.0, 200.0, 0.06, 1500.0, 30.0, 0.5);
         assert!(
             (new_r - 1500.0).abs() < 10.0,
             "Draw should be near stable, got {}",

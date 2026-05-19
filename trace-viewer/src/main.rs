@@ -142,10 +142,7 @@ use capnp::serialize_packed;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
-    terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-        enable_raw_mode,
-    },
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
     Frame, Terminal,
@@ -188,21 +185,18 @@ impl App {
                 break;
             }
 
-            let reader = match serialize_packed::read_message(
-                &mut msg_buf.as_slice(),
-                ReaderOptions::new(),
-            ) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
+            let reader =
+                match serialize_packed::read_message(&mut msg_buf.as_slice(), ReaderOptions::new())
+                {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
 
-            let event = match reader
-                .get_root::<amp_telemetry_capnp::amp_telemetry_event::Reader<
-                '_,
-            >>() {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
+            let event =
+                match reader.get_root::<amp_telemetry_capnp::amp_telemetry_event::Reader<'_>>() {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
 
             let match_id = match event.get_match_id() {
                 Ok(d) => hex::encode(d),
@@ -291,10 +285,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_app<B: Backend>(
-    terminal: &mut Terminal<B>,
-    mut app: App,
-) -> std::io::Result<()> {
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::io::Result<()> {
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
 
@@ -373,7 +364,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         "Select an event to view details.".to_string()
     };
 
-    let p = Paragraph::new(info_text)
-        .block(Block::default().title("Inspector").borders(Borders::ALL));
+    let p =
+        Paragraph::new(info_text).block(Block::default().title("Inspector").borders(Borders::ALL));
     f.render_widget(p, rects[1]);
 }

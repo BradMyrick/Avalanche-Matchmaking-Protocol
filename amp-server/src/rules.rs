@@ -1,8 +1,7 @@
 use crate::state::{
-    AvoidanceParams, ConnectionQualityParams, LanguageParams, LatencyParams,
-    MatchQualityDetail, PreferenceParams, QueueEntry, RegionParams, RuleParams,
-    RuleType, SkillDecayParams, SkillParams, StoredBackfillPolicy, StoredRule,
-    StoredRuleSet, TeamBalanceParams, now_ms,
+    AvoidanceParams, ConnectionQualityParams, LanguageParams, LatencyParams, MatchQualityDetail,
+    PreferenceParams, QueueEntry, RegionParams, RuleParams, RuleType, SkillDecayParams,
+    SkillParams, StoredBackfillPolicy, StoredRule, StoredRuleSet, TeamBalanceParams, now_ms,
 };
 
 pub struct RuleEvaluationResult {
@@ -20,8 +19,7 @@ pub fn evaluate_rules(
     let queue_duration_b = now_ms().saturating_sub(entry_b.enqueued_at_ms);
     let max_queue_duration = queue_duration_a.max(queue_duration_b);
 
-    let effective_skill_diff =
-        compute_effective_skill_diff(ruleset, max_queue_duration);
+    let effective_skill_diff = compute_effective_skill_diff(ruleset, max_queue_duration);
 
     let mut hard_pass = true;
     let mut total_weight: f32 = 0.0;
@@ -45,12 +43,7 @@ pub fn evaluate_rules(
             hard_pass = false;
         }
 
-        accumulate_quality(
-            &mut quality,
-            &rule.rule_type,
-            result.score,
-            rule.weight,
-        );
+        accumulate_quality(&mut quality, &rule.rule_type, result.score, rule.weight);
         total_weight += rule.weight;
     }
 
@@ -79,10 +72,7 @@ pub fn evaluate_rules(
     }
 }
 
-fn compute_effective_skill_diff(
-    ruleset: &StoredRuleSet,
-    queue_duration_ms: u64,
-) -> f32 {
+fn compute_effective_skill_diff(ruleset: &StoredRuleSet, queue_duration_ms: u64) -> f32 {
     let base = ruleset.max_skill_diff;
     for rule in &ruleset.rules {
         if let RuleParams::Skill(sp) = &rule.params
@@ -109,18 +99,14 @@ fn evaluate_single_rule(
     _queue_duration_ms: u64,
 ) -> SingleResult {
     match &rule.params {
-        RuleParams::Skill(params) => {
-            evaluate_skill(params, a, b, effective_skill_diff)
-        }
+        RuleParams::Skill(params) => evaluate_skill(params, a, b, effective_skill_diff),
         RuleParams::Latency(params) => evaluate_latency(params, a, b),
         RuleParams::Region(params) => evaluate_region(params, a, b),
         RuleParams::Language(params) => evaluate_language(params, a, b),
         RuleParams::TeamBalance(params) => evaluate_team_balance(params, a, b),
         RuleParams::Avoidance(params) => evaluate_avoidance(params, a, b),
         RuleParams::Preference(params) => evaluate_preference(params, a, b),
-        RuleParams::ConnectionQuality(params) => {
-            evaluate_connection_quality(params, a, b)
-        }
+        RuleParams::ConnectionQuality(params) => evaluate_connection_quality(params, a, b),
         RuleParams::Schedule(_) => SingleResult {
             passes: true,
             score: 1.0,
@@ -169,11 +155,7 @@ fn evaluate_skill(
     }
 }
 
-fn evaluate_latency(
-    params: &LatencyParams,
-    a: &QueueEntry,
-    b: &QueueEntry,
-) -> SingleResult {
+fn evaluate_latency(params: &LatencyParams, a: &QueueEntry, b: &QueueEntry) -> SingleResult {
     let max_ping = a.max_ping_ms.min(b.max_ping_ms).min(params.max_ping_ms);
     let estimated_ping = estimate_ping(&a.region, &b.region);
     if estimated_ping <= max_ping as f32 {
@@ -194,20 +176,14 @@ fn evaluate_latency(
     }
 }
 
-fn evaluate_region(
-    params: &RegionParams,
-    a: &QueueEntry,
-    b: &QueueEntry,
-) -> SingleResult {
+fn evaluate_region(params: &RegionParams, a: &QueueEntry, b: &QueueEntry) -> SingleResult {
     if a.region == b.region {
         return SingleResult {
             passes: true,
             score: 1.0,
         };
     }
-    if params.allowed_regions.contains(&a.region)
-        && params.allowed_regions.contains(&b.region)
-    {
+    if params.allowed_regions.contains(&a.region) && params.allowed_regions.contains(&b.region) {
         return SingleResult {
             passes: true,
             score: 0.5,
@@ -219,11 +195,7 @@ fn evaluate_region(
     }
 }
 
-fn evaluate_language(
-    params: &LanguageParams,
-    a: &QueueEntry,
-    b: &QueueEntry,
-) -> SingleResult {
+fn evaluate_language(params: &LanguageParams, a: &QueueEntry, b: &QueueEntry) -> SingleResult {
     if !params.prefer_same {
         return SingleResult {
             passes: true,
@@ -260,20 +232,15 @@ fn evaluate_team_balance(
             score: 0.6,
         };
     }
-    let both_have_roles =
-        params.required_roles.iter().any(|r| r == &a.preferred_role)
-            && params.required_roles.iter().any(|r| r == &b.preferred_role);
+    let both_have_roles = params.required_roles.iter().any(|r| r == &a.preferred_role)
+        && params.required_roles.iter().any(|r| r == &b.preferred_role);
     SingleResult {
         passes: both_have_roles || params.flex_slots > 0,
         score: if both_have_roles { 1.0 } else { 0.5 },
     }
 }
 
-fn evaluate_avoidance(
-    _params: &AvoidanceParams,
-    _a: &QueueEntry,
-    _b: &QueueEntry,
-) -> SingleResult {
+fn evaluate_avoidance(_params: &AvoidanceParams, _a: &QueueEntry, _b: &QueueEntry) -> SingleResult {
     SingleResult {
         passes: true,
         score: 1.0,
@@ -306,11 +273,7 @@ fn evaluate_connection_quality(
     }
 }
 
-fn evaluate_skill_decay(
-    params: &SkillDecayParams,
-    a: &QueueEntry,
-    b: &QueueEntry,
-) -> SingleResult {
+fn evaluate_skill_decay(params: &SkillDecayParams, a: &QueueEntry, b: &QueueEntry) -> SingleResult {
     let diff = (a.mmr - b.mmr).abs();
     let floor = params.min_mmr;
     let a_floor = a.mmr >= floor;
@@ -340,12 +303,8 @@ fn accumulate_quality(
     let weighted = score * weight;
     quality.total_score += weighted;
     match rule_type {
-        RuleType::Skill | RuleType::SkillDecay => {
-            quality.skill_balance += weighted
-        }
-        RuleType::Latency | RuleType::PingBased => {
-            quality.latency_score += weighted
-        }
+        RuleType::Skill | RuleType::SkillDecay => quality.skill_balance += weighted,
+        RuleType::Latency | RuleType::PingBased => quality.latency_score += weighted,
         RuleType::Region => quality.region_score += weighted,
         RuleType::Language => quality.language_score += weighted,
         RuleType::TeamBalance => quality.role_balance += weighted,

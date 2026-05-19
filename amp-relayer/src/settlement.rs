@@ -32,11 +32,7 @@ pub struct SettlementQueue {
 }
 
 impl SettlementQueue {
-    pub fn new(
-        db: Arc<Db>,
-        max_retries: u32,
-        base_retry_delay_ms: u64,
-    ) -> Self {
+    pub fn new(db: Arc<Db>, max_retries: u32, base_retry_delay_ms: u64) -> Self {
         Self {
             db,
             max_retries,
@@ -64,8 +60,7 @@ impl SettlementQueue {
                 .as_millis() as u64;
 
             if let Some(last) = settlement.last_attempt_at_ms {
-                let delay = self.base_retry_delay_ms
-                    * 2u64.pow(settlement.retry_count.min(4));
+                let delay = self.base_retry_delay_ms * 2u64.pow(settlement.retry_count.min(4));
                 if now.saturating_sub(last) < delay {
                     continue;
                 }
@@ -154,8 +149,7 @@ impl SettlementQueue {
         gas_manager: &GasManager,
         nonce_manager: &NonceManager,
     ) -> Result<()> {
-        let (game_id, _, _, _, _, _) =
-            state.registry.matches(match_id).call().await?;
+        let (game_id, _, _, _, _, _) = state.registry.matches(match_id).call().await?;
 
         let chain_id = state.master_client.signer().chain_id();
         let custodial_wallet = custodial::derive_custodial_signer(
@@ -169,19 +163,14 @@ impl SettlementQueue {
         custodial::ensure_gas(custodial_addr, state).await?;
 
         let provider = state.master_client.provider().clone();
-        let custodial_client =
-            SignerMiddleware::new(provider.clone(), custodial_wallet);
+        let custodial_client = SignerMiddleware::new(provider.clone(), custodial_wallet);
 
-        let nonce =
-            nonce_manager.next_nonce(&custodial_addr, &provider).await?;
+        let nonce = nonce_manager.next_nonce(&custodial_addr, &provider).await?;
 
         let (max_fee, _priority_fee) = gas_manager
             .estimate_eip1559_fees(&provider)
             .await
-            .unwrap_or((
-                U256::from(30_000_000_000u64),
-                U256::from(2_000_000_000u64),
-            ));
+            .unwrap_or((U256::from(30_000_000_000u64), U256::from(2_000_000_000u64)));
 
         let mut t_hash = [0u8; 32];
         if settlement.transcript_hash.len() == 32 {

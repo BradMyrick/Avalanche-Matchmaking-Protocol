@@ -210,10 +210,7 @@ impl AmpClient {
     /// Returns `(challenge_bytes, expires_at_ns)` where `challenge_bytes` must be
     /// signed by the player's Ethereum wallet. The signed bytes are then passed to
     /// [`login`](Self::login).
-    pub async fn request_challenge(
-        &self,
-        game_id: u64,
-    ) -> AmpResult<(Vec<u8>, u64)> {
+    pub async fn request_challenge(&self, game_id: u64) -> AmpResult<(Vec<u8>, u64)> {
         let mut request = self.client.request_challenge_request();
         request.get().set_game_id(game_id);
         let response = request
@@ -233,11 +230,7 @@ impl AmpClient {
     /// challenge bytes appended after the 65-byte secp256k1 signature.
     ///
     /// On success, returns a [`UserSession`] for matchmaking operations.
-    pub async fn login(
-        &self,
-        game_id: u64,
-        signature: &[u8],
-    ) -> AmpResult<UserSession> {
+    pub async fn login(&self, game_id: u64, signature: &[u8]) -> AmpResult<UserSession> {
         let mut request = self.client.login_request();
         request.get().set_game_id(game_id);
         request.get().set_signed_challenge(signature);
@@ -265,10 +258,7 @@ impl UserSession {
     /// This call blocks (returns a pending future) until a suitable opponent
     /// is found and a match is created. On success, returns a [`MatchSession`]
     /// for interacting with the match.
-    pub async fn request_match(
-        &self,
-        req: MatchRequest,
-    ) -> AmpResult<MatchSession> {
+    pub async fn request_match(&self, req: MatchRequest) -> AmpResult<MatchSession> {
         let mut request = self.inner.request_match_request();
         {
             let mut builder = request.get().init_req();
@@ -313,10 +303,7 @@ impl MatchSession {
     ///
     /// Returns the verifier's 65-byte ECDSA signature attesting to the outcome.
     /// This signature is submitted on-chain by the relayer for settlement.
-    pub async fn submit_outcome(
-        &self,
-        outcome: OutcomeSubmission,
-    ) -> AmpResult<Vec<u8>> {
+    pub async fn submit_outcome(&self, outcome: OutcomeSubmission) -> AmpResult<Vec<u8>> {
         let mut request = self.inner.submit_outcome_request();
         {
             let mut sub = request.get().init_submission();
@@ -353,11 +340,7 @@ impl MatchSession {
     ///
     /// `event_type` is a human-readable event label.
     /// `data` is an opaque payload describing the event.
-    pub async fn emit_game_event(
-        &self,
-        event_type: &str,
-        data: &[u8],
-    ) -> AmpResult<()> {
+    pub async fn emit_game_event(&self, event_type: &str, data: &[u8]) -> AmpResult<()> {
         let mut request = self.inner.emit_game_event_request();
         {
             let mut event = request.get().init_event();

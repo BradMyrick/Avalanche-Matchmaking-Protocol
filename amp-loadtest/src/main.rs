@@ -250,15 +250,14 @@ async fn run_client(
     }
 
     let match_start = Instant::now();
-    let (match_session, match_id) =
-        match request_match(&session, client_id, deadline).await {
-            Ok(r) => r,
-            Err(e) => {
-                warn!(client_id, "match request failed: {e}");
-                stats.errors.fetch_add(1, Ordering::Relaxed);
-                return;
-            }
-        };
+    let (match_session, match_id) = match request_match(&session, client_id, deadline).await {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(client_id, "match request failed: {e}");
+            stats.errors.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+    };
     let match_ns = match_start.elapsed().as_nanos() as u64;
     stats.match_found.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut h) = match_hist.lock() {
@@ -366,9 +365,7 @@ fn print_histogram(label: &str, hist: &Histogram<u64>) {
     let min = Duration::from_nanos(hist.min());
     let max = Duration::from_nanos(hist.max());
     println!("  {label}:");
-    println!(
-        "    min={min:?}  p50={p50:?}  p95={p95:?}  p99={p99:?}  max={max:?}"
-    );
+    println!("    min={min:?}  p50={p50:?}  p95={p95:?}  p99={p99:?}  max={max:?}");
 }
 
 fn main() -> Result<()> {
