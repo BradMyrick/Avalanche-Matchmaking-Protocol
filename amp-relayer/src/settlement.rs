@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::error::RelayerError;
 use ethers::prelude::*;
 use serde::{Deserialize, Serialize};
 use sled::Db;
@@ -8,11 +8,16 @@ use tracing::{info, warn};
 use super::AsyncResult;
 use super::RelayerState;
 use super::custodial;
-use super::gas::GasManager;
 use super::nonce::NonceManager;
 
 const CF_PENDING: &str = "pending_settlements";
 const CF_DEAD_LETTER: &str = "dead_letter";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SettlementStatus {
+    Queued,
+    InFlight,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingSettlement {
@@ -23,6 +28,12 @@ pub struct PendingSettlement {
     pub retry_count: u32,
     pub enqueued_at_ms: u64,
     pub last_attempt_at_ms: Option<u64>,
+    #[serde(default = "default_status")]
+    pub status: SettlementStatus,
+}
+
+fn default_status() -> SettlementStatus {
+    SettlementStatus::Queued
 }
 
 pub struct SettlementQueue {
@@ -40,7 +51,7 @@ impl SettlementQueue {
         }
     }
 
-    pub fn enqueue(&self, settlement: PendingSettlement) -> Result<()> {
+    pub fn enqueue(&self, settlement: PendingSettlement) -> Result<(), RelayerError> {
         let cf = self.db.open_tree(CF_PENDING)?;
         let key = settlement.match_id.clone();
         let value = bincode::serialize(&settlement)?;
@@ -49,11 +60,15 @@ impl SettlementQueue {
         Ok(())
     }
 
-    pub fn dequeue(&self) -> Result<Option<PendingSettlement>> {
+    pub fn mark_in_flight(&self) -> Result<Option<PendingSettlement>, RelayerError> {
         let cf = self.db.open_tree(CF_PENDING)?;
         for item in cf.iter() {
             let (key, value) = item?;
-            let settlement: PendingSettlement = bincode::deserialize(&value)?;
+            let mut settlement: PendingSettlement = bincode::deserialize(&value)?;
+
+            if settlement.status == SettlementStatus::InFlight {
+                continue;
+            }
 
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
@@ -66,13 +81,21 @@ impl SettlementQueue {
                 }
             }
 
-            cf.remove(&key)?;
+            settlement.status = SettlementStatus::InFlight;
+            let updated = bincode::serialize(&settlement)?;
+            cf.insert(&key, &updated as &[u8])?;
             return Ok(Some(settlement));
         }
         Ok(None)
     }
 
-    pub fn dead_letter(&self, settlement: PendingSettlement) -> Result<()> {
+    pub fn finalize_settlement(&self, match_id: &[u8]) -> Result<(), RelayerError> {
+        let cf = self.db.open_tree(CF_PENDING)?;
+        cf.remove(match_id)?;
+        Ok(())
+    }
+
+    pub fn dead_letter(&self, settlement: PendingSettlement) -> Result<(), RelayerError> {
         let cf = self.db.open_tree(CF_DEAD_LETTER)?;
         let key = settlement.match_id.clone();
         let value = bincode::serialize(&settlement)?;
@@ -88,10 +111,9 @@ impl SettlementQueue {
     pub async fn process_next(
         &self,
         state: &RelayerState,
-        gas_manager: &GasManager,
         nonce_manager: &NonceManager,
-    ) -> Result<bool> {
-        let settlement = match self.dequeue()? {
+    ) -> Result<bool, RelayerError> {
+        let settlement = match self.mark_in_flight()? {
             Some(s) => s,
             None => return Ok(false),
         };
@@ -108,13 +130,13 @@ impl SettlementQueue {
                 &settlement,
                 match_id_parsed,
                 state,
-                gas_manager,
                 nonce_manager,
             )
             .await;
 
         match result {
             Ok(_) => {
+                self.finalize_settlement(&settlement.match_id)?;
                 info!("Settlement for match {} succeeded", match_id_parsed);
                 Ok(true)
             }
@@ -128,12 +150,14 @@ impl SettlementQueue {
                 );
 
                 if retry.retry_count >= self.max_retries {
+                    self.finalize_settlement(&retry.match_id)?;
                     self.dead_letter(retry)?;
                 } else {
                     warn!(
                         "Settlement for match {} failed (attempt {}): {}. Re-queueing.",
                         match_id_parsed, retry.retry_count, e
                     );
+                    retry.status = SettlementStatus::Queued;
                     self.enqueue(retry)?;
                 }
                 Ok(true)
@@ -146,10 +170,14 @@ impl SettlementQueue {
         settlement: &PendingSettlement,
         match_id: U256,
         state: &RelayerState,
-        gas_manager: &GasManager,
         nonce_manager: &NonceManager,
-    ) -> Result<()> {
-        let (game_id, _, _, _, _, _) = state.registry.matches(match_id).call().await?;
+    ) -> Result<(), RelayerError> {
+        let (game_id, _, _, _, _, _) = state
+            .registry
+            .matches(match_id)
+            .call()
+            .await
+            .map_err(|e| RelayerError::Contract(e.to_string()))?;
 
         let chain_id = state.master_client.signer().chain_id();
         let custodial_wallet = custodial::derive_custodial_signer(
@@ -166,11 +194,6 @@ impl SettlementQueue {
         let custodial_client = SignerMiddleware::new(provider.clone(), custodial_wallet);
 
         let nonce = nonce_manager.next_nonce(&custodial_addr, &provider).await?;
-
-        let (max_fee, _priority_fee) = gas_manager
-            .estimate_eip1559_fees(&provider)
-            .await
-            .unwrap_or((U256::from(30_000_000_000u64), U256::from(2_000_000_000u64)));
 
         let mut t_hash = [0u8; 32];
         if settlement.transcript_hash.len() == 32 {
@@ -191,22 +214,48 @@ impl SettlementQueue {
 
         let tx = settlement_custodial
             .submit_async_result(match_id, async_result)
-            .gas_price(max_fee)
             .nonce(nonce);
 
-        let pending = tx.send().await?;
+        let pending = tx
+            .send()
+            .await
+            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
         info!("Submitted tx {} for match {}", pending.tx_hash(), match_id);
 
-        let _receipt = pending.await?;
+        pending
+            .await
+            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
         nonce_manager.reset(&custodial_addr);
         Ok(())
     }
 
-    pub fn replay_pending(&self) -> Result<usize> {
+    pub fn replay_pending(&self) -> Result<usize, RelayerError> {
         let cf = self.db.open_tree(CF_PENDING)?;
+        let mut reset_count = 0usize;
+        let mut to_reset: Vec<(Vec<u8>, PendingSettlement)> = Vec::new();
+
+        for item in cf.iter() {
+            let (key, value) = item?;
+            let settlement: PendingSettlement = bincode::deserialize(&value)?;
+            if settlement.status == SettlementStatus::InFlight {
+                let mut s = settlement;
+                s.status = SettlementStatus::Queued;
+                to_reset.push((key.to_vec(), s));
+            }
+        }
+
+        for (key, settlement) in &to_reset {
+            let bytes = bincode::serialize(settlement)?;
+            cf.insert(key.as_slice(), &bytes as &[u8])?;
+            reset_count += 1;
+        }
+
         let count = cf.len();
         if count > 0 {
-            info!("Found {} pending settlements to replay", count);
+            info!(
+                "Found {} pending settlements to replay ({} reset from in-flight)",
+                count, reset_count
+            );
         }
         Ok(count)
     }

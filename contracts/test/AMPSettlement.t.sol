@@ -139,7 +139,7 @@ contract AMPSettlementTest is Test {
             transcriptHash: bytes32(uint256(0x11)),
             signature: signature
         });
-        vm.expectRevert("Invalid verifier signature");
+        vm.expectRevert(AMPSettlement.InvalidVerifierSignature.selector);
         settlement.submitAsyncResult(matchId, result);
     }
 
@@ -149,7 +149,7 @@ contract AMPSettlementTest is Test {
         AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
             matchId: matchId, outcome: AMPTypes.OutcomeCode.WIN_A, transcriptHash: bytes32(0), signature: signature
         });
-        vm.expectRevert("Wrong mode");
+        vm.expectRevert(AMPSettlement.WrongMode.selector);
         settlement.submitAsyncResult(matchId, result);
     }
 
@@ -177,7 +177,7 @@ contract AMPSettlementTest is Test {
             matchId: matchId, outcome: AMPTypes.OutcomeCode.WIN_A, transcriptHash: bytes32(uint256(0x1))
         });
         vm.prank(nonPlayer);
-        vm.expectRevert("Not a player");
+        vm.expectRevert(AMPSettlement.NotAPlayer.selector);
         settlement.submitRealTimeHashResult(matchId, result);
     }
 
@@ -194,7 +194,7 @@ contract AMPSettlementTest is Test {
         vm.prank(playerB);
         settlement.submitRealTimeHashResult(matchId, resultB);
         vm.prank(nonPlayer);
-        vm.expectRevert("Not arbiter");
+        vm.expectRevert(AMPSettlement.NotArbiter.selector);
         settlement.resolveDispute(matchId, AMPTypes.OutcomeCode.WIN_A);
     }
 
@@ -214,8 +214,8 @@ contract AMPSettlementTest is Test {
     }
 
     function testFeeInvalidBps() public {
-        vm.expectRevert("Invalid bps");
-        settlement.updateProtocolFeeBps(10001);
+        vm.expectRevert(AMPSettlement.FeeExceedsMax.selector);
+        settlement.updateProtocolFeeBps(501);
     }
 
     function testUpdateFeeRecipient() public {
@@ -245,7 +245,7 @@ contract AMPSettlementTest is Test {
         AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
             matchId: 999, outcome: outcome, transcriptHash: transcriptHash, signature: signature
         });
-        vm.expectRevert("Match ID mismatch");
+        vm.expectRevert(AMPSettlement.MatchIdMismatch.selector);
         settlement.submitAsyncResult(matchId, result);
     }
 }

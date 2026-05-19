@@ -61,7 +61,7 @@ contract AMPRegistryTest is Test {
         for (uint256 i = 0; i < 11; i++) {
             verifiers[i] = address(uint160(i + 1));
         }
-        vm.expectRevert("Too many verifiers");
+        vm.expectRevert(AMPRegistry.TooManyVerifiers.selector);
         registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
     }
 
@@ -91,7 +91,7 @@ contract AMPRegistryTest is Test {
         address[] memory newVerifiers = new address[](1);
         newVerifiers[0] = address(0x456);
         vm.prank(playerA);
-        vm.expectRevert("Not game admin");
+        vm.expectRevert(AMPRegistry.NotGameAdmin.selector);
         registry.updateGameVerifiers(gameId, newVerifiers);
     }
 
@@ -128,7 +128,7 @@ contract AMPRegistryTest is Test {
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
-        vm.expectRevert("Not player A");
+        vm.expectRevert(AMPRegistry.NotPlayerA.selector);
         registry.cancelMatch(matchId);
     }
 
@@ -158,7 +158,7 @@ contract AMPRegistryTest is Test {
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);
-        vm.expectRevert("Not expired yet");
+        vm.expectRevert(AMPRegistry.NotExpiredYet.selector);
         registry.expireMatch(matchId);
     }
 

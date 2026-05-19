@@ -184,13 +184,11 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
             }
 
             let rulesets_snapshot = {
-                let s = state.read().await;
-                s.rulesets.clone()
+                state.rulesets.read().await.clone()
             };
 
             let active_count = {
-                let s = state.read().await;
-                s.active_matches.len()
+                state.active_matches.read().await.len()
             };
 
             let mut queue = MATCH_QUEUE.lock().await;
@@ -201,6 +199,8 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
             let keys = queue.bucket_keys();
             for key in keys {
                 let ruleset = rulesets_snapshot.get(&key.1).cloned().unwrap_or_default();
+                let mut ruleset = ruleset;
+                ruleset.sort_rules();
 
                 loop {
                     let result = queue.try_match_bucket(
@@ -239,7 +239,6 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
                     let _ = m.entry_a.sender.send(p1);
                     let _ = m.entry_b.sender.send(p2);
 
-                    let mut s_write = state.write().await;
                     let now = now_ms();
                     let active = ActiveMatch {
                         match_id: match_id.clone(),
@@ -250,9 +249,8 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
                         settled_at_ms: None,
                         expires_at_ms: Some(now + state::MATCH_TTL_MS),
                     };
-                    s_write.active_matches.insert(match_id, active.clone());
-                    s_write.persist_match(&active.match_id, &active);
-                    drop(s_write);
+                    state.active_matches.write().await.insert(match_id, active.clone());
+                    state.persist_match(&active.match_id, &active);
                 }
             }
         }
@@ -275,8 +273,7 @@ fn start_cleanup_loop(
             }
 
             {
-                let mut s = state.write().await;
-                let removed = s.cleanup_expired_matches();
+                let removed = state.cleanup_expired_matches().await;
                 if removed > 0 {
                     info!("Cleanup: removed {} expired matches", removed);
                 }
@@ -432,10 +429,10 @@ impl match_session::Server for MatchSessionImpl {
 
                     {
                         let match_id_for_update = m_id.clone();
-                        let mut s = state.write().await;
-                        if let Some(m) = s.active_matches.get_mut(&match_id_for_update) {
+                        let mut matches = state.active_matches.write().await;
+                        if let Some(m) = matches.get_mut(&match_id_for_update) {
                             if m.settled {
-                                drop(s);
+                                drop(matches);
                                 return Err(::capnp::Error::failed("Match already settled".into()));
                             }
                             m.settled = true;
@@ -449,9 +446,9 @@ impl match_session::Server for MatchSessionImpl {
                                 settled_at_ms: m.settled_at_ms,
                                 expires_at_ms: m.expires_at_ms,
                             };
-                            s.archive_settled_match(&match_id_for_update, &m_clone);
+                            drop(matches);
+                            state.archive_settled_match(&match_id_for_update, &m_clone).await;
                         }
-                        drop(s);
                     }
 
                     tokio::task::spawn_local(async move {
@@ -559,8 +556,7 @@ impl user_session::Server for UserSessionImpl {
 
         Promise::from_future(async move {
             {
-                let s = app_state.read().await;
-                if let Some(p) = s.players.get(&p_id) {
+                if let Some(p) = app_state.players.get(&p_id) {
                     mmr = p.global_mmr;
                     mmr_unc = p.mmr_uncertainty;
                     region = p.region.clone();
@@ -635,8 +631,8 @@ impl user_session::Server for UserSessionImpl {
         let player_id = self.player_id.clone();
 
         Promise::from_future(async move {
-            let s = state.read().await;
-            match s.active_matches.get(&match_id) {
+            let matches = state.active_matches.read().await;
+            match matches.get(&match_id) {
                 Some(m) if !m.settled => {
                     let session = capnp_rpc::new_client(MatchSessionImpl {
                         match_id: match_id.clone(),
@@ -645,7 +641,7 @@ impl user_session::Server for UserSessionImpl {
                         player_service: p_service,
                         state: state.clone(),
                     });
-                    drop(s);
+                    drop(matches);
                     results.get().set_session(session);
                     info!("Player {} reconnected to match {}", player_id, match_id);
                     Ok(())
@@ -704,8 +700,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
                     let player_id = format!("0x{}", hex::encode(address.as_bytes()));
 
                     {
-                        let mut s = state.write().await;
-                        let profile = s
+                        let mut profile = state
                             .players
                             .entry(player_id.clone())
                             .or_insert_with(state::StoredPlayerProfile::default);
@@ -713,7 +708,8 @@ impl game_session_service::Server for GameSessionServiceImpl {
                         profile.is_online = true;
                         profile.last_login = state::now_ns();
                         let profile_clone = profile.clone();
-                        s.persist_player(&player_id, &profile_clone);
+                        drop(profile);
+                        state.persist_player(&player_id, &profile_clone);
                     }
 
                     info!("Authenticated player {} for game {}", player_id, game_id);
@@ -786,12 +782,12 @@ async fn main() -> Result<()> {
                     info!("Received shutdown signal, draining...");
                     cancel_clone.cancel();
 
-                    let s = state_for_shutdown.read().await;
-                    let active = s.active_matches.iter()
+                    let matches = state_for_shutdown.active_matches.read().await;
+                    let active = matches.iter()
                         .filter(|(_, m)| !m.settled)
                         .count();
                     info!("Active unsettled matches: {}", active);
-                    drop(s);
+                    drop(matches);
 
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     info!("Shutdown complete.");

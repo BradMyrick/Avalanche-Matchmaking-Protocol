@@ -19,6 +19,7 @@ capnp-rpc = "0.19"
 futures = "0.3"
 tokio-util = { version = "0.7", features = ["compat", "rt"] }
 sled = "0.34"
+dashmap = "6.0"
 
 [build-dependencies]
 capnpc = "0.19"

@@ -81,7 +81,7 @@ impl AuthService {
         }
 
         let expected_hash: H256 = hash_message(&entry.message);
-        let recovered = Signature::try_from(sig_bytes)
+        let recovered = Signature::try_from(&sig_bytes[..65])
             .map_err(|e| anyhow::anyhow!("invalid signature: {:?}", e))?
             .recover(expected_hash)
             .map_err(|e| anyhow::anyhow!("recovery failed: {:?}", e))?;

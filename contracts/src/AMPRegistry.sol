@@ -11,6 +11,27 @@ import "openzeppelin-contracts/contracts/utils/Pausable.sol";
 contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     using SafeERC20 for IERC20;
 
+    error NoReentrancy();
+    error NotSettlement();
+    error TooManyVerifiers();
+    error RTModeRequiresArbiter();
+    error NotGameAdmin();
+    error TimeoutTooShort();
+    error TimeoutTooLong();
+    error StakeTooLow();
+    error NativeTokenSentForERC20();
+    error MatchNotOpen();
+    error CannotJoinOwnMatch();
+    error StakeMismatch();
+    error NotPlayerA();
+    error RefundFailed();
+    error DisputeTimeoutNotReached();
+    error MatchNotExpirable();
+    error NotExpiredYet();
+    error NoFeesToWithdraw();
+    error TransferFailed();
+    error MatchNotSettlable();
+
     address public settlement;
     uint256 public nextGameId;
     uint256 public nextMatchId;
@@ -20,7 +41,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     bool private locked;
 
     modifier nonReentrant() {
-        require(!locked, "No reentrancy");
+        if (locked) revert NoReentrancy();
         locked = true;
         _;
         locked = false;
@@ -40,7 +61,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     event SettlementUpdated(address indexed settlementAddress);
 
     modifier onlySettlement() {
-        require(_msgSender() == settlement, "Not settlement");
+        if (_msgSender() != settlement) revert NotSettlement();
         _;
     }
 
@@ -53,9 +74,9 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         address stakeToken,
         address arbiter
     ) external whenNotPaused returns (uint256 gameId) {
-        require(verifiers.length <= 10, "Too many verifiers");
+        if (verifiers.length > 10) revert TooManyVerifiers();
         if (mode == AMPTypes.SettlementMode.RT_HASH_AGREE) {
-            require(arbiter != address(0), "RT mode requires arbiter");
+            if (arbiter == address(0)) revert RTModeRequiresArbiter();
         }
         gameId = nextGameId++;
         games[gameId] = AMPTypes.Game({
@@ -73,15 +94,15 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     }
 
     function setMatchTimeout(uint256 gameId, uint256 timeoutSeconds) external {
-        require(_msgSender() == games[gameId].admin, "Not game admin");
-        require(timeoutSeconds >= 5 minutes, "Timeout too short");
-        require(timeoutSeconds <= 30 days, "Timeout too long");
+        if (_msgSender() != games[gameId].admin) revert NotGameAdmin();
+        if (timeoutSeconds < 5 minutes) revert TimeoutTooShort();
+        if (timeoutSeconds > 30 days) revert TimeoutTooLong();
         games[gameId].matchTimeout = timeoutSeconds;
     }
 
     function updateGameVerifiers(uint256 gameId, address[] calldata verifiers) external {
-        require(_msgSender() == games[gameId].admin, "Not game admin");
-        require(verifiers.length <= 10, "Too many verifiers");
+        if (_msgSender() != games[gameId].admin) revert NotGameAdmin();
+        if (verifiers.length > 10) revert TooManyVerifiers();
         _clearVerifierMapping(gameId);
         games[gameId].verifiers = verifiers;
         _syncVerifierMapping(gameId, verifiers);
@@ -103,11 +124,11 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
 
         uint256 actualStake;
         if (game.stakeToken == address(0)) {
-            require(msg.value >= game.minStake, "Stake too low");
+            if (msg.value < game.minStake) revert StakeTooLow();
             actualStake = msg.value;
         } else {
-            require(stakeAmount >= game.minStake, "Stake too low");
-            require(msg.value == 0, "Native token sent for ERC20 match");
+            if (stakeAmount < game.minStake) revert StakeTooLow();
+            if (msg.value != 0) revert NativeTokenSentForERC20();
             IERC20(game.stakeToken).safeTransferFrom(_msgSender(), address(this), stakeAmount);
             actualStake = stakeAmount;
         }
@@ -127,15 +148,15 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
 
     function joinMatch(uint256 matchId) external payable whenNotPaused nonReentrant {
         AMPTypes.Match storage m = matches[matchId];
-        require(m.state == AMPTypes.MatchState.OPEN, "Match not open");
-        require(_msgSender() != m.playerA, "Cannot join own match");
+        if (m.state != AMPTypes.MatchState.OPEN) revert MatchNotOpen();
+        if (_msgSender() == m.playerA) revert CannotJoinOwnMatch();
 
         AMPTypes.Game storage game = games[m.gameId];
 
         if (game.stakeToken == address(0)) {
-            require(msg.value == m.stakeAmount, "Stake mismatch");
+            if (msg.value != m.stakeAmount) revert StakeMismatch();
         } else {
-            require(msg.value == 0, "Native token sent for ERC20 match");
+            if (msg.value != 0) revert NativeTokenSentForERC20();
             IERC20(game.stakeToken).safeTransferFrom(_msgSender(), address(this), m.stakeAmount);
         }
 
@@ -147,8 +168,8 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
 
     function cancelMatch(uint256 matchId) external nonReentrant whenNotPaused {
         AMPTypes.Match storage m = matches[matchId];
-        require(m.state == AMPTypes.MatchState.OPEN, "Match not open");
-        require(_msgSender() == m.playerA, "Not player A");
+        if (m.state != AMPTypes.MatchState.OPEN) revert MatchNotOpen();
+        if (_msgSender() != m.playerA) revert NotPlayerA();
 
         m.state = AMPTypes.MatchState.SETTLED;
 
@@ -158,7 +179,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
 
         if (game.stakeToken == address(0)) {
             (bool success,) = m.playerA.call{value: refund}("");
-            require(success, "Refund failed");
+            if (!success) revert RefundFailed();
         } else {
             IERC20(game.stakeToken).safeTransfer(m.playerA, refund);
         }
@@ -170,10 +191,10 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         AMPTypes.Match storage m = matches[matchId];
         AMPTypes.Game storage game = games[m.gameId];
         if (m.state == AMPTypes.MatchState.DISPUTED) {
-            require(block.timestamp >= m.createdAt + game.matchTimeout * 3, "Dispute timeout not reached");
+            if (block.timestamp < m.createdAt + game.matchTimeout * 3) revert DisputeTimeoutNotReached();
         } else {
-            require(m.state == AMPTypes.MatchState.OPEN || m.state == AMPTypes.MatchState.READY, "Match not expirable");
-            require(block.timestamp >= m.createdAt + game.matchTimeout, "Not expired yet");
+            if (m.state != AMPTypes.MatchState.OPEN && m.state != AMPTypes.MatchState.READY) revert MatchNotExpirable();
+            if (block.timestamp < m.createdAt + game.matchTimeout) revert NotExpiredYet();
         }
 
         m.state = AMPTypes.MatchState.EXPIRED;
@@ -190,7 +211,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
             if (amounts[i] > 0) {
                 if (game.stakeToken == address(0)) {
                     (bool success,) = recipients[i].call{value: amounts[i]}("");
-                    require(success, "Refund failed");
+                    if (!success) revert RefundFailed();
                 } else {
                     IERC20(game.stakeToken).safeTransfer(recipients[i], amounts[i]);
                 }
@@ -202,12 +223,12 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
 
     function withdrawFees(address token) external onlyOwner nonReentrant {
         uint256 amount = feeBalances[token];
-        require(amount > 0, "No fees to withdraw");
+        if (amount == 0) revert NoFeesToWithdraw();
         feeBalances[token] = 0;
 
         if (token == address(0)) {
             (bool success,) = owner().call{value: amount}("");
-            require(success, "Transfer Failed");
+            if (!success) revert TransferFailed();
         } else {
             IERC20(token).safeTransfer(owner(), amount);
         }
@@ -228,11 +249,10 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         uint256 protocolFee
     ) external onlySettlement nonReentrant {
         AMPTypes.Match storage m = matches[matchId];
-        require(
-            m.state == AMPTypes.MatchState.READY || m.state == AMPTypes.MatchState.OPEN
-                || m.state == AMPTypes.MatchState.DISPUTED,
-            "Match not settlable"
-        );
+        if (
+            m.state != AMPTypes.MatchState.READY && m.state != AMPTypes.MatchState.OPEN
+                && m.state != AMPTypes.MatchState.DISPUTED
+        ) revert MatchNotSettlable();
         m.state = newState;
 
         AMPTypes.Game storage game = games[m.gameId];
@@ -242,7 +262,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
             if (amounts[i] > 0) {
                 if (game.stakeToken == address(0)) {
                     (bool success,) = recipients[i].call{value: amounts[i]}("");
-                    require(success, "Transfer failed");
+                    if (!success) revert TransferFailed();
                 } else {
                     IERC20(game.stakeToken).safeTransfer(recipients[i], amounts[i]);
                 }

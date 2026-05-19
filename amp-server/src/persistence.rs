@@ -27,7 +27,6 @@ impl Persistence {
         let tree = self.db.open_tree(cf)?;
         let bytes = bincode::serialize(value)?;
         tree.insert(key.as_bytes(), bytes.as_slice())?;
-        tree.flush()?;
         Ok(())
     }
 
@@ -44,7 +43,6 @@ impl Persistence {
     pub fn delete(&self, cf: &str, key: &str) -> Result<()> {
         let tree = self.db.open_tree(cf)?;
         tree.remove(key.as_bytes())?;
-        tree.flush()?;
         Ok(())
     }
 

@@ -24,9 +24,7 @@ pub fn evaluate_rules(
     let mut hard_pass = true;
     let mut total_weight: f32 = 0.0;
 
-    let sorted_rules = sort_rules(&ruleset.rules);
-
-    for rule in &sorted_rules {
+    for rule in &ruleset.rules {
         if rule.is_hard_constraint && !hard_pass {
             break;
         }
@@ -282,16 +280,6 @@ fn evaluate_skill_decay(params: &SkillDecayParams, a: &QueueEntry, b: &QueueEntr
         passes: a_floor && b_floor,
         score: if diff < 200.0 { 1.0 } else { 0.5 },
     }
-}
-
-fn sort_rules(rules: &[StoredRule]) -> Vec<&StoredRule> {
-    let mut sorted: Vec<&StoredRule> = rules.iter().collect();
-    sorted.sort_by(|a, b| {
-        b.is_hard_constraint
-            .cmp(&a.is_hard_constraint)
-            .then_with(|| a.priority.cmp(&b.priority))
-    });
-    sorted
 }
 
 fn accumulate_quality(
