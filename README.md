@@ -1,7 +1,5 @@
 # Avalanche Matchmaking Protocol (AMP)
 
-![AMP Hero Banner](docs/images/hero_banner.png)
-
 ### Any Engine. Any Language. Trustless Settlement.
 
 AMP is a decentralized, high-performance matchmaking protocol built on Avalanche. It provides game developers with enterprise-grade matchmaking capabilities—similar to AWS FlexMatch—but with the added security and transparency of on-chain verifiers and cryptographically settled outcomes.
@@ -9,8 +7,6 @@ AMP is a decentralized, high-performance matchmaking protocol built on Avalanche
 ---
 
 ## Award Winning Technology
-
-![AMP Grant Badge](docs/images/grant_badge.png)
 
 AMP was awarded a **$15,000.00 Merit Grant** for placing in the **top 20 projects** of the **Avalanche Build Games 2026**. This recognition highlights our commitment to building the future of competitive gaming on the Avalanche C-Chain.
 
