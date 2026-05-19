@@ -1,3 +1,7 @@
+---
+title: FAQ
+---
+
 # FAQ
 
 Common questions about AMP.
@@ -6,7 +10,7 @@ Common questions about AMP.
 Yes. AMP is open-source. However, the value of the protocol lies in the **Verifier Network** and the **Trust Ecosystem** built around the shared settlement contracts on Avalanche.
 
 ### "What if the verifier is wrong?"
-In Phase 1, we rely on a whitelist of reputable verifiers. In Phase 2, we are introducing **Fraud Proofs**, allowing anyone to challenge an incorrect attestation by providing the transcript that proves the Verifier's result was invalid.
+In Phase 1, we rely on a whitelist of reputable verifiers. For `RT_HASH_AGREE` mode, disputed matches are resolved by a designated arbiter. In Phase 2, we are introducing **Fraud Proofs**, allowing anyone to challenge an incorrect attestation by providing the transcript that proves the Verifier's result was invalid.
 
 ### "Does AMP provide anti-cheat?"
 AMP provides **verifiable anti-cheat**. Because we have the match transcript, the `ASYNC_VERIFIER` can catch many common cheats (speed hacks, wall hacks) by re-simulating the game logic. However, AMP is not a replacement for traditional anti-cheat (like Easy Anti-Cheat) which runs on the local machine to prevent memory manipulation.
@@ -15,4 +19,16 @@ AMP provides **verifiable anti-cheat**. Because we have the match transcript, th
 While optimized for Avalanche (using Avalanche-specific settlement and targeting an Avalanche Subnet), the core protocol logic is chain-agnostic.
 
 ### "What engines are supported?"
-We currently provide SDKs for **C++ (Unreal)** and **C# (Unity)**. Because we use Cap'n Proto, you can easily generate an SDK for any language (Rust, Go, Python, etc.) that supports the Cap'n Proto RPC specification.
+We provide SDKs for **C++ (Unreal)**, **C# (Unity/Godot)**, **Go**, **Python**, and **Rust**. Because we use Cap'n Proto, you can generate an SDK for any language that supports the Cap'n Proto RPC specification.
+
+### "How does authentication work?"
+AMP uses a challenge-response flow: the server issues a time-bound nonce, the client signs it with their wallet, and the server verifies the signature. This replaces static token auth and prevents replay attacks.
+
+### "What happens if a match expires?"
+Expired matches refund all staked funds to the players. OPEN/READY matches expire after the configured match timeout. DISPUTED matches require 3x the timeout before expiry.
+
+### "Can players cancel a match?"
+Yes. Player A can cancel an OPEN match (before player B joins) and receive a full refund. Once a second player joins, the match moves to READY and cannot be cancelled.
+
+### "What stake tokens are supported?"
+Both native AVAX and any ERC-20 token. The game admin specifies the stake token during game registration.

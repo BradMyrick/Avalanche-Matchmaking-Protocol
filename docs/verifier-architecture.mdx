@@ -1,3 +1,7 @@
+---
+title: Verifier Architecture
+---
+
 # Verifier Architecture
 
 The AMP Verifier is the "heart" of the protocol's trust model. It is a high-performance Rust-based service responsible for matching players and certifying match outcomes.
@@ -5,9 +9,36 @@ The AMP Verifier is the "heart" of the protocol's trust model. It is a high-perf
 ## Trust Model: "Trust but Verify"
 
 AMP uses a hybrid trust model:
-1.  **Matchmaking:** Players trust the Verifier to pair them fairly based on capabilities and MMR.
-2.  **Gameplay:** In `RT_HASH_AGREE` mode, players trust each other not to collude, with the Verifier acting as a witness to their hashed state.
-3.  **Settlement:** The Avalanche network trusts the Verifier's cryptographic signature (attestation) to release funds from escrow.
+1. **Matchmaking**: Players trust the Verifier to pair them fairly based on MMR and rulesets.
+2. **Authentication**: Challenge-response auth binds sessions to wallet keys via server-issued nonces.
+3. **Gameplay**: In `RT_HASH_AGREE` mode, players trust each other not to collude, with the Verifier acting as a witness to their hashed state.
+4. **Settlement**: The Avalanche network trusts the Verifier's cryptographic signature (attestation) to release funds from escrow.
+
+## Internal Architecture
+
+### Match Queue (`IndexedQueue`)
+The matchmaker uses an `IndexedQueue` data structure:
+- Players are bucketed by `(gameId, rulesetId)`.
+- Within each bucket, entries are sorted by MMR.
+- Binary search finds skill-compatible pairs within a configured skill window.
+- The matchmaker tick runs every 50ms.
+- Maximum active matches capped at 10,000.
+
+### Authentication (`auth.rs`)
+- Server issues time-bound challenges (nonce + 60s TTL + gameId binding).
+- `cleanup_expired` runs on every cleanup cycle to purge stale challenges.
+- Login verifies the signed nonce against the challenge store.
+
+### Match State Management (`state.rs`)
+- Active matches stored in-memory with `settled_at_ms` and `expires_at_ms`.
+- `archive_settled_match` moves completed matches out of active storage.
+- `cleanup_expired_matches` runs every 60 seconds to expire stale matches.
+- Idempotent outcome submission via write-lock + deduplication guard.
+
+### Relayer Integration
+- Outcomes are enqueued to the `amp-relayer` for on-chain settlement.
+- Notification failures trigger exponential backoff retry (500ms -- 4s, 5 attempts).
+- The relayer uses sled for persistent queue, EIP-1559 gas, and nonce tracking.
 
 ## Attestation Format
 
@@ -22,17 +53,24 @@ When a match is settled, the Verifier generates a signed **Attestation**. This i
 ## Settlement Modes (Deep Dive)
 
 ### 1. Real-Time Hash Agreement (`RT_HASH_AGREE`)
-- **Latency:** Sub-millisecond.
-- **Cost:** Practically zero.
-- **Use Case:** Trusted competitive play between known entities or low-stakes games.
+- **Latency**: Sub-millisecond.
+- **Cost**: Practically zero (one on-chain tx for settlement).
+- **Use Case**: Trusted competitive play, deterministic lockstep games.
 
 ### 2. Asynchronous Replay (`ASYNC_VERIFIER`)
-- **Latency:** Seconds to Minutes (depending on match length).
-- **Cost:** Compute-intensive (requires running a headless game instance).
-- **Use Case:** High-stakes tournaments, anti-cheat enforcement, or when a desync is detected in real-time mode.
+- **Latency**: Seconds to minutes (depending on match length).
+- **Cost**: Compute-intensive (requires running a headless game instance).
+- **Use Case**: High-stakes tournaments, anti-cheat enforcement, or when a desync is detected in real-time mode.
 
 ---
 
 ## Security & Anti-Cheat
 
 Because the Verifier has access to the full `MatchTranscript` (all inputs from all players), it can detect impossible movements or actions (e.g., speed hacks) by re-simulating the game logic. In Phase 2, we will introduce **Fraud Proofs**, allowing third parties to challenge a Verifier's attestation if they suspect foul play.
+
+### Current Security Measures
+- **TOCTOU prevention**: Single write-lock + idempotency guard on outcome submission.
+- **Self-join guard**: Players cannot join their own matches.
+- ** Arbiter validation**: RT_HASH_AGREE games require a designated arbiter for disputes.
+- **Dispute timeout**: Disputed matches can only be expired after 3x the match timeout.
+- **Match timeout cap**: Maximum 30-day match timeout to prevent fund lockup.

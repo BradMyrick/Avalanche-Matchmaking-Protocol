@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.33;
 
 import "forge-std/Script.sol";
 import "../src/AMPRegistry.sol";
@@ -12,7 +12,7 @@ contract DeployScript is Script {
 
         AMPRegistry registry = new AMPRegistry(address(0));
         AMPSettlement settlement = new AMPSettlement(address(registry), address(0));
-        
+
         registry.setSettlement(address(settlement));
 
         vm.stopBroadcast();

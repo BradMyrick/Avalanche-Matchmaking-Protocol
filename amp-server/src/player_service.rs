@@ -3,7 +3,9 @@ use capnp_rpc::pry;
 use tracing::{info, warn};
 
 use crate::matchmaker::glicko2_update;
-use crate::state::{now_ms, now_ns, AppState, StoredGameStats, StoredPlayerProfile};
+use crate::state::{
+    AppState, StoredGameStats, StoredPlayerProfile, now_ms, now_ns,
+};
 
 pub struct PlayerServiceImpl {
     pub state: AppState,
@@ -79,7 +81,9 @@ impl PlayerServiceImpl {
 }
 use crate::player_profile_capnp;
 
-impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl {
+impl player_profile_capnp::player_profile_service::Server
+    for PlayerServiceImpl
+{
     fn create_or_update_profile(
         &mut self,
         params: player_profile_capnp::player_profile_service::CreateOrUpdateProfileParams,
@@ -95,7 +99,8 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
             .ok()
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        let wallet_address = p.get_wallet_address().unwrap_or_default().to_vec();
+        let wallet_address =
+            p.get_wallet_address().unwrap_or_default().to_vec();
         let preferred_role = p
             .get_preferred_role()
             .ok()
@@ -122,7 +127,8 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
         let state = self.state.clone();
         Promise::from_future(async move {
             let mut state_w = state.write().await;
-            let id = player_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let id =
+                player_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let profile = state_w
                 .players
                 .entry(id.clone())
@@ -181,7 +187,8 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
                     let mut out = results.get().init_profile();
                     out.set_display_name(&profile.display_name);
                     if !profile.wallet_address.is_empty() {
-                        out.reborrow().set_wallet_address(&profile.wallet_address);
+                        out.reborrow()
+                            .set_wallet_address(&profile.wallet_address);
                     }
 
                     {
@@ -210,7 +217,10 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
                         restr.set_is_banned(profile.restrictions.is_banned);
                         restr.set_ban_reason(&profile.restrictions.ban_reason);
                         restr.set_matchmaking_cool_down(
-                            profile.restrictions.matchmaking_cooldown_until.saturating_sub(now_ms()),
+                            profile
+                                .restrictions
+                                .matchmaking_cooldown_until
+                                .saturating_sub(now_ms()),
                         );
                     }
                 }
@@ -231,9 +241,12 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
         _results: player_profile_capnp::player_profile_service::RecordMatchResultResults,
     ) -> Promise<(), ::capnp::Error> {
         let p = pry!(params.get());
-        let player_id = String::from_utf8_lossy(pry!(p.get_player_id())).to_string();
-        let opponent_id = String::from_utf8_lossy(pry!(p.get_opponent_id())).to_string();
-        let game_id = String::from_utf8_lossy(pry!(p.get_game_id())).to_string();
+        let player_id =
+            String::from_utf8_lossy(pry!(p.get_player_id())).to_string();
+        let opponent_id =
+            String::from_utf8_lossy(pry!(p.get_opponent_id())).to_string();
+        let game_id =
+            String::from_utf8_lossy(pry!(p.get_game_id())).to_string();
         let score = p.get_score();
         let play_time_ms = p.get_play_time_ms();
 
@@ -241,7 +254,13 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
         Promise::from_future(async move {
             let service = PlayerServiceImpl { state };
             if let Err(e) = service
-                .record_match_result(&player_id, &opponent_id, &game_id, score, play_time_ms)
+                .record_match_result(
+                    &player_id,
+                    &opponent_id,
+                    &game_id,
+                    score,
+                    play_time_ms,
+                )
                 .await
             {
                 warn!("record_match_result failed: {}", e);
@@ -257,7 +276,8 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
         _: player_profile_capnp::player_profile_service::SetOfflineResults,
     ) -> Promise<(), ::capnp::Error> {
         let p = pry!(params.get());
-        let player_id = String::from_utf8_lossy(pry!(p.get_player_id())).to_string();
+        let player_id =
+            String::from_utf8_lossy(pry!(p.get_player_id())).to_string();
         let state = self.state.clone();
 
         Promise::from_future(async move {
@@ -282,7 +302,8 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
             let s = state.read().await;
             let online_players: Vec<&StoredPlayerProfile> =
                 s.players.values().filter(|p| p.is_online).collect();
-            let mut list = results.get().init_players(online_players.len() as u32);
+            let mut list =
+                results.get().init_players(online_players.len() as u32);
             for (i, profile) in online_players.iter().enumerate() {
                 let mut entry = list.reborrow().get(i as u32);
                 entry.set_display_name(&profile.display_name);
@@ -300,7 +321,8 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
         _: player_profile_capnp::player_profile_service::ApplyRestrictionResults,
     ) -> Promise<(), ::capnp::Error> {
         let p = pry!(params.get());
-        let player_id = String::from_utf8_lossy(pry!(p.get_player_id())).to_string();
+        let player_id =
+            String::from_utf8_lossy(pry!(p.get_player_id())).to_string();
         let ban = p.get_ban();
         let cooldown_ms = p.get_cooldown_ms();
         let state = self.state.clone();
@@ -310,7 +332,8 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
             if let Some(profile) = s.players.get_mut(&player_id) {
                 if ban {
                     profile.restrictions.is_banned = true;
-                    profile.restrictions.ban_reason = "admin_restriction".to_string();
+                    profile.restrictions.ban_reason =
+                        "admin_restriction".to_string();
                     profile.restrictions.ban_expiry = u64::MAX;
                     info!("Player {} banned", player_id);
                 } else {
@@ -320,8 +343,12 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
                     info!("Player {} unbanned", player_id);
                 }
                 if cooldown_ms > 0 {
-                    profile.restrictions.matchmaking_cooldown_until = now_ms() + cooldown_ms;
-                    info!("Player {} cooldown set for {}ms", player_id, cooldown_ms);
+                    profile.restrictions.matchmaking_cooldown_until =
+                        now_ms() + cooldown_ms;
+                    info!(
+                        "Player {} cooldown set for {}ms",
+                        player_id, cooldown_ms
+                    );
                 }
                 let profile_clone = profile.clone();
                 s.persist_player(&player_id, &profile_clone);

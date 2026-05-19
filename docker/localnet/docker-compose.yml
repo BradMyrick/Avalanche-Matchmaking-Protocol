@@ -23,37 +23,25 @@ services:
       retries: 3
       start_period: 5s
 
-  amp-core:
+  amp-server:
     build:
-      context: ../../amp-core
-      dockerfile: Dockerfile
-    container_name: amp_core
+      context: ../../
+      dockerfile: docker/amp-server.Dockerfile
+    container_name: amp_server_localnet
     depends_on:
       avalanche:
         condition: service_healthy
     ports:
-      - "9660:9660"
+      - "50051:50051"
     volumes:
-      - ../../amp-core:/app
+      - amp-server-data:/app/data
     environment:
-      - AVALANCHE_RPC_URL=http://avalanche:9650
-      - AMP_CHAIN_ID=amp-12345
-    command: ["/app/amp-core"]
-
-  # Example matchmaking service
-  matchmaking-example:
-    build:
-      context: ../../amp-examples/basic-matchmaking
-      dockerfile: Dockerfile
-    container_name: matchmaking_example
-    depends_on:
-      - amp-core
-    ports:
-      - "9670:9670"
-    environment:
-      - AMP_RPC_URL=http://amp-core:9660
-    command: ["npm", "start"]
+      - AMP_ADDR=0.0.0.0:50051
+      - VERIFIER_KEY=${AMP_VERIFIER_PRIVATE_KEY}
+      - RELAYER_RPC_ADDR=${RELAYER_RPC_ADDR:-amp-relayer:50052}
+      - TELEMETRY_ADDR=${TELEMETRY_ADDR:-amp-telemetry:4317}
 
 volumes:
   avalanche_data:
     driver: local
+  amp-server-data:

@@ -16,13 +16,25 @@ fn main() {
     println!("cargo:rerun-if-changed={}/game_types.capnp", schema_dir_str);
     println!("cargo:rerun-if-changed={}/service.capnp", schema_dir_str);
     println!("cargo:rerun-if-changed={}/game_core.capnp", schema_dir_str);
-    println!("cargo:rerun-if-changed={}/amp_telemetry.capnp", schema_dir_str);
+    println!(
+        "cargo:rerun-if-changed={}/amp_telemetry.capnp",
+        schema_dir_str
+    );
     println!("cargo:rerun-if-changed={}/relayer.capnp", schema_dir_str);
 
     // New AMP FlexMatch-style schemas
-    println!("cargo:rerun-if-changed={}/player_profile.capnp", schema_dir_str);
-    println!("cargo:rerun-if-changed={}/matchmaking_rules.capnp", schema_dir_str);
-    println!("cargo:rerun-if-changed={}/game_registry.capnp", schema_dir_str);
+    println!(
+        "cargo:rerun-if-changed={}/player_profile.capnp",
+        schema_dir_str
+    );
+    println!(
+        "cargo:rerun-if-changed={}/matchmaking_rules.capnp",
+        schema_dir_str
+    );
+    println!(
+        "cargo:rerun-if-changed={}/game_registry.capnp",
+        schema_dir_str
+    );
     println!("cargo:rerun-if-changed={}/inventory.capnp", schema_dir_str);
     println!("cargo:rerun-if-changed={}/tournament.capnp", schema_dir_str);
     println!("cargo:rerun-if-changed={}/security.capnp", schema_dir_str);

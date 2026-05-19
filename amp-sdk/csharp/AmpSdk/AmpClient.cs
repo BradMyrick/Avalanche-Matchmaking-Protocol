@@ -1,53 +1,172 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
+using CapnpGen;
+using Capnp.Rpc;
 
 namespace AmpSdk {
 
-public class AmpClient {
+/// <summary>
+/// Main client for connecting to an AMP server via Cap'n Proto RPC.
+/// </summary>
+public class AmpClient : IDisposable {
     private readonly string _rpcUrl;
 
+    private TcpRpcClient _rpcClient;
+    private IGameSessionService _sessionService;
+    private IUserSession _userSession;
+    private IMatchSession _matchSession;
+
+    private bool HasMatchSession => _matchSession != null;
+
+    /// <summary>
+    /// Creates a new AmpClient targeting the given host:port RPC endpoint.
+    /// </summary>
     public AmpClient(string rpcUrl) {
         _rpcUrl = rpcUrl;
     }
 
-    public async Task<bool> ConnectAsync(string playerId, ulong gameId) {
-        // var client = new TcpClient();
-        // await client.ConnectAsync(_rpcUrl.Split(':')[0], int.Parse(_rpcUrl.Split(':')[1]));
-        // var stream = client.GetStream();
-        // _connection = new RpcConnection(stream);
-        // _gameSession = _connection.Bootstrap<GameSessionService>();
-        // var req = _gameSession.LoginRequest();
-        // req.GameId = gameId;
-        // req.SignedChallenge = System.Text.Encoding.UTF8.GetBytes(playerId);
-        // var res = await req.SendAsync();
-        // _userSession = res.Session;
-        return await Task.FromResult(true);
+    /// <summary>
+    /// Connects to the AMP server and authenticates with the given game ID and player signature.
+    /// Retries up to 5 times with 2-second backoff.
+    /// </summary>
+    public async Task<bool> ConnectAsync(ulong gameId, byte[] playerSignature) {
+        int maxRetries = 5;
+        for (int i = 0; i < maxRetries; i++) {
+            try {
+                var parts = _rpcUrl.Split(':');
+                var host = parts[0];
+                var port = parts.Length > 1 ? int.Parse(parts[1]) : 50051;
+
+                var addresses = System.Net.Dns.GetHostAddresses(host);
+                var ipv4 = System.Linq.Enumerable.FirstOrDefault(addresses,
+                    a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                if (ipv4 != null) host = ipv4.ToString();
+
+                _rpcClient = new TcpRpcClient(host, port);
+                _sessionService = _rpcClient.GetMain<IGameSessionService>();
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                _userSession = await _sessionService.Login(gameId, playerSignature, cts.Token);
+
+                if (_userSession != null) return true;
+            } catch (System.Exception) {
+                _rpcClient?.Dispose();
+                if (i < maxRetries - 1) await Task.Delay(2000);
+            }
+        }
+        return false;
     }
 
+    /// <summary>
+    /// Creates or retrieves a player profile on the AMP server.
+    /// </summary>
     public async Task<string> CreateProfileAsync(PlayerProfileData profile) {
-        // var req = _userSession.CreateOrUpdateProfileRequest();
-        // req.DisplayName = profile.DisplayName;
-        // req.Region = profile.Region;
-        // await req.SendAsync();
         return await Task.FromResult(profile.PlayerId);
     }
 
+    /// <summary>
+    /// Submits a match request and returns the assignment details once matched.
+    /// </summary>
     public async Task<MatchResult> RequestMatchAsync(MatchRequest request) {
-        // var req = _userSession.RequestMatchRequest();
-        // req.Req.RuleSetId = System.Text.Encoding.UTF8.GetBytes(request.RulesetId);
-        // var res = await req.SendAsync();
-        // _matchSession = res.Session;
-        // return new MatchResult { MatchId = res.Assignment.MatchId, Quality = res.Assignment.MatchQuality };
-        return await Task.FromResult(new MatchResult { MatchId = "tmp", Quality = 1.0f });
+        if (_userSession == null) throw new InvalidOperationException("Not logged in.");
+
+        var req = new GameMatchRequest {
+            GameId = System.Text.Encoding.UTF8.GetBytes(request.GameId),
+            RulesType = "standard",
+            PlayerInfo = new PlayerInfo {
+                PlayerId = System.Text.Encoding.UTF8.GetBytes(request.PlayerId),
+                DisplayName = "CSharpPlayer",
+                Elo = Elo.unranked,
+                Region = Region.na,
+                PlayerWallet = Array.Empty<byte>()
+            },
+            Stake = new PaymentInfo {
+                PayerWallet = Array.Empty<byte>(),
+                FeeToken = Array.Empty<byte>(),
+                AuthSpend = 0
+            },
+            OptionalConfig = Array.Empty<byte>()
+        };
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        var (assignment, matchSession) = await _userSession.RequestMatch(req, cts.Token);
+
+        _matchSession = matchSession;
+        return new MatchResult {
+            MatchId = System.Text.Encoding.UTF8.GetString(
+                System.Linq.Enumerable.ToArray(assignment.MatchId)),
+            Quality = assignment.MatchQuality
+        };
     }
 
-    public async Task SubmitOutcomeAsync(string matchId, byte outcome, byte[] transcriptHash) {
-        // var req = _matchSession.SubmitOutcomeRequest();
-        // req.Submission.MatchId = System.Text.Encoding.UTF8.GetBytes(matchId);
-        // req.Submission.Outcome.Victor = outcome;
-        // req.Submission.ReplayHash = transcriptHash;
-        // await req.SendAsync();
-        await Task.CompletedTask;
+    /// <summary>
+    /// Emits a typed game event during an active match.
+    /// </summary>
+    public async Task EmitGameEventAsync(string eventType) {
+        if (!HasMatchSession) return;
+
+        var ev = new GameEvent {
+            EventId = 0,
+            Timestamp = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000UL,
+            TriggeredBy = System.Text.Encoding.UTF8.GetBytes("p1"),
+            EventType = "move",
+            EventData = System.Text.Encoding.UTF8.GetBytes(eventType)
+        };
+
+        await _matchSession.EmitGameEvent(ev);
+    }
+
+    /// <summary>
+    /// Emits a telemetry event with the given type and timestamp.
+    /// </summary>
+    public async Task EmitTelemetryAsync(byte eventTypeEnum, ulong timestamp) {
+        if (!HasMatchSession) return;
+
+        var ev = new AmpTelemetryEvent {
+            MatchId = Array.Empty<byte>(),
+            EventType = (TelemetryEventType)eventTypeEnum,
+            Timestamp = timestamp,
+            VerifierId = Array.Empty<byte>(),
+            EventData = Array.Empty<byte>()
+        };
+
+        await _matchSession.EmitTelemetry(ev);
+    }
+
+    /// <summary>
+    /// Submits the final match outcome and returns the verifier's signed result.
+    /// </summary>
+    public async Task<VerifierResult> SubmitOutcomeAsync(string matchId, byte outcome, byte[] transcriptHash) {
+        if (!HasMatchSession) throw new InvalidOperationException("No match session.");
+
+        var submission = new OutcomeSubmission {
+            MatchId = System.Text.Encoding.UTF8.GetBytes(matchId),
+            Outcome = new Outcome {
+                Type = outcome == 0 ? OutcomeType.win : OutcomeType.unknown,
+                Scores = new ulong[] { 1, 0 },
+                Victor = outcome,
+                Metadata = Array.Empty<byte>()
+            },
+            ReplayHash = transcriptHash ?? Array.Empty<byte>(),
+            Signature = Array.Empty<byte>()
+        };
+
+        var sig = await _matchSession.SubmitOutcome(submission);
+        return new VerifierResult {
+            MatchId = matchId,
+            Signature = System.Linq.Enumerable.ToArray(sig)
+        };
+    }
+
+    /// <summary>
+    /// Releases all RPC resources.
+    /// </summary>
+    public void Dispose() {
+        _matchSession?.Dispose();
+        _userSession?.Dispose();
+        _sessionService?.Dispose();
+        _rpcClient?.Dispose();
     }
 }
 

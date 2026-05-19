@@ -1,26 +1,43 @@
 {
   "name": "Avalanche Matchmaking Protocol",
-  "description": "Any Engine. Any Language. Scale your game effortlessly with decentralized matchmaking.",
-  "logo": "https://avatars.githubusercontent.com/u/10452331?s=200&v=4",
-  "theme": "#E84142",
-  "sidebar": {
-    "Overview": [
-      "index",
-      "architecture",
-      "sdk-overview"
-    ],
-    "Guides": [
-      "integration-guide",
-      "match-transcripts",
-      "running-a-verifier"
-    ],
-    "Reference": [
-      "verifier-architecture",
-      "capnp-schemas",
-      "contracts-reference",
-      "roadmap",
-      "faq",
-      "glossary"
-    ]
-  }
+  "description": "Decentralized matchmaking and trustless settlement for competitive Avalanche games.",
+  "theme": {
+    "primary": "#E84142"
+  },
+  "sidebar": [
+    {
+      "group": "Overview",
+      "pages": [
+        { "title": "Introduction", "href": "/" },
+        { "title": "Architecture", "href": "/architecture" },
+        { "title": "SDK Overview", "href": "/sdk-overview" }
+      ]
+    },
+    {
+      "group": "Guides",
+      "pages": [
+        { "title": "Integration Guide", "href": "/integration-guide" },
+        { "title": "Match Transcripts", "href": "/match-transcripts" },
+        { "title": "Running a Verifier", "href": "/running-a-verifier" }
+      ]
+    },
+    {
+      "group": "Reference",
+      "pages": [
+        { "title": "Verifier Architecture", "href": "/verifier-architecture" },
+        { "title": "Cap'n Proto Schemas", "href": "/capnp-schemas" },
+        { "title": "Contracts Reference", "href": "/contracts-reference" },
+        { "title": "Roadmap", "href": "/roadmap" },
+        { "title": "FAQ", "href": "/faq" },
+        { "title": "Glossary", "href": "/glossary" }
+      ]
+    }
+  ],
+  "anchors": [
+    {
+      "title": "GitHub",
+      "icon": "github",
+      "href": "https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol"
+    }
+  ]
 }

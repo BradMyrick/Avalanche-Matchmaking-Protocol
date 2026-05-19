@@ -1,6 +1,7 @@
 use crate::rules;
 use crate::state::{MatchQualityDetail, QueueEntry, StoredRuleSet};
 
+#[allow(dead_code)]
 pub fn find_match(
     queue: &[QueueEntry],
     new_entry: &QueueEntry,

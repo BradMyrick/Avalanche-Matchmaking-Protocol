@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
 ethers = { version = "2.0", features = ["rustls", "ws"] }
 anyhow = "1.0"
 tracing = "0.1"
@@ -16,7 +17,8 @@ dotenv = "0.15"
 capnp = "0.19"
 capnp-rpc = "0.19"
 futures = "0.3"
-tokio-util = { version = "0.7", features = ["compat"] }
+tokio-util = { version = "0.7", features = ["compat", "rt"] }
+sled = "0.34"
 
 [build-dependencies]
 capnpc = "0.19"

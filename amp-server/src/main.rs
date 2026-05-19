@@ -7,48 +7,173 @@ use ethers_signers::LocalWallet;
 use lazy_static::lazy_static;
 use std::env;
 use std::sync::Arc;
-use uuid::Uuid;
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use std::time::Duration;
 use tokio::sync::oneshot;
-use tracing::{info, error, warn};
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use tracing::{error, info, warn};
+use uuid::Uuid;
 
-mod state;
-mod matchmaker;
-mod player_service;
-mod persistence;
 mod auth;
+mod match_queue;
+mod matchmaker;
+mod persistence;
+mod player_service;
 mod rules;
+mod state;
 
-use state::{AppState, QueueEntry, MatchFoundPayload, ActiveMatch, now_ms};
+use state::{ActiveMatch, AppState, MatchFoundPayload, QueueEntry, now_ms};
 
-pub mod game_types_capnp { include!(concat!(env!("OUT_DIR"), "/game_types_capnp.rs")); }
-pub mod match_capnp { include!(concat!(env!("OUT_DIR"), "/match_capnp.rs")); }
-pub mod service_capnp { include!(concat!(env!("OUT_DIR"), "/service_capnp.rs")); }
-pub mod game_core_capnp { include!(concat!(env!("OUT_DIR"), "/game_core_capnp.rs")); }
-pub mod amp_telemetry_capnp { include!(concat!(env!("OUT_DIR"), "/amp_telemetry_capnp.rs")); }
-pub mod relayer_capnp { include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs")); }
-pub mod player_profile_capnp { include!(concat!(env!("OUT_DIR"), "/player_profile_capnp.rs")); }
-pub mod matchmaking_rules_capnp { include!(concat!(env!("OUT_DIR"), "/matchmaking_rules_capnp.rs")); }
-pub mod game_registry_capnp { include!(concat!(env!("OUT_DIR"), "/game_registry_capnp.rs")); }
-pub mod inventory_capnp { include!(concat!(env!("OUT_DIR"), "/inventory_capnp.rs")); }
-pub mod tournament_capnp { include!(concat!(env!("OUT_DIR"), "/tournament_capnp.rs")); }
-pub mod security_capnp { include!(concat!(env!("OUT_DIR"), "/security_capnp.rs")); }
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod game_types_capnp {
+    include!(concat!(env!("OUT_DIR"), "/game_types_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod match_capnp {
+    include!(concat!(env!("OUT_DIR"), "/match_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod service_capnp {
+    include!(concat!(env!("OUT_DIR"), "/service_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod game_core_capnp {
+    include!(concat!(env!("OUT_DIR"), "/game_core_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod amp_telemetry_capnp {
+    include!(concat!(env!("OUT_DIR"), "/amp_telemetry_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod relayer_capnp {
+    include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod player_profile_capnp {
+    include!(concat!(env!("OUT_DIR"), "/player_profile_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod matchmaking_rules_capnp {
+    include!(concat!(env!("OUT_DIR"), "/matchmaking_rules_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod game_registry_capnp {
+    include!(concat!(env!("OUT_DIR"), "/game_registry_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod inventory_capnp {
+    include!(concat!(env!("OUT_DIR"), "/inventory_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod tournament_capnp {
+    include!(concat!(env!("OUT_DIR"), "/tournament_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod security_capnp {
+    include!(concat!(env!("OUT_DIR"), "/security_capnp.rs"));
+}
 
 use service_capnp::*;
 
 lazy_static! {
-    static ref MATCH_QUEUE: Arc<tokio::sync::Mutex<Vec<QueueEntry>>> = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    static ref MATCH_QUEUE: Arc<tokio::sync::Mutex<match_queue::IndexedQueue>> =
+        Arc::new(tokio::sync::Mutex::new(match_queue::IndexedQueue::new()));
 }
 
-async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::CancellationToken) {
+async fn start_matchmaker_loop(
+    state: AppState,
+    cancel: tokio_util::sync::CancellationToken,
+) {
     tokio::spawn(async move {
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => {
                     info!("Matchmaker loop shutting down, draining queue...");
                     let mut queue = MATCH_QUEUE.lock().await;
-                    for entry in queue.drain(..) {
+                    for entry in queue.drain_all() {
                         let _ = entry.sender.send(MatchFoundPayload {
                             match_id: String::new(),
                             opponent_ids: vec![],
@@ -58,75 +183,127 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
                     info!("Queue drained.");
                     return;
                 }
-                _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
             }
 
-            let mut queue = MATCH_QUEUE.lock().await;
-            if queue.len() < 2 { continue; }
-
-            let mut i = 0;
-            while i < queue.len() {
-                let entry_a = &queue[i];
-
+            let rulesets_snapshot = {
                 let s = state.read().await;
-                let ruleset = s.rulesets.get(&entry_a.ruleset_id).cloned().unwrap_or_default();
-                drop(s);
+                s.rulesets.clone()
+            };
 
-                let sub_queue = &queue[i + 1..];
-                if let Some(mut target_idx) = matchmaker::find_match(sub_queue, entry_a, &ruleset) {
-                    target_idx += i + 1;
+            let active_count = {
+                let s = state.read().await;
+                s.active_matches.len()
+            };
 
-                    let entry_b = queue.remove(target_idx);
-                    let entry_a = queue.remove(i);
+            let mut queue = MATCH_QUEUE.lock().await;
+            if queue.len() < 2 {
+                continue;
+            }
 
-                    let quality = matchmaker::compute_match_quality(&entry_a, &entry_b, &ruleset);
+            let keys = queue.bucket_keys();
+            for key in keys {
+                let ruleset =
+                    rulesets_snapshot.get(&key.1).cloned().unwrap_or_default();
+
+                loop {
+                    let result = queue.try_match_bucket(
+                        &key,
+                        &ruleset,
+                        state::MAX_ACTIVE_MATCHES,
+                        active_count,
+                    );
+                    let m = match result {
+                        Some(m) => m,
+                        None => break,
+                    };
+
                     let match_id = Uuid::new_v4().to_string();
                     info!(
                         "Match found! [{}] vs [{}] Quality={:.2} (skill={:.2} role={:.2} region={:.2})",
-                        entry_a.player_id, entry_b.player_id, quality.total_score,
-                        quality.skill_balance, quality.role_balance, quality.region_score
+                        m.entry_a.player_id,
+                        m.entry_b.player_id,
+                        m.quality.total_score,
+                        m.quality.skill_balance,
+                        m.quality.role_balance,
+                        m.quality.region_score
                     );
 
                     let p1 = MatchFoundPayload {
                         match_id: match_id.clone(),
-                        opponent_ids: vec![entry_b.player_id.clone()],
-                        quality: quality.clone(),
+                        opponent_ids: vec![m.entry_b.player_id.clone()],
+                        quality: m.quality.clone(),
                     };
                     let p2 = MatchFoundPayload {
                         match_id: match_id.clone(),
-                        opponent_ids: vec![entry_a.player_id.clone()],
-                        quality,
+                        opponent_ids: vec![m.entry_a.player_id.clone()],
+                        quality: m.quality,
                     };
 
-                    let _ = entry_a.sender.send(p1);
-                    let _ = entry_b.sender.send(p2);
+                    let _ = m.entry_a.sender.send(p1);
+                    let _ = m.entry_b.sender.send(p2);
 
                     let mut s_write = state.write().await;
+                    let now = now_ms();
                     let active = ActiveMatch {
                         match_id: match_id.clone(),
-                        game_id: entry_a.game_id.clone(),
-                        players: vec![entry_a.player_id, entry_b.player_id],
-                        created_at_ms: now_ms(),
+                        game_id: m.entry_a.game_id.clone(),
+                        players: vec![m.entry_a.player_id, m.entry_b.player_id],
+                        created_at_ms: now,
                         settled: false,
+                        settled_at_ms: None,
+                        expires_at_ms: Some(now + state::MATCH_TTL_MS),
                     };
                     s_write.active_matches.insert(match_id, active.clone());
                     s_write.persist_match(&active.match_id, &active);
-
-                    continue;
+                    drop(s_write);
                 }
-                i += 1;
             }
         }
     });
 }
 
-async fn sign_match_outcome(match_id: &str, outcome: u8, transcript_hash: &[u8]) -> Result<Vec<u8>> {
+fn start_cleanup_loop(
+    state: AppState,
+    auth_service: Arc<auth::AuthService>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    info!("Cleanup loop shutting down");
+                    return;
+                }
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+            }
+
+            {
+                let mut s = state.write().await;
+                let removed = s.cleanup_expired_matches();
+                if removed > 0 {
+                    info!("Cleanup: removed {} expired matches", removed);
+                }
+            }
+
+            auth_service.cleanup_expired().await;
+        }
+    });
+}
+
+async fn sign_match_outcome(
+    match_id: &str,
+    outcome: u8,
+    transcript_hash: &[u8],
+) -> Result<Vec<u8>> {
     let key = env::var("VERIFIER_KEY")?;
     let wallet: LocalWallet = key.parse()?;
     let match_id_val = if let Ok(val) = U256::from_dec_str(match_id) {
         val
     } else {
-        U256::from_big_endian(&ethers_core::utils::keccak256(match_id.as_bytes()))
+        U256::from_big_endian(&ethers_core::utils::keccak256(
+            match_id.as_bytes(),
+        ))
     };
     let t_hash = if transcript_hash.len() == 32 {
         H256::from_slice(transcript_hash)
@@ -140,13 +317,18 @@ async fn sign_match_outcome(match_id: &str, outcome: u8, transcript_hash: &[u8])
     ]);
     let struct_hash = ethers_core::utils::keccak256(&encoded);
     let digest = hash_message(struct_hash);
-    let signature = wallet.sign_hash(H256::from(digest))?;
+    let signature = wallet.sign_hash(digest)?;
     Ok(signature.to_vec())
 }
 
-async fn notify_relayer_rpc(match_id: &str, outcome: u8, transcript_hash: &[u8], signature: &[u8]) -> Result<()> {
-    let relayer_rpc_addr =
-        env::var("RELAYER_RPC_ADDR").unwrap_or_else(|_| "localhost:50052".to_string());
+async fn notify_relayer_rpc(
+    match_id: &str,
+    outcome: u8,
+    transcript_hash: &[u8],
+    signature: &[u8],
+) -> Result<()> {
+    let relayer_rpc_addr = env::var("RELAYER_RPC_ADDR")
+        .unwrap_or_else(|_| "localhost:50052".to_string());
     let stream = tokio::net::TcpStream::connect(&relayer_rpc_addr).await?;
     let (reader, writer) = stream.into_split();
     let network = twoparty::VatNetwork::new(
@@ -177,7 +359,8 @@ async fn notify_relayer_rpc(match_id: &str, outcome: u8, transcript_hash: &[u8],
 }
 
 async fn forward_telemetry(event: &[u8]) {
-    let telemetry_addr = env::var("TELEMETRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4317".to_string());
+    let telemetry_addr = env::var("TELEMETRY_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:4317".to_string());
     if let Ok(stream) = tokio::net::TcpStream::connect(&telemetry_addr).await {
         let (reader, writer) = stream.into_split();
         let network = twoparty::VatNetwork::new(
@@ -195,7 +378,10 @@ async fn forward_telemetry(event: &[u8]) {
         evt.set_event_data(event);
         let _ = req.send().promise.await;
     } else {
-        warn!("Failed to connect to telemetry service at {}", telemetry_addr);
+        warn!(
+            "Failed to connect to telemetry service at {}",
+            telemetry_addr
+        );
     }
 }
 
@@ -253,31 +439,72 @@ impl match_session::Server for MatchSessionImpl {
                     {
                         let match_id_for_update = m_id.clone();
                         let mut s = state.write().await;
-                        if let Some(m) = s.active_matches.get_mut(&match_id_for_update) {
+                        if let Some(m) =
+                            s.active_matches.get_mut(&match_id_for_update)
+                        {
+                            if m.settled {
+                                drop(s);
+                                return Err(::capnp::Error::failed(
+                                    "Match already settled".into(),
+                                ));
+                            }
                             m.settled = true;
-                            let match_id_persist = m.match_id.clone();
+                            m.settled_at_ms = Some(now_ms());
                             let m_clone = ActiveMatch {
                                 match_id: m.match_id.clone(),
                                 game_id: m.game_id.clone(),
                                 players: m.players.clone(),
                                 created_at_ms: m.created_at_ms,
                                 settled: true,
+                                settled_at_ms: m.settled_at_ms,
+                                expires_at_ms: m.expires_at_ms,
                             };
-                            drop(s);
-                            let mut s2 = state.write().await;
-                            s2.persist_match(&match_id_persist, &m_clone);
+                            s.archive_settled_match(
+                                &match_id_for_update,
+                                &m_clone,
+                            );
                         }
+                        drop(s);
                     }
 
                     tokio::task::spawn_local(async move {
-                        if let Err(e) = notify_relayer_rpc(&m_id, outcome_val, &r_hash, &sig).await
-                        {
-                            error!("Failed to notify relayer for {}: {:?}", m_id, e);
+                        let mut attempts = 0u32;
+                        loop {
+                            match notify_relayer_rpc(
+                                &m_id,
+                                outcome_val,
+                                &r_hash,
+                                &sig,
+                            )
+                            .await
+                            {
+                                Ok(()) => break,
+                                Err(e) => {
+                                    attempts += 1;
+                                    if attempts >= 5 {
+                                        error!(
+                                            "Failed to notify relayer for {} after {} attempts: {:?}",
+                                            m_id, attempts, e
+                                        );
+                                        break;
+                                    }
+                                    warn!(
+                                        "Relayer notify attempt {} failed for {}: {:?}",
+                                        attempts, m_id, e
+                                    );
+                                    tokio::time::sleep(Duration::from_millis(
+                                        500 * 2u64.pow(attempts.min(3)),
+                                    ))
+                                    .await;
+                                }
+                            }
                         }
                     });
                     Ok(())
                 }
-                Err(e) => Err(::capnp::Error::failed(format!("Signer error: {}", e))),
+                Err(e) => {
+                    Err(::capnp::Error::failed(format!("Signer error: {}", e)))
+                }
             }
         })
     }
@@ -305,11 +532,7 @@ impl match_session::Server for MatchSessionImpl {
             .ok()
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default();
-        info!(
-            "Game event in match {}: {}",
-            self.match_id,
-            event_type
-        );
+        info!("Game event in match {}: {}", self.match_id, event_type);
         Promise::ok(())
     }
 
@@ -319,10 +542,7 @@ impl match_session::Server for MatchSessionImpl {
         _: match_session::EmitTelemetryResults,
     ) -> Promise<(), ::capnp::Error> {
         let event_data = pry!(pry!(params.get()).get_event());
-        let raw = event_data
-            .get_event_data()
-            .unwrap_or_default()
-            .to_vec();
+        let raw = event_data.get_event_data().unwrap_or_default().to_vec();
         Promise::from_future(async move {
             forward_telemetry(&raw).await;
             Ok(())
@@ -343,7 +563,7 @@ impl user_session::Server for UserSessionImpl {
         params: user_session::RequestMatchParams,
         mut results: user_session::RequestMatchResults,
     ) -> Promise<(), ::capnp::Error> {
-        let req = pry!(params.get()).get_req().unwrap();
+        let req = pry!(pry!(params.get()).get_req());
         let game_id = self.game_id;
         let p_id = self.player_id.clone();
         let app_state = self.state.clone();
@@ -371,7 +591,9 @@ impl user_session::Server for UserSessionImpl {
                     max_ping = p.max_ping_ms;
 
                     if p.restrictions.is_banned {
-                        return Err(::capnp::Error::failed("Player is banned".into()));
+                        return Err(::capnp::Error::failed(
+                            "Player is banned".into(),
+                        ));
                     }
                     let now = now_ms();
                     if p.restrictions.matchmaking_cooldown_until > now {
@@ -400,7 +622,9 @@ impl user_session::Server for UserSessionImpl {
 
             if let Ok(payload) = rx.await {
                 if payload.match_id.is_empty() {
-                    return Err(::capnp::Error::failed("Queue drained (server shutting down)".into()));
+                    return Err(::capnp::Error::failed(
+                        "Queue drained (server shutting down)".into(),
+                    ));
                 }
 
                 let mut assignment = results.get().init_assignment();
@@ -429,10 +653,11 @@ impl user_session::Server for UserSessionImpl {
         mut results: user_session::ReconnectResults,
     ) -> Promise<(), ::capnp::Error> {
         let match_id =
-            String::from_utf8_lossy(pry!(pry!(params.get()).get_match_id())).to_string();
+            String::from_utf8_lossy(pry!(pry!(params.get()).get_match_id()))
+                .to_string();
         let state = self.state.clone();
         let p_service = self.player_service.clone();
-        let game_id = self.game_id;
+        let _game_id = self.game_id;
         let player_id = self.player_id.clone();
 
         Promise::from_future(async move {
@@ -454,12 +679,10 @@ impl user_session::Server for UserSessionImpl {
                     );
                     Ok(())
                 }
-                Some(m) => {
-                    Err(::capnp::Error::failed(format!(
-                        "Match {} is already settled",
-                        match_id
-                    )))
-                }
+                Some(_m) => Err(::capnp::Error::failed(format!(
+                    "Match {} is already settled",
+                    match_id
+                ))),
                 None => Err(::capnp::Error::failed(format!(
                     "Match {} not found",
                     match_id
@@ -476,13 +699,31 @@ struct GameSessionServiceImpl {
 }
 
 impl game_session_service::Server for GameSessionServiceImpl {
+    fn request_challenge(
+        &mut self,
+        params: game_session_service::RequestChallengeParams,
+        mut results: game_session_service::RequestChallengeResults,
+    ) -> Promise<(), ::capnp::Error> {
+        let game_id = pry!(params.get()).get_game_id();
+        let auth = self.auth_service.clone();
+
+        Promise::from_future(async move {
+            let (challenge_bytes, expires_at) =
+                auth.create_challenge(game_id).await;
+            results.get().set_challenge(&challenge_bytes);
+            results.get().set_expires_at(expires_at);
+            Ok(())
+        })
+    }
+
     fn login(
         &mut self,
         params: game_session_service::LoginParams,
         mut results: game_session_service::LoginResults,
     ) -> Promise<(), ::capnp::Error> {
         let game_id = pry!(params.get()).get_game_id();
-        let sig_bytes = pry!(pry!(params.get()).get_signed_challenge()).to_vec();
+        let sig_bytes =
+            pry!(pry!(params.get()).get_signed_challenge()).to_vec();
 
         let state = self.state.clone();
         let p_service = self.player_service.clone();
@@ -491,14 +732,15 @@ impl game_session_service::Server for GameSessionServiceImpl {
         Promise::from_future(async move {
             match auth.verify_login(game_id, &sig_bytes).await {
                 Ok(address) => {
-                    let player_id = format!("0x{}", hex::encode(address.as_bytes()));
+                    let player_id =
+                        format!("0x{}", hex::encode(address.as_bytes()));
 
                     {
                         let mut s = state.write().await;
-                        let profile = s
-                            .players
-                            .entry(player_id.clone())
-                            .or_insert_with(state::StoredPlayerProfile::default);
+                        let profile =
+                            s.players.entry(player_id.clone()).or_insert_with(
+                                state::StoredPlayerProfile::default,
+                            );
                         profile.wallet_address = address.as_bytes().to_vec();
                         profile.is_online = true;
                         profile.last_login = state::now_ns();
@@ -506,7 +748,10 @@ impl game_session_service::Server for GameSessionServiceImpl {
                         s.persist_player(&player_id, &profile_clone);
                     }
 
-                    info!("Authenticated player {} for game {}", player_id, game_id);
+                    info!(
+                        "Authenticated player {} for game {}",
+                        player_id, game_id
+                    );
                     let session = capnp_rpc::new_client(UserSessionImpl {
                         player_id,
                         game_id,
@@ -533,8 +778,10 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     dotenv::dotenv().ok();
 
-    let addr = env::var("AMP_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
-    let db_path = env::var("AMP_DB_PATH").unwrap_or_else(|_| "./amp-data".to_string());
+    let addr =
+        env::var("AMP_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
+    let db_path =
+        env::var("AMP_DB_PATH").unwrap_or_else(|_| "./amp-data".to_string());
 
     info!("AMP Matchmaker (FlexMatch Edition) starting on {}", addr);
     info!("Persistence layer at: {}", db_path);
@@ -561,6 +808,7 @@ async fn main() -> Result<()> {
     let cancel_clone = cancel.clone();
 
     start_matchmaker_loop(state.clone(), cancel.clone()).await;
+    start_cleanup_loop(state.clone(), auth_service.clone(), cancel.clone());
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("Listening on {}", addr);
@@ -612,14 +860,14 @@ async fn accept_loop(
                 rpc_twoparty_capnp::Side::Server,
                 Default::default(),
             );
-            let service: game_session_service::Client = capnp_rpc::new_client(
-                GameSessionServiceImpl {
+            let service: game_session_service::Client =
+                capnp_rpc::new_client(GameSessionServiceImpl {
                     state: s_clone,
                     player_service: ps_clone,
                     auth_service: auth_clone,
-                },
-            );
-            let rpc_system = RpcSystem::new(Box::new(network), Some(service.client));
+                });
+            let rpc_system =
+                RpcSystem::new(Box::new(network), Some(service.client));
             if let Err(e) = rpc_system.await {
                 error!("RPC error: {}", e);
             }

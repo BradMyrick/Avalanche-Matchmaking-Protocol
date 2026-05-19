@@ -30,6 +30,10 @@ interface GameSessionService {
     # Authenticates the user for a specific game. 
     # The signature must verify against a challenge (e.g. nonce) for the game's admin address.
     # Returns a UserSession capability which holds the user's identity and game context.
+    
+    requestChallenge @1 (gameId :UInt64) -> (challenge :Data, expiresAt :UInt64);
+    # Requests a one-time authentication challenge for the given game.
+    # The client must sign the returned challenge bytes and pass them to login().
 }
 
 interface UserSession {
