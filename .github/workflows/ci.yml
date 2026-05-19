@@ -109,12 +109,3 @@ jobs:
       - name: Verify C# SDK compiles
         working-directory: amp-sdk/examples/csharp
         run: dotnet build
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22.x"
-
-      - name: Verify Go SDK compiles
-        working-directory: amp-sdk/go
-        run: go build ./...

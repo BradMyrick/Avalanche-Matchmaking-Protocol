@@ -61,7 +61,7 @@ amp-sdk/cpp/generated/
 amp-sdk/csharp/generated/
 amp-sdk/go/generated/
 amp-sdk/python/generated/
-amp-sdk/rust/src/*.rs
+amp-sdk/rust/src/generated_*
 
 # --- Build Artifacts ---
 amp-sdk/examples/cpp/build/
