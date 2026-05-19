@@ -12,7 +12,7 @@ contract DeployScript is Script {
 
         AMPRegistry registry = new AMPRegistry(address(0));
         AMPSettlement settlement = new AMPSettlement(address(registry), address(0));
-        
+
         registry.setSettlement(address(settlement));
 
         vm.stopBroadcast();

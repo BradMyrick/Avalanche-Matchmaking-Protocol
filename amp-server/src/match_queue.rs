@@ -213,8 +213,7 @@ mod tests {
         q.push(make_entry("p1", "g1", "r1", 1500.0));
         q.push(make_entry("p2", "g1", "r1", 3000.0));
 
-        let mut ruleset = StoredRuleSet::default();
-        ruleset.max_skill_diff = 500.0;
+        let ruleset = StoredRuleSet { max_skill_diff: 500.0, ..Default::default() };
         let result =
             q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 10000, 0);
 

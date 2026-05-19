@@ -9,9 +9,7 @@ import "openzeppelin-contracts/contracts/metatx/ERC2771Context.sol";
 import "openzeppelin-contracts/contracts/utils/Pausable.sol";
 
 interface IAMPRegistry {
-    function games(
-        uint256 id
-    )
+    function games(uint256 id)
         external
         view
         returns (
@@ -27,19 +25,10 @@ interface IAMPRegistry {
 
     function isVerifier(uint256 gameId, address verifier) external view returns (bool);
 
-    function matches(
-        uint256 id
-    )
+    function matches(uint256 id)
         external
         view
-        returns (
-            uint256,
-            address,
-            address,
-            uint256,
-            AMPTypes.MatchState,
-            uint256
-        );
+        returns (uint256, address, address, uint256, AMPTypes.MatchState, uint256);
 
     function settleMatch(
         uint256 matchId,
@@ -82,43 +71,26 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         emit ProtocolFeeRecipientUpdated(recipient);
     }
 
-    function submitAsyncResult(
-        uint256 matchId,
-        AMPTypes.AsyncResult calldata result
-    ) external whenNotPaused {
+    function submitAsyncResult(uint256 matchId, AMPTypes.AsyncResult calldata result) external whenNotPaused {
         require(result.matchId == matchId, "Match ID mismatch");
 
-        (
-            uint256 gameId,
-            address playerA,
-            address playerB,
-            uint256 stakeAmount,
-            AMPTypes.MatchState state,
+        (uint256 gameId, address playerA, address playerB, uint256 stakeAmount, AMPTypes.MatchState state,) =
+            IAMPRegistry(registry).matches(matchId);
 
-        ) = IAMPRegistry(registry).matches(matchId);
-
-        (, AMPTypes.SettlementMode mode, , , , ) = IAMPRegistry(registry).games(gameId);
+        (, AMPTypes.SettlementMode mode,,,,) = IAMPRegistry(registry).games(gameId);
 
         require(mode == AMPTypes.SettlementMode.ASYNC_VERIFIER, "Wrong mode");
-        require(
-            state == AMPTypes.MatchState.READY,
-            "Match not settlable"
-        );
+        require(state == AMPTypes.MatchState.READY, "Match not settlable");
         require(playerB != address(0), "No opponent joined");
 
-        bytes32 structHash = keccak256(
-            abi.encode(result.matchId, result.outcome, result.transcriptHash)
-        );
+        bytes32 structHash = keccak256(abi.encode(result.matchId, result.outcome, result.transcriptHash));
         bytes32 digest = MessageHashUtils.toEthSignedMessageHash(structHash);
         address signer = ECDSA.recover(digest, result.signature);
 
         require(IAMPRegistry(registry).isVerifier(gameId, signer), "Invalid verifier signature");
 
         settlements[matchId] = AMPTypes.Settlement({
-            matchId: matchId,
-            outcome: result.outcome,
-            transcriptHash: result.transcriptHash,
-            settledAt: block.timestamp
+            matchId: matchId, outcome: result.outcome, transcriptHash: result.transcriptHash, settledAt: block.timestamp
         });
 
         _payout(matchId, playerA, playerB, stakeAmount, result.outcome);
@@ -126,21 +98,15 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         emit MatchSettled(matchId, result.outcome, stakeAmount * 2);
     }
 
-    function submitRealTimeHashResult(
-        uint256 matchId,
-        AMPTypes.RealTimeHashResult calldata result
-    ) external whenNotPaused {
+    function submitRealTimeHashResult(uint256 matchId, AMPTypes.RealTimeHashResult calldata result)
+        external
+        whenNotPaused
+    {
         require(result.matchId == matchId, "Match ID mismatch");
-        (
-            uint256 gameId,
-            address playerA,
-            address playerB,
-            uint256 stakeAmount,
-            AMPTypes.MatchState state,
+        (uint256 gameId, address playerA, address playerB, uint256 stakeAmount, AMPTypes.MatchState state,) =
+            IAMPRegistry(registry).matches(matchId);
 
-        ) = IAMPRegistry(registry).matches(matchId);
-
-        (, AMPTypes.SettlementMode mode, , , , ) = IAMPRegistry(registry).games(gameId);
+        (, AMPTypes.SettlementMode mode,,,,) = IAMPRegistry(registry).games(gameId);
 
         require(mode == AMPTypes.SettlementMode.RT_HASH_AGREE, "Wrong mode");
         require(state == AMPTypes.MatchState.READY, "Match not ready");
@@ -152,10 +118,7 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         AMPTypes.RealTimeHashResult memory otherResult = rtResults[matchId][otherPlayer];
 
         if (otherResult.outcome != AMPTypes.OutcomeCode.NONE) {
-            if (
-                result.outcome == otherResult.outcome &&
-                result.transcriptHash == otherResult.transcriptHash
-            ) {
+            if (result.outcome == otherResult.outcome && result.transcriptHash == otherResult.transcriptHash) {
                 settlements[matchId] = AMPTypes.Settlement({
                     matchId: matchId,
                     outcome: result.outcome,
@@ -168,38 +131,23 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
             } else {
                 address[] memory recipients = new address[](0);
                 uint256[] memory amounts = new uint256[](0);
-                IAMPRegistry(registry).settleMatch(
-                    matchId,
-                    AMPTypes.MatchState.DISPUTED,
-                    recipients,
-                    amounts,
-                    0
-                );
+                IAMPRegistry(registry).settleMatch(matchId, AMPTypes.MatchState.DISPUTED, recipients, amounts, 0);
                 emit MatchDisputed(matchId);
             }
         }
     }
 
     function resolveDispute(uint256 matchId, AMPTypes.OutcomeCode enforcedOutcome) external {
-        (
-            uint256 gameId,
-            address playerA,
-            address playerB,
-            uint256 stakeAmount,
-            AMPTypes.MatchState state,
+        (uint256 gameId, address playerA, address playerB, uint256 stakeAmount, AMPTypes.MatchState state,) =
+            IAMPRegistry(registry).matches(matchId);
 
-        ) = IAMPRegistry(registry).matches(matchId);
-
-        (, , , , address arbiter, ) = IAMPRegistry(registry).games(gameId);
+        (,,,, address arbiter,) = IAMPRegistry(registry).games(gameId);
 
         require(state == AMPTypes.MatchState.DISPUTED, "Not disputed");
         require(_msgSender() == arbiter, "Not arbiter");
 
         settlements[matchId] = AMPTypes.Settlement({
-            matchId: matchId,
-            outcome: enforcedOutcome,
-            transcriptHash: bytes32(0),
-            settledAt: block.timestamp
+            matchId: matchId, outcome: enforcedOutcome, transcriptHash: bytes32(0), settledAt: block.timestamp
         });
 
         _payout(matchId, playerA, playerB, stakeAmount, enforcedOutcome);
@@ -250,13 +198,7 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
             amounts[1] = playerB == address(0) ? 0 : stakeAmount;
         }
 
-        IAMPRegistry(registry).settleMatch(
-            matchId,
-            AMPTypes.MatchState.SETTLED,
-            recipients,
-            amounts,
-            protocolFee
-        );
+        IAMPRegistry(registry).settleMatch(matchId, AMPTypes.MatchState.SETTLED, recipients, amounts, protocolFee);
     }
 
     function _msgSender() internal view virtual override(Context, ERC2771Context) returns (address) {

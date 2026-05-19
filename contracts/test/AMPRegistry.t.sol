@@ -22,58 +22,43 @@ contract AMPRegistryTest is Test {
     function testRegisterGame() public {
         address[] memory verifiers = new address[](1);
         verifiers[0] = address(0x123);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         assertEq(gameId, 0);
         assertEq(registry.nextGameId(), 1);
     }
 
     function testCreateMatch() public {
         address[] memory verifiers = new address[](1);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         assertEq(matchId, 0);
-        (, address pA, address pB, uint256 stake, AMPTypes.MatchState state, ) = registry.matches(matchId);
+        (, address pA, address pB, uint256 stake, AMPTypes.MatchState state,) = registry.matches(matchId);
         assertEq(pA, playerA);
         assertEq(pB, address(0));
         assertEq(stake, 0.1 ether);
-        assertEq(uint(state), uint(AMPTypes.MatchState.OPEN));
+        assertEq(uint256(state), uint256(AMPTypes.MatchState.OPEN));
     }
 
     function testJoinMatch() public {
         address[] memory verifiers = new address[](1);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);
-        (, address pA, address pB, , AMPTypes.MatchState state, ) = registry.matches(matchId);
+        (, address pA, address pB,, AMPTypes.MatchState state,) = registry.matches(matchId);
         assertEq(pA, playerA);
         assertEq(pB, playerB);
-        assertEq(uint(state), uint(AMPTypes.MatchState.READY));
+        assertEq(uint256(state), uint256(AMPTypes.MatchState.READY));
     }
 
     function testRegisterGameTooManyVerifiers() public {
         address[] memory verifiers = new address[](11);
-        for (uint i = 0; i < 11; i++) {
+        for (uint256 i = 0; i < 11; i++) {
             verifiers[i] = address(uint160(i + 1));
         }
         vm.expectRevert("Too many verifiers");
@@ -83,13 +68,8 @@ contract AMPRegistryTest is Test {
     function testUpdateGameVerifiers() public {
         address[] memory verifiers = new address[](1);
         verifiers[0] = address(0x123);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         address[] memory newVerifiers = new address[](2);
         newVerifiers[0] = address(0x456);
         newVerifiers[1] = address(0x789);
@@ -106,13 +86,8 @@ contract AMPRegistryTest is Test {
     function testUpdateGameVerifiersNotAdmin() public {
         address[] memory verifiers = new address[](1);
         verifiers[0] = address(0x123);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         address[] memory newVerifiers = new address[](1);
         newVerifiers[0] = address(0x456);
         vm.prank(playerA);
@@ -134,13 +109,8 @@ contract AMPRegistryTest is Test {
 
     function testCancelMatch() public {
         address[] memory verifiers = new address[](1);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         uint256 balanceBefore = playerA.balance;
@@ -148,18 +118,13 @@ contract AMPRegistryTest is Test {
         registry.cancelMatch(matchId);
         assertEq(playerA.balance, balanceBefore + 0.1 ether);
         (,,,, AMPTypes.MatchState state,) = registry.matches(matchId);
-        assertEq(uint(state), uint(AMPTypes.MatchState.SETTLED));
+        assertEq(uint256(state), uint256(AMPTypes.MatchState.SETTLED));
     }
 
     function testCancelMatchNotPlayerA() public {
         address[] memory verifiers = new address[](1);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
@@ -169,13 +134,8 @@ contract AMPRegistryTest is Test {
 
     function testExpireMatch() public {
         address[] memory verifiers = new address[](1);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
@@ -187,18 +147,13 @@ contract AMPRegistryTest is Test {
         assertEq(playerA.balance, balanceA + 0.1 ether);
         assertEq(playerB.balance, balanceB + 0.1 ether);
         (,,,, AMPTypes.MatchState state,) = registry.matches(matchId);
-        assertEq(uint(state), uint(AMPTypes.MatchState.EXPIRED));
+        assertEq(uint256(state), uint256(AMPTypes.MatchState.EXPIRED));
     }
 
     function testExpireMatchTooEarly() public {
         address[] memory verifiers = new address[](1);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
@@ -209,13 +164,7 @@ contract AMPRegistryTest is Test {
 
     function testPauseBlocksCreateMatch() public {
         address[] memory verifiers = new address[](1);
-        registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         registry.pause();
         vm.prank(playerA);
         vm.expectRevert(abi.encodeWithSelector(Pausable.EnforcedPause.selector));
@@ -224,13 +173,8 @@ contract AMPRegistryTest is Test {
 
     function testUnpauseResumes() public {
         address[] memory verifiers = new address[](1);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         registry.pause();
         registry.unpause();
         vm.prank(playerA);
@@ -241,26 +185,16 @@ contract AMPRegistryTest is Test {
     function testIsVerifierTrue() public {
         address[] memory verifiers = new address[](1);
         verifiers[0] = address(0x123);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         assertTrue(registry.isVerifier(gameId, address(0x123)));
     }
 
     function testIsVerifierFalse() public {
         address[] memory verifiers = new address[](1);
         verifiers[0] = address(0x123);
-        uint256 gameId = registry.registerGame(
-            AMPTypes.SettlementMode.ASYNC_VERIFIER,
-            verifiers,
-            0.1 ether,
-            address(0),
-            address(0)
-        );
+        uint256 gameId =
+            registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         assertFalse(registry.isVerifier(gameId, address(0xdead)));
     }
 

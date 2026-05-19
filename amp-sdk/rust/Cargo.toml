@@ -8,6 +8,10 @@ repository = "https://github.com/avalanche-matchmaking-protocol/amp"
 homepage = "https://github.com/avalanche-matchmaking-protocol/amp"
 documentation = "https://docs.amp.avalanche.dev"
 
+[lib]
+name = "amp_sdk"
+path = "src/lib.rs"
+
 [features]
 default = ["serde"]
 
