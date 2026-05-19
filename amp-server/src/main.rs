@@ -14,6 +14,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod auth;
+mod match_queue;
 mod matchmaker;
 mod persistence;
 mod player_service;
@@ -158,8 +159,8 @@ pub mod security_capnp {
 use service_capnp::*;
 
 lazy_static! {
-    static ref MATCH_QUEUE: Arc<tokio::sync::Mutex<Vec<QueueEntry>>> =
-        Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    static ref MATCH_QUEUE: Arc<tokio::sync::Mutex<match_queue::IndexedQueue>> =
+        Arc::new(tokio::sync::Mutex::new(match_queue::IndexedQueue::new()));
 }
 
 async fn start_matchmaker_loop(
@@ -172,7 +173,7 @@ async fn start_matchmaker_loop(
                 _ = cancel.cancelled() => {
                     info!("Matchmaker loop shutting down, draining queue...");
                     let mut queue = MATCH_QUEUE.lock().await;
-                    for entry in queue.drain(..) {
+                    for entry in queue.drain_all() {
                         let _ = entry.sender.send(MatchFoundPayload {
                             match_id: String::new(),
                             opponent_ids: vec![],
@@ -182,78 +183,110 @@ async fn start_matchmaker_loop(
                     info!("Queue drained.");
                     return;
                 }
-                _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
             }
+
+            let rulesets_snapshot = {
+                let s = state.read().await;
+                s.rulesets.clone()
+            };
+
+            let active_count = {
+                let s = state.read().await;
+                s.active_matches.len()
+            };
 
             let mut queue = MATCH_QUEUE.lock().await;
             if queue.len() < 2 {
                 continue;
             }
 
-            let mut i = 0;
-            while i < queue.len() {
-                let entry_a = &queue[i];
+            let keys = queue.bucket_keys();
+            for key in keys {
+                let ruleset =
+                    rulesets_snapshot.get(&key.1).cloned().unwrap_or_default();
 
-                let s = state.read().await;
-                let ruleset = s
-                    .rulesets
-                    .get(&entry_a.ruleset_id)
-                    .cloned()
-                    .unwrap_or_default();
-                drop(s);
-
-                let sub_queue = &queue[i + 1..];
-                if let Some(mut target_idx) =
-                    matchmaker::find_match(sub_queue, entry_a, &ruleset)
-                {
-                    target_idx += i + 1;
-
-                    let entry_b = queue.remove(target_idx);
-                    let entry_a = queue.remove(i);
-
-                    let quality = matchmaker::compute_match_quality(
-                        &entry_a, &entry_b, &ruleset,
+                loop {
+                    let result = queue.try_match_bucket(
+                        &key,
+                        &ruleset,
+                        state::MAX_ACTIVE_MATCHES,
+                        active_count,
                     );
+                    let m = match result {
+                        Some(m) => m,
+                        None => break,
+                    };
+
                     let match_id = Uuid::new_v4().to_string();
                     info!(
                         "Match found! [{}] vs [{}] Quality={:.2} (skill={:.2} role={:.2} region={:.2})",
-                        entry_a.player_id,
-                        entry_b.player_id,
-                        quality.total_score,
-                        quality.skill_balance,
-                        quality.role_balance,
-                        quality.region_score
+                        m.entry_a.player_id,
+                        m.entry_b.player_id,
+                        m.quality.total_score,
+                        m.quality.skill_balance,
+                        m.quality.role_balance,
+                        m.quality.region_score
                     );
 
                     let p1 = MatchFoundPayload {
                         match_id: match_id.clone(),
-                        opponent_ids: vec![entry_b.player_id.clone()],
-                        quality: quality.clone(),
+                        opponent_ids: vec![m.entry_b.player_id.clone()],
+                        quality: m.quality.clone(),
                     };
                     let p2 = MatchFoundPayload {
                         match_id: match_id.clone(),
-                        opponent_ids: vec![entry_a.player_id.clone()],
-                        quality,
+                        opponent_ids: vec![m.entry_a.player_id.clone()],
+                        quality: m.quality,
                     };
 
-                    let _ = entry_a.sender.send(p1);
-                    let _ = entry_b.sender.send(p2);
+                    let _ = m.entry_a.sender.send(p1);
+                    let _ = m.entry_b.sender.send(p2);
 
                     let mut s_write = state.write().await;
+                    let now = now_ms();
                     let active = ActiveMatch {
                         match_id: match_id.clone(),
-                        game_id: entry_a.game_id.clone(),
-                        players: vec![entry_a.player_id, entry_b.player_id],
-                        created_at_ms: now_ms(),
+                        game_id: m.entry_a.game_id.clone(),
+                        players: vec![m.entry_a.player_id, m.entry_b.player_id],
+                        created_at_ms: now,
                         settled: false,
+                        settled_at_ms: None,
+                        expires_at_ms: Some(now + state::MATCH_TTL_MS),
                     };
                     s_write.active_matches.insert(match_id, active.clone());
                     s_write.persist_match(&active.match_id, &active);
-
-                    continue;
+                    drop(s_write);
                 }
-                i += 1;
             }
+        }
+    });
+}
+
+fn start_cleanup_loop(
+    state: AppState,
+    auth_service: Arc<auth::AuthService>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    info!("Cleanup loop shutting down");
+                    return;
+                }
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+            }
+
+            {
+                let mut s = state.write().await;
+                let removed = s.cleanup_expired_matches();
+                if removed > 0 {
+                    info!("Cleanup: removed {} expired matches", removed);
+                }
+            }
+
+            auth_service.cleanup_expired().await;
         }
     });
 }
@@ -409,19 +442,29 @@ impl match_session::Server for MatchSessionImpl {
                         if let Some(m) =
                             s.active_matches.get_mut(&match_id_for_update)
                         {
+                            if m.settled {
+                                drop(s);
+                                return Err(::capnp::Error::failed(
+                                    "Match already settled".into(),
+                                ));
+                            }
                             m.settled = true;
-                            let match_id_persist = m.match_id.clone();
+                            m.settled_at_ms = Some(now_ms());
                             let m_clone = ActiveMatch {
                                 match_id: m.match_id.clone(),
                                 game_id: m.game_id.clone(),
                                 players: m.players.clone(),
                                 created_at_ms: m.created_at_ms,
                                 settled: true,
+                                settled_at_ms: m.settled_at_ms,
+                                expires_at_ms: m.expires_at_ms,
                             };
-                            drop(s);
-                            let s2 = state.write().await;
-                            s2.persist_match(&match_id_persist, &m_clone);
+                            s.archive_settled_match(
+                                &match_id_for_update,
+                                &m_clone,
+                            );
                         }
+                        drop(s);
                     }
 
                     tokio::task::spawn_local(async move {
@@ -638,6 +681,23 @@ struct GameSessionServiceImpl {
 }
 
 impl game_session_service::Server for GameSessionServiceImpl {
+    fn request_challenge(
+        &mut self,
+        params: game_session_service::RequestChallengeParams,
+        mut results: game_session_service::RequestChallengeResults,
+    ) -> Promise<(), ::capnp::Error> {
+        let game_id = pry!(params.get()).get_game_id();
+        let auth = self.auth_service.clone();
+
+        Promise::from_future(async move {
+            let (challenge_bytes, expires_at) =
+                auth.create_challenge(game_id).await;
+            results.get().set_challenge(&challenge_bytes);
+            results.get().set_expires_at(expires_at);
+            Ok(())
+        })
+    }
+
     fn login(
         &mut self,
         params: game_session_service::LoginParams,
@@ -730,6 +790,7 @@ async fn main() -> Result<()> {
     let cancel_clone = cancel.clone();
 
     start_matchmaker_loop(state.clone(), cancel.clone()).await;
+    start_cleanup_loop(state.clone(), auth_service.clone(), cancel.clone());
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("Listening on {}", addr);

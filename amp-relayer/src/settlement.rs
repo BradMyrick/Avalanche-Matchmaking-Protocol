@@ -160,6 +160,7 @@ impl SettlementQueue {
         let chain_id = state.master_client.signer().chain_id();
         let custodial_wallet = custodial::derive_custodial_signer(
             state.master_client.signer(),
+            "settlement",
             game_id.as_u64(),
             chain_id,
         );

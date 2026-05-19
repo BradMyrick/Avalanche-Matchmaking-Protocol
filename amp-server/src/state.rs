@@ -381,7 +381,15 @@ pub struct ActiveMatch {
     pub players: Vec<String>,
     pub created_at_ms: u64,
     pub settled: bool,
+    #[serde(default)]
+    pub settled_at_ms: Option<u64>,
+    #[serde(default)]
+    pub expires_at_ms: Option<u64>,
 }
+
+pub const MAX_ACTIVE_MATCHES: usize = 10_000;
+pub const MATCH_TTL_MS: u64 = 3_600_000;
+pub const SETTLED_ARCHIVE_TREE: &str = "settled_matches";
 
 pub struct InnerState {
     pub players: HashMap<AmpId, StoredPlayerProfile>,
@@ -441,6 +449,52 @@ impl InnerState {
         {
             warn!(target: "persist", "Failed to persist match {}: {}", id, e);
         }
+    }
+
+    pub fn archive_settled_match(&mut self, id: &str, m: &ActiveMatch) {
+        if let Some(ref p) = self.persistence
+            && let Err(e) = p.save(SETTLED_ARCHIVE_TREE, id, m)
+        {
+            warn!(target: "persist", "Failed to archive settled match {}: {}", id, e);
+        }
+        self.active_matches.remove(id);
+        if let Some(ref p) = self.persistence
+            && let Err(e) = p.delete("matches", id)
+        {
+            warn!(target: "persist", "Failed to delete active match {}: {}", id, e);
+        }
+    }
+
+    pub fn cleanup_expired_matches(&mut self) -> usize {
+        let now = now_ms();
+        let expired: Vec<String> = self
+            .active_matches
+            .iter()
+            .filter(|(_, m)| {
+                if m.settled
+                    && let Some(settled_at) = m.settled_at_ms
+                {
+                    return now.saturating_sub(settled_at) > MATCH_TTL_MS;
+                }
+                if let Some(expires_at) = m.expires_at_ms {
+                    return now > expires_at && !m.settled;
+                }
+                false
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        let count = expired.len();
+        for id in expired {
+            if let Some(m) = self.active_matches.remove(&id) {
+                if let Some(ref p) = self.persistence {
+                    let _ = p.save(SETTLED_ARCHIVE_TREE, &id, &m);
+                    let _ = p.delete("matches", &id);
+                }
+                warn!(target: "cleanup", "Expired match {} (settled={}, created={}ms ago)", id, m.settled, now.saturating_sub(m.created_at_ms));
+            }
+        }
+        count
     }
 
     #[allow(dead_code)]

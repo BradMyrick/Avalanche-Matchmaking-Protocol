@@ -83,6 +83,7 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
         let chain_id = self.state.master_client.signer().chain_id();
         let wallet = custodial::derive_custodial_signer(
             self.state.master_client.signer(),
+            "settlement",
             game_id,
             chain_id,
         );
