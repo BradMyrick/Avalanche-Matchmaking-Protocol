@@ -163,10 +163,7 @@ lazy_static! {
         Arc::new(tokio::sync::Mutex::new(match_queue::IndexedQueue::new()));
 }
 
-async fn start_matchmaker_loop(
-    state: AppState,
-    cancel: tokio_util::sync::CancellationToken,
-) {
+async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::CancellationToken) {
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -203,8 +200,7 @@ async fn start_matchmaker_loop(
 
             let keys = queue.bucket_keys();
             for key in keys {
-                let ruleset =
-                    rulesets_snapshot.get(&key.1).cloned().unwrap_or_default();
+                let ruleset = rulesets_snapshot.get(&key.1).cloned().unwrap_or_default();
 
                 loop {
                     let result = queue.try_match_bucket(
@@ -301,9 +297,7 @@ async fn sign_match_outcome(
     let match_id_val = if let Ok(val) = U256::from_dec_str(match_id) {
         val
     } else {
-        U256::from_big_endian(&ethers_core::utils::keccak256(
-            match_id.as_bytes(),
-        ))
+        U256::from_big_endian(&ethers_core::utils::keccak256(match_id.as_bytes()))
     };
     let t_hash = if transcript_hash.len() == 32 {
         H256::from_slice(transcript_hash)
@@ -327,8 +321,8 @@ async fn notify_relayer_rpc(
     transcript_hash: &[u8],
     signature: &[u8],
 ) -> Result<()> {
-    let relayer_rpc_addr = env::var("RELAYER_RPC_ADDR")
-        .unwrap_or_else(|_| "localhost:50052".to_string());
+    let relayer_rpc_addr =
+        env::var("RELAYER_RPC_ADDR").unwrap_or_else(|_| "localhost:50052".to_string());
     let stream = tokio::net::TcpStream::connect(&relayer_rpc_addr).await?;
     let (reader, writer) = stream.into_split();
     let network = twoparty::VatNetwork::new(
@@ -359,8 +353,8 @@ async fn notify_relayer_rpc(
 }
 
 async fn forward_telemetry(event: &[u8]) {
-    let telemetry_addr = env::var("TELEMETRY_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:4317".to_string());
+    let telemetry_addr =
+        env::var("TELEMETRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4317".to_string());
     if let Ok(stream) = tokio::net::TcpStream::connect(&telemetry_addr).await {
         let (reader, writer) = stream.into_split();
         let network = twoparty::VatNetwork::new(
@@ -439,14 +433,10 @@ impl match_session::Server for MatchSessionImpl {
                     {
                         let match_id_for_update = m_id.clone();
                         let mut s = state.write().await;
-                        if let Some(m) =
-                            s.active_matches.get_mut(&match_id_for_update)
-                        {
+                        if let Some(m) = s.active_matches.get_mut(&match_id_for_update) {
                             if m.settled {
                                 drop(s);
-                                return Err(::capnp::Error::failed(
-                                    "Match already settled".into(),
-                                ));
+                                return Err(::capnp::Error::failed("Match already settled".into()));
                             }
                             m.settled = true;
                             m.settled_at_ms = Some(now_ms());
@@ -459,10 +449,7 @@ impl match_session::Server for MatchSessionImpl {
                                 settled_at_ms: m.settled_at_ms,
                                 expires_at_ms: m.expires_at_ms,
                             };
-                            s.archive_settled_match(
-                                &match_id_for_update,
-                                &m_clone,
-                            );
+                            s.archive_settled_match(&match_id_for_update, &m_clone);
                         }
                         drop(s);
                     }
@@ -470,14 +457,7 @@ impl match_session::Server for MatchSessionImpl {
                     tokio::task::spawn_local(async move {
                         let mut attempts = 0u32;
                         loop {
-                            match notify_relayer_rpc(
-                                &m_id,
-                                outcome_val,
-                                &r_hash,
-                                &sig,
-                            )
-                            .await
-                            {
+                            match notify_relayer_rpc(&m_id, outcome_val, &r_hash, &sig).await {
                                 Ok(()) => break,
                                 Err(e) => {
                                     attempts += 1;
@@ -502,9 +482,7 @@ impl match_session::Server for MatchSessionImpl {
                     });
                     Ok(())
                 }
-                Err(e) => {
-                    Err(::capnp::Error::failed(format!("Signer error: {}", e)))
-                }
+                Err(e) => Err(::capnp::Error::failed(format!("Signer error: {}", e))),
             }
         })
     }
@@ -591,9 +569,7 @@ impl user_session::Server for UserSessionImpl {
                     max_ping = p.max_ping_ms;
 
                     if p.restrictions.is_banned {
-                        return Err(::capnp::Error::failed(
-                            "Player is banned".into(),
-                        ));
+                        return Err(::capnp::Error::failed("Player is banned".into()));
                     }
                     let now = now_ms();
                     if p.restrictions.matchmaking_cooldown_until > now {
@@ -652,9 +628,7 @@ impl user_session::Server for UserSessionImpl {
         params: user_session::ReconnectParams,
         mut results: user_session::ReconnectResults,
     ) -> Promise<(), ::capnp::Error> {
-        let match_id =
-            String::from_utf8_lossy(pry!(pry!(params.get()).get_match_id()))
-                .to_string();
+        let match_id = String::from_utf8_lossy(pry!(pry!(params.get()).get_match_id())).to_string();
         let state = self.state.clone();
         let p_service = self.player_service.clone();
         let _game_id = self.game_id;
@@ -673,10 +647,7 @@ impl user_session::Server for UserSessionImpl {
                     });
                     drop(s);
                     results.get().set_session(session);
-                    info!(
-                        "Player {} reconnected to match {}",
-                        player_id, match_id
-                    );
+                    info!("Player {} reconnected to match {}", player_id, match_id);
                     Ok(())
                 }
                 Some(_m) => Err(::capnp::Error::failed(format!(
@@ -708,8 +679,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
         let auth = self.auth_service.clone();
 
         Promise::from_future(async move {
-            let (challenge_bytes, expires_at) =
-                auth.create_challenge(game_id).await;
+            let (challenge_bytes, expires_at) = auth.create_challenge(game_id).await;
             results.get().set_challenge(&challenge_bytes);
             results.get().set_expires_at(expires_at);
             Ok(())
@@ -722,8 +692,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
         mut results: game_session_service::LoginResults,
     ) -> Promise<(), ::capnp::Error> {
         let game_id = pry!(params.get()).get_game_id();
-        let sig_bytes =
-            pry!(pry!(params.get()).get_signed_challenge()).to_vec();
+        let sig_bytes = pry!(pry!(params.get()).get_signed_challenge()).to_vec();
 
         let state = self.state.clone();
         let p_service = self.player_service.clone();
@@ -732,15 +701,14 @@ impl game_session_service::Server for GameSessionServiceImpl {
         Promise::from_future(async move {
             match auth.verify_login(game_id, &sig_bytes).await {
                 Ok(address) => {
-                    let player_id =
-                        format!("0x{}", hex::encode(address.as_bytes()));
+                    let player_id = format!("0x{}", hex::encode(address.as_bytes()));
 
                     {
                         let mut s = state.write().await;
-                        let profile =
-                            s.players.entry(player_id.clone()).or_insert_with(
-                                state::StoredPlayerProfile::default,
-                            );
+                        let profile = s
+                            .players
+                            .entry(player_id.clone())
+                            .or_insert_with(state::StoredPlayerProfile::default);
                         profile.wallet_address = address.as_bytes().to_vec();
                         profile.is_online = true;
                         profile.last_login = state::now_ns();
@@ -748,10 +716,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
                         s.persist_player(&player_id, &profile_clone);
                     }
 
-                    info!(
-                        "Authenticated player {} for game {}",
-                        player_id, game_id
-                    );
+                    info!("Authenticated player {} for game {}", player_id, game_id);
                     let session = capnp_rpc::new_client(UserSessionImpl {
                         player_id,
                         game_id,
@@ -778,10 +743,8 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     dotenv::dotenv().ok();
 
-    let addr =
-        env::var("AMP_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
-    let db_path =
-        env::var("AMP_DB_PATH").unwrap_or_else(|_| "./amp-data".to_string());
+    let addr = env::var("AMP_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
+    let db_path = env::var("AMP_DB_PATH").unwrap_or_else(|_| "./amp-data".to_string());
 
     info!("AMP Matchmaker (FlexMatch Edition) starting on {}", addr);
     info!("Persistence layer at: {}", db_path);
@@ -866,8 +829,7 @@ async fn accept_loop(
                     player_service: ps_clone,
                     auth_service: auth_clone,
                 });
-            let rpc_system =
-                RpcSystem::new(Box::new(network), Some(service.client));
+            let rpc_system = RpcSystem::new(Box::new(network), Some(service.client));
             if let Err(e) = rpc_system.await {
                 error!("RPC error: {}", e);
             }

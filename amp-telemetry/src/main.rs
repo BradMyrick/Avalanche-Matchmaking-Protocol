@@ -91,10 +91,7 @@ fn export_json(path: &str) -> Result<()> {
         let mut msg_buf = vec![0u8; len];
         file.read_exact(&mut msg_buf)?;
 
-        let reader = serialize_packed::read_message(
-            &mut msg_buf.as_slice(),
-            ReaderOptions::new(),
-        )?;
+        let reader = serialize_packed::read_message(&mut msg_buf.as_slice(), ReaderOptions::new())?;
         let event = reader
             .get_root::<amp_telemetry::amp_telemetry_capnp::amp_telemetry_event::Reader<'_>>()?;
 
@@ -179,10 +176,8 @@ async fn main() -> Result<()> {
                         rpc_twoparty_capnp::Side::Server,
                         Default::default(),
                     );
-                    let rpc_system = RpcSystem::new(
-                        Box::new(network),
-                        Some(receiver.clone().client),
-                    );
+                    let rpc_system =
+                        RpcSystem::new(Box::new(network), Some(receiver.clone().client));
                     tokio::task::spawn_local(rpc_system);
                 }
             }

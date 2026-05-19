@@ -39,10 +39,8 @@ abigen!(
 
 #[derive(Clone)]
 pub struct RelayerState {
-    settlement:
-        AMPSettlementContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
-    registry:
-        AMPRegistryContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
+    settlement: AMPSettlementContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
+    registry: AMPRegistryContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
     master_client: Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
 }
 
@@ -98,13 +96,10 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
         mut results: relayer_capnp::relayer_service::SubmitOutcomeResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let params_reader = capnp_rpc::pry!(params.get());
-        let match_id_bytes =
-            capnp_rpc::pry!(params_reader.get_match_id()).to_vec();
+        let match_id_bytes = capnp_rpc::pry!(params_reader.get_match_id()).to_vec();
         let outcome = params_reader.get_outcome();
-        let transcript_hash_bytes =
-            capnp_rpc::pry!(params_reader.get_transcript_hash()).to_vec();
-        let signature_bytes =
-            capnp_rpc::pry!(params_reader.get_signature()).to_vec();
+        let transcript_hash_bytes = capnp_rpc::pry!(params_reader.get_transcript_hash()).to_vec();
+        let signature_bytes = capnp_rpc::pry!(params_reader.get_signature()).to_vec();
 
         let queue = self.queue.clone();
 
@@ -124,9 +119,9 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
                 last_attempt_at_ms: None,
             };
 
-            queue.enqueue(pending).map_err(|e| {
-                capnp::Error::failed(format!("Queue error: {:?}", e))
-            })?;
+            queue
+                .enqueue(pending)
+                .map_err(|e| capnp::Error::failed(format!("Queue error: {:?}", e)))?;
 
             results.get().set_tx_hash(b"queued");
             Ok(())
@@ -181,8 +176,7 @@ async fn run_settlement_processor(
     cfg: config::Config,
     cancel: tokio_util::sync::CancellationToken,
 ) {
-    let gas_manager =
-        gas::GasManager::new(cfg.gas_bump_percent, cfg.gas_bump_timeout_secs);
+    let gas_manager = gas::GasManager::new(cfg.gas_bump_percent, cfg.gas_bump_timeout_secs);
     let nonce_manager = Arc::new(nonce::NonceManager::new());
 
     loop {
@@ -225,15 +219,12 @@ async fn main() -> Result<()> {
     let chain_id = provider.get_chainid().await?.as_u64();
     let wallet = wallet.with_chain_id(chain_id);
 
-    let master_client =
-        Arc::new(SignerMiddleware::new(provider.clone(), wallet));
+    let master_client = Arc::new(SignerMiddleware::new(provider.clone(), wallet));
     let settlement_address: Address = cfg.contract_settlement.parse()?;
     let registry_address: Address = cfg.contract_registry.parse()?;
 
-    let settlement =
-        AMPSettlementContract::new(settlement_address, master_client.clone());
-    let registry =
-        AMPRegistryContract::new(registry_address, master_client.clone());
+    let settlement = AMPSettlementContract::new(settlement_address, master_client.clone());
+    let registry = AMPRegistryContract::new(registry_address, master_client.clone());
 
     let state = RelayerState {
         settlement,
@@ -311,10 +302,7 @@ async fn accept_loop(
             Default::default(),
         );
 
-        let rpc_system = RpcSystem::new(
-            Box::new(network),
-            Some(relayer_client.clone().client),
-        );
+        let rpc_system = RpcSystem::new(Box::new(network), Some(relayer_client.clone().client));
         tokio::task::spawn_local(rpc_system.map(|_| ()));
     }
 }

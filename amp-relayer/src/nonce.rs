@@ -26,8 +26,7 @@ impl NonceManager {
         let nonce = match cached {
             Some(n) => n,
             None => {
-                let chain_nonce =
-                    provider.get_transaction_count(*addr, None).await?.as_u64();
+                let chain_nonce = provider.get_transaction_count(*addr, None).await?.as_u64();
                 let mut cache = self.cache.lock().unwrap();
                 cache.insert(*addr, chain_nonce);
                 chain_nonce

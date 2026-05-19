@@ -23,12 +23,7 @@ impl Persistence {
         Ok(Self { db: Arc::new(db) })
     }
 
-    pub fn save<T: serde::Serialize>(
-        &self,
-        cf: &str,
-        key: &str,
-        value: &T,
-    ) -> Result<()> {
+    pub fn save<T: serde::Serialize>(&self, cf: &str, key: &str, value: &T) -> Result<()> {
         let tree = self.db.open_tree(cf)?;
         let bytes = bincode::serialize(value)?;
         tree.insert(key.as_bytes(), bytes.as_slice())?;
@@ -37,11 +32,7 @@ impl Persistence {
     }
 
     #[allow(dead_code)]
-    pub fn load<T: DeserializeOwned>(
-        &self,
-        cf: &str,
-        key: &str,
-    ) -> Result<Option<T>> {
+    pub fn load<T: DeserializeOwned>(&self, cf: &str, key: &str) -> Result<Option<T>> {
         let tree = self.db.open_tree(cf)?;
         match tree.get(key.as_bytes())? {
             Some(bytes) => Ok(Some(bincode::deserialize(&bytes)?)),
@@ -57,10 +48,7 @@ impl Persistence {
         Ok(())
     }
 
-    pub fn load_all<T: DeserializeOwned>(
-        &self,
-        cf: &str,
-    ) -> Result<Vec<(String, T)>> {
+    pub fn load_all<T: DeserializeOwned>(&self, cf: &str) -> Result<Vec<(String, T)>> {
         let tree = self.db.open_tree(cf)?;
         let mut results = Vec::new();
         for item in tree.iter() {

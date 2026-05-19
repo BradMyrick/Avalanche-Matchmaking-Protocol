@@ -46,13 +46,9 @@ impl AuthService {
         (msg_bytes, expires_at)
     }
 
-    pub async fn verify_login(
-        &self,
-        game_id: u64,
-        sig_bytes: &[u8],
-    ) -> Result<Address> {
-        let address = recover_address(sig_bytes)
-            .context("failed to recover address from signature")?;
+    pub async fn verify_login(&self, game_id: u64, sig_bytes: &[u8]) -> Result<Address> {
+        let address =
+            recover_address(sig_bytes).context("failed to recover address from signature")?;
 
         let address_hex = hex::encode(address.as_bytes());
         info!(target: "auth", "Recovered address: 0x{}", address_hex);
@@ -103,8 +99,7 @@ impl AuthService {
         let now = now_ns();
         let mut challenges = self.challenges.write().await;
         let before = challenges.len();
-        challenges
-            .retain(|_, c| now.saturating_sub(c.created_at) < CHALLENGE_TTL_NS);
+        challenges.retain(|_, c| now.saturating_sub(c.created_at) < CHALLENGE_TTL_NS);
         let removed = before - challenges.len();
         if removed > 0 {
             info!(target: "auth", "Cleaned up {} expired challenges", removed);

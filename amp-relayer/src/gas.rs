@@ -18,8 +18,7 @@ impl GasManager {
         &self,
         provider: &Provider<Http>,
     ) -> anyhow::Result<(U256, U256)> {
-        let (max_fee, priority_fee) =
-            provider.estimate_eip1559_fees(None).await?;
+        let (max_fee, priority_fee) = provider.estimate_eip1559_fees(None).await?;
         Ok((max_fee, priority_fee))
     }
 
@@ -27,8 +26,7 @@ impl GasManager {
     pub fn bump_fees(&self, max_fee: U256, priority_fee: U256) -> (U256, U256) {
         let bump_factor = (100 + self.bump_percent) as u128;
         let new_max = max_fee * U256::from(bump_factor) / U256::from(100);
-        let new_priority =
-            priority_fee * U256::from(bump_factor) / U256::from(100);
+        let new_priority = priority_fee * U256::from(bump_factor) / U256::from(100);
         (new_max, new_priority)
     }
 }

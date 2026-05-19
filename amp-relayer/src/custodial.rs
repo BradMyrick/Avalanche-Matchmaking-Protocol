@@ -14,12 +14,7 @@ pub fn derive_custodial_signer(
     let master_bytes = master_key.signer().to_bytes();
 
     let mut preimage = Vec::with_capacity(
-        DERIVATION_DOMAIN.len()
-            + 1
-            + purpose.len()
-            + 1
-            + 8
-            + master_bytes.len(),
+        DERIVATION_DOMAIN.len() + 1 + purpose.len() + 1 + 8 + master_bytes.len(),
     );
     preimage.extend_from_slice(DERIVATION_DOMAIN);
     preimage.push(0x00);
@@ -34,10 +29,7 @@ pub fn derive_custodial_signer(
         .with_chain_id(chain_id)
 }
 
-pub async fn ensure_gas(
-    custodial_addr: Address,
-    state: &RelayerState,
-) -> anyhow::Result<()> {
+pub async fn ensure_gas(custodial_addr: Address, state: &RelayerState) -> anyhow::Result<()> {
     let balance = state
         .master_client
         .provider()
