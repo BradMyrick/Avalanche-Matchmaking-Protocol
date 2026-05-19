@@ -28,6 +28,16 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
 
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build contracts (needed by amp-relayer)
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts --no-git
+          forge install foundry-rs/forge-std --no-git
+          forge build
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
