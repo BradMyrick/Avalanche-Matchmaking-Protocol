@@ -54,6 +54,9 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         address arbiter
     ) external whenNotPaused returns (uint256 gameId) {
         require(verifiers.length <= 10, "Too many verifiers");
+        if (mode == AMPTypes.SettlementMode.RT_HASH_AGREE) {
+            require(arbiter != address(0), "RT mode requires arbiter");
+        }
         gameId = nextGameId++;
         games[gameId] = AMPTypes.Game({
             admin: _msgSender(),
@@ -72,6 +75,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     function setMatchTimeout(uint256 gameId, uint256 timeoutSeconds) external {
         require(_msgSender() == games[gameId].admin, "Not game admin");
         require(timeoutSeconds >= 5 minutes, "Timeout too short");
+        require(timeoutSeconds <= 30 days, "Timeout too long");
         games[gameId].matchTimeout = timeoutSeconds;
     }
 
@@ -121,6 +125,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     function joinMatch(uint256 matchId) external payable whenNotPaused nonReentrant {
         AMPTypes.Match storage m = matches[matchId];
         require(m.state == AMPTypes.MatchState.OPEN, "Match not open");
+        require(_msgSender() != m.playerA, "Cannot join own match");
 
         AMPTypes.Game storage game = games[m.gameId];
 
@@ -161,11 +166,18 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     function expireMatch(uint256 matchId) external nonReentrant {
         AMPTypes.Match storage m = matches[matchId];
         AMPTypes.Game storage game = games[m.gameId];
-        require(
-            m.state == AMPTypes.MatchState.OPEN || m.state == AMPTypes.MatchState.READY,
-            "Match not expirable"
-        );
-        require(block.timestamp >= m.createdAt + game.matchTimeout, "Not expired yet");
+        if (m.state == AMPTypes.MatchState.DISPUTED) {
+            require(
+                block.timestamp >= m.createdAt + game.matchTimeout * 3,
+                "Dispute timeout not reached"
+            );
+        } else {
+            require(
+                m.state == AMPTypes.MatchState.OPEN || m.state == AMPTypes.MatchState.READY,
+                "Match not expirable"
+            );
+            require(block.timestamp >= m.createdAt + game.matchTimeout, "Not expired yet");
+        }
 
         m.state = AMPTypes.MatchState.EXPIRED;
 

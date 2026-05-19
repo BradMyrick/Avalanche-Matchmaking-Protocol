@@ -468,18 +468,36 @@ impl match_session::Server for MatchSessionImpl {
                     }
 
                     tokio::task::spawn_local(async move {
-                        if let Err(e) = notify_relayer_rpc(
-                            &m_id,
-                            outcome_val,
-                            &r_hash,
-                            &sig,
-                        )
-                        .await
-                        {
-                            error!(
-                                "Failed to notify relayer for {}: {:?}",
-                                m_id, e
-                            );
+                        let mut attempts = 0u32;
+                        loop {
+                            match notify_relayer_rpc(
+                                &m_id,
+                                outcome_val,
+                                &r_hash,
+                                &sig,
+                            )
+                            .await
+                            {
+                                Ok(()) => break,
+                                Err(e) => {
+                                    attempts += 1;
+                                    if attempts >= 5 {
+                                        error!(
+                                            "Failed to notify relayer for {} after {} attempts: {:?}",
+                                            m_id, attempts, e
+                                        );
+                                        break;
+                                    }
+                                    warn!(
+                                        "Relayer notify attempt {} failed for {}: {:?}",
+                                        attempts, m_id, e
+                                    );
+                                    tokio::time::sleep(Duration::from_millis(
+                                        500 * 2u64.pow(attempts.min(3)),
+                                    ))
+                                    .await;
+                                }
+                            }
                         }
                     });
                     Ok(())
@@ -545,7 +563,7 @@ impl user_session::Server for UserSessionImpl {
         params: user_session::RequestMatchParams,
         mut results: user_session::RequestMatchResults,
     ) -> Promise<(), ::capnp::Error> {
-        let req = pry!(params.get()).get_req().unwrap();
+        let req = pry!(pry!(params.get()).get_req());
         let game_id = self.game_id;
         let p_id = self.player_id.clone();
         let app_state = self.state.clone();

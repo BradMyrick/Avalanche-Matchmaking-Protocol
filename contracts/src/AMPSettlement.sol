@@ -101,9 +101,10 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
 
         require(mode == AMPTypes.SettlementMode.ASYNC_VERIFIER, "Wrong mode");
         require(
-            state == AMPTypes.MatchState.READY || state == AMPTypes.MatchState.OPEN,
+            state == AMPTypes.MatchState.READY,
             "Match not settlable"
         );
+        require(playerB != address(0), "No opponent joined");
 
         bytes32 structHash = keccak256(
             abi.encode(result.matchId, result.outcome, result.transcriptHash)

@@ -282,10 +282,17 @@ async fn login(
     service: &service_capnp::game_session_service::Client,
     client_id: u64,
 ) -> Result<service_capnp::user_session::Client> {
+    let mut challenge_req = service.request_challenge_request();
+    challenge_req.get().set_game_id(client_id);
+    let challenge_resp = challenge_req.send().promise.await?;
+    let challenge_bytes = challenge_resp.get()?.get_challenge()?.to_vec();
+
+    let mut sig_bytes = vec![0u8; 65];
+    sig_bytes.extend_from_slice(&challenge_bytes);
+
     let mut req = service.login_request();
     req.get().set_game_id(client_id);
-    let sig = vec![0u8; 65];
-    req.get().set_signed_challenge(&sig);
+    req.get().set_signed_challenge(&sig_bytes);
     let response = req.send().promise.await?;
     let session = response.get()?.get_session()?;
     Ok(session)

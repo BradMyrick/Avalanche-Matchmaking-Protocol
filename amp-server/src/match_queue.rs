@@ -69,8 +69,8 @@ impl IndexedQueue {
             let search_start = match bucket[i + 1..].binary_search_by(|e| {
                 e.mmr.partial_cmp(&lo).unwrap_or(std::cmp::Ordering::Equal)
             }) {
-                Ok(idx) => idx + 1,
-                Err(idx) => idx + 1,
+                Ok(idx) => (i + 1) + idx,
+                Err(idx) => (i + 1) + idx,
             };
 
             let mut best_j: Option<usize> = None;
@@ -93,8 +93,15 @@ impl IndexedQueue {
             }
 
             if let Some(j) = best_j {
-                let entry_b = bucket.remove(j);
-                let entry_a = bucket.remove(i);
+                let (entry_a, entry_b) = if j > i {
+                    let b = bucket.remove(j);
+                    let a = bucket.remove(i);
+                    (a, b)
+                } else {
+                    let a = bucket.remove(i);
+                    let b = bucket.remove(j);
+                    (a, b)
+                };
                 self.total_count -= 2;
 
                 let quality = crate::matchmaker::compute_match_quality(
