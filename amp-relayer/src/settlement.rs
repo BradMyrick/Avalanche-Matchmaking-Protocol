@@ -8,6 +8,7 @@ use tracing::{info, warn};
 use super::AsyncResult;
 use super::RelayerState;
 use super::custodial;
+use super::gas::GasManager;
 use super::nonce::NonceManager;
 
 const CF_PENDING: &str = "pending_settlements";
@@ -40,14 +41,16 @@ pub struct SettlementQueue {
     db: Arc<Db>,
     max_retries: u32,
     base_retry_delay_ms: u64,
+    gas_manager: GasManager,
 }
 
 impl SettlementQueue {
-    pub fn new(db: Arc<Db>, max_retries: u32, base_retry_delay_ms: u64) -> Self {
+    pub fn new(db: Arc<Db>, max_retries: u32, base_retry_delay_ms: u64, gas_manager: GasManager) -> Self {
         Self {
             db,
             max_retries,
             base_retry_delay_ms,
+            gas_manager,
         }
     }
 
@@ -212,9 +215,24 @@ impl SettlementQueue {
             Arc::new(custodial_client),
         );
 
+        let (max_fee, _priority_fee) = self
+            .gas_manager
+            .estimate_eip1559_fees(&provider)
+            .await
+            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
+
+        let effective_max_fee = if settlement.retry_count > 0 {
+            let bump_factor =
+                (100 + self.gas_manager.bump_percent * settlement.retry_count as u64) as u128;
+            max_fee * U256::from(bump_factor) / U256::from(100)
+        } else {
+            max_fee
+        };
+
         let tx = settlement_custodial
             .submit_async_result(match_id, async_result)
-            .nonce(nonce);
+            .nonce(nonce)
+            .gas_price(effective_max_fee);
 
         let pending = tx
             .send()

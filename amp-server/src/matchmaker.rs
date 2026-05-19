@@ -1,11 +1,12 @@
 use crate::rules;
 use crate::state::{MatchQualityDetail, QueueEntry, StoredRuleSet};
+use std::sync::Arc;
 
 #[allow(dead_code)]
 pub fn find_match(
     queue: &[QueueEntry],
     new_entry: &QueueEntry,
-    ruleset: &StoredRuleSet,
+    ruleset: &Arc<StoredRuleSet>,
 ) -> Option<usize> {
     let mut best_idx: Option<usize> = None;
     let mut best_score = 0.0f32;
@@ -35,7 +36,7 @@ pub fn find_match(
 pub fn compute_match_quality(
     player_a: &QueueEntry,
     player_b: &QueueEntry,
-    ruleset: &StoredRuleSet,
+    ruleset: &Arc<StoredRuleSet>,
 ) -> MatchQualityDetail {
     let result = rules::evaluate_rules(player_a, player_b, ruleset);
     result.quality
@@ -168,7 +169,7 @@ mod tests {
     fn test_match_quality_perfect() {
         let a = make_queue_entry(1500.0, "tank");
         let b = make_queue_entry(1500.0, "dps");
-        let ruleset = StoredRuleSet::default();
+        let ruleset = Arc::new(StoredRuleSet::default());
         let q = compute_match_quality(&a, &b, &ruleset);
         assert!(
             q.total_score > 0.5,

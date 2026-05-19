@@ -28,7 +28,7 @@ interface IAMPRegistry {
     function matches(uint256 id)
         external
         view
-        returns (uint256, address, address, uint256, AMPTypes.MatchState, uint256);
+        returns (uint256, address, AMPTypes.MatchState, address, uint64, uint256);
 
     function settleMatch(
         uint256 matchId,
@@ -88,7 +88,7 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
     function submitAsyncResult(uint256 matchId, AMPTypes.AsyncResult calldata result) external whenNotPaused {
         if (result.matchId != matchId) revert MatchIdMismatch();
 
-        (uint256 gameId, address playerA, address playerB, uint256 stakeAmount, AMPTypes.MatchState state,) =
+        (uint256 gameId, address playerA, AMPTypes.MatchState state, address playerB, uint64 createdAt, uint256 stakeAmount) =
             IAMPRegistry(registry).matches(matchId);
 
         (, AMPTypes.SettlementMode mode,,,,) = IAMPRegistry(registry).games(gameId);
@@ -117,7 +117,7 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         whenNotPaused
     {
         if (result.matchId != matchId) revert MatchIdMismatch();
-        (uint256 gameId, address playerA, address playerB, uint256 stakeAmount, AMPTypes.MatchState state,) =
+        (uint256 gameId, address playerA, AMPTypes.MatchState state, address playerB, uint64 createdAt, uint256 stakeAmount) =
             IAMPRegistry(registry).matches(matchId);
 
         (, AMPTypes.SettlementMode mode,,,,) = IAMPRegistry(registry).games(gameId);
@@ -152,7 +152,7 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
     }
 
     function resolveDispute(uint256 matchId, AMPTypes.OutcomeCode enforcedOutcome) external {
-        (uint256 gameId, address playerA, address playerB, uint256 stakeAmount, AMPTypes.MatchState state,) =
+        (uint256 gameId, address playerA, AMPTypes.MatchState state, address playerB, uint64 createdAt, uint256 stakeAmount) =
             IAMPRegistry(registry).matches(matchId);
 
         (,,,, address arbiter,) = IAMPRegistry(registry).games(gameId);

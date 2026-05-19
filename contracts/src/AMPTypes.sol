@@ -36,10 +36,10 @@ library AMPTypes {
     struct Match {
         uint256 gameId;
         address playerA;
+        AMPTypes.MatchState state;
         address playerB;
+        uint64 createdAt;
         uint256 stakeAmount;
-        MatchState state;
-        uint256 createdAt;
     }
 
     struct Settlement {

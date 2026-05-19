@@ -72,7 +72,7 @@ impl PlayerServiceImpl {
 
         let profile = player.clone();
         drop(player);
-        self.state.persist_player(player_id, &profile);
+        self.state.persist_player(player_id, &profile).await;
 
         Ok(())
     }
@@ -155,7 +155,7 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
 
             let profile_for_persist = profile_entry.clone();
             drop(profile_entry);
-            state.persist_player(&id, &profile_for_persist);
+            state.persist_player(&id, &profile_for_persist).await;
 
             results.get().set_player_id(id.as_bytes());
             Ok(())
@@ -265,8 +265,7 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
                 profile.is_online = false;
                 let profile_clone = profile.clone();
                 drop(profile);
-                state.persist_player(&player_id, &profile_clone);
-                info!("Player {} set offline", player_id);
+                state.persist_player(&player_id, &profile_clone).await;
             }
             Ok(())
         })
@@ -323,7 +322,7 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
                 }
                 let profile_clone = profile.clone();
                 drop(profile);
-                state.persist_player(&player_id, &profile_clone);
+                state.persist_player(&player_id, &profile_clone).await;
             }
             Ok(())
         })

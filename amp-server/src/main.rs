@@ -21,7 +21,7 @@ mod player_service;
 mod rules;
 mod state;
 
-use state::{ActiveMatch, AppState, MatchFoundPayload, QueueEntry, now_ms};
+use state::{ActiveMatch, AppState, MatchFoundPayload, QueueEntry, StoredRuleSet, now_ms};
 
 #[allow(
     clippy::all,
@@ -198,9 +198,7 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
 
             let keys = queue.bucket_keys();
             for key in keys {
-                let ruleset = rulesets_snapshot.get(&key.1).cloned().unwrap_or_default();
-                let mut ruleset = ruleset;
-                ruleset.sort_rules();
+                let ruleset = rulesets_snapshot.get(&key.1).cloned().unwrap_or_else(|| StoredRuleSet::default_arc());
 
                 loop {
                     let result = queue.try_match_bucket(
@@ -250,7 +248,7 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
                         expires_at_ms: Some(now + state::MATCH_TTL_MS),
                     };
                     state.active_matches.write().await.insert(match_id, active.clone());
-                    state.persist_match(&active.match_id, &active);
+                    state.persist_match(&active.match_id, &active).await;
                 }
             }
         }
@@ -687,15 +685,17 @@ impl game_session_service::Server for GameSessionServiceImpl {
         params: game_session_service::LoginParams,
         mut results: game_session_service::LoginResults,
     ) -> Promise<(), ::capnp::Error> {
-        let game_id = pry!(params.get()).get_game_id();
-        let sig_bytes = pry!(pry!(params.get()).get_signed_challenge()).to_vec();
+        let params_reader = pry!(params.get());
+        let game_id = params_reader.get_game_id();
+        let sig_bytes = pry!(params_reader.get_signature()).to_vec();
+        let challenge_payload = pry!(params_reader.get_challenge_payload()).to_vec();
 
         let state = self.state.clone();
         let p_service = self.player_service.clone();
         let auth = self.auth_service.clone();
 
         Promise::from_future(async move {
-            match auth.verify_login(game_id, &sig_bytes).await {
+            match auth.verify_login(game_id, &sig_bytes, &challenge_payload).await {
                 Ok(address) => {
                     let player_id = format!("0x{}", hex::encode(address.as_bytes()));
 
@@ -709,7 +709,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
                         profile.last_login = state::now_ns();
                         let profile_clone = profile.clone();
                         drop(profile);
-                        state.persist_player(&player_id, &profile_clone);
+                        state.persist_player(&player_id, &profile_clone).await;
                     }
 
                     info!("Authenticated player {} for game {}", player_id, game_id);

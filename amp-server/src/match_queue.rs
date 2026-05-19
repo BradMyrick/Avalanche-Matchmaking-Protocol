@@ -1,4 +1,5 @@
 use crate::state::{MatchQualityDetail, QueueEntry, StoredRuleSet};
+use std::sync::Arc;
 use std::collections::HashMap;
 
 type BucketKey = (String, String);
@@ -44,7 +45,7 @@ impl IndexedQueue {
     pub fn try_match_bucket(
         &mut self,
         key: &BucketKey,
-        ruleset: &StoredRuleSet,
+        ruleset: &Arc<StoredRuleSet>,
         max_active: usize,
         current_active: usize,
     ) -> Option<MatchResult> {
@@ -190,7 +191,7 @@ mod tests {
         q.push(make_entry("p1", "g1", "r1", 1500.0));
         q.push(make_entry("p2", "g1", "r1", 1400.0));
 
-        let ruleset = StoredRuleSet::default();
+        let ruleset = Arc::new(StoredRuleSet::default());
         let result = q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 10000, 0);
 
         assert!(result.is_some());
@@ -204,10 +205,10 @@ mod tests {
         q.push(make_entry("p1", "g1", "r1", 1500.0));
         q.push(make_entry("p2", "g1", "r1", 3000.0));
 
-        let ruleset = StoredRuleSet {
+        let ruleset = Arc::new(StoredRuleSet {
             max_skill_diff: 500.0,
             ..Default::default()
-        };
+        });
         let result = q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 10000, 0);
 
         assert!(result.is_none());
@@ -220,7 +221,7 @@ mod tests {
         q.push(make_entry("p1", "g1", "r1", 1500.0));
         q.push(make_entry("p2", "g1", "r1", 1400.0));
 
-        let ruleset = StoredRuleSet::default();
+        let ruleset = Arc::new(StoredRuleSet::default());
         let result = q.try_match_bucket(&("g1".into(), "r1".into()), &ruleset, 100, 100);
 
         assert!(result.is_none());

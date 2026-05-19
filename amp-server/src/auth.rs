@@ -46,18 +46,18 @@ impl AuthService {
         (msg_bytes, expires_at)
     }
 
-    pub async fn verify_login(&self, game_id: u64, sig_bytes: &[u8]) -> Result<Address> {
+    pub async fn verify_login(&self, game_id: u64, sig_bytes: &[u8], challenge_payload: &[u8]) -> Result<Address> {
         let address =
-            recover_address(sig_bytes).context("failed to recover address from signature")?;
+            recover_address_from_sig(sig_bytes, challenge_payload).context("failed to recover address from signature")?;
 
         let address_hex = hex::encode(address.as_bytes());
         info!(target: "auth", "Recovered address: 0x{}", address_hex);
 
-        let challenge = extract_challenge(sig_bytes);
-        let nonce = match challenge {
+        let challenge_text = String::from_utf8_lossy(challenge_payload);
+        let nonce = match extract_nonce_from_challenge(&challenge_text) {
             Some(n) => n,
             None => {
-                bail!("signature does not contain a valid challenge reference")
+                bail!("challenge payload does not contain a valid nonce reference")
             }
         };
 
@@ -107,14 +107,9 @@ impl AuthService {
     }
 }
 
-fn extract_challenge(sig_bytes: &[u8]) -> Option<String> {
-    if sig_bytes.len() < 65 {
-        return None;
-    }
-    let payload = &sig_bytes[65..];
-    let message = String::from_utf8_lossy(payload);
-    if message.starts_with("AMP_AUTH:") {
-        let parts: Vec<&str> = message.splitn(3, ':').collect();
+fn extract_nonce_from_challenge(challenge_text: &str) -> Option<String> {
+    if challenge_text.starts_with("AMP_AUTH:") {
+        let parts: Vec<&str> = challenge_text.splitn(3, ':').collect();
         if parts.len() == 3 {
             return Some(parts[2].to_string());
         }
@@ -122,7 +117,7 @@ fn extract_challenge(sig_bytes: &[u8]) -> Option<String> {
     None
 }
 
-fn recover_address(sig_bytes: &[u8]) -> Result<Address> {
+fn recover_address_from_sig(sig_bytes: &[u8], payload: &[u8]) -> Result<Address> {
     if sig_bytes.len() < 65 {
         bail!("signature too short: {} bytes", sig_bytes.len());
     }
@@ -130,10 +125,10 @@ fn recover_address(sig_bytes: &[u8]) -> Result<Address> {
     let sig = Signature::try_from(&sig_bytes[..65])
         .map_err(|e| anyhow::anyhow!("invalid signature format: {:?}", e))?;
 
-    let payload = if sig_bytes.len() > 65 {
-        &sig_bytes[65..]
-    } else {
+    let payload = if payload.is_empty() {
         b"AMP_LOGIN"
+    } else {
+        payload
     };
 
     let msg_hash: H256 = hash_message(payload);
@@ -150,35 +145,29 @@ mod tests {
 
     #[test]
     fn test_reject_short_signature() {
-        let result = recover_address(&[0u8; 32]);
+        let result = recover_address_from_sig(&[0u8; 32], b"AMP_AUTH:1:nonce");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_reject_garbage_signature() {
-        let result = recover_address(&[0u8; 65]);
+        let result = recover_address_from_sig(&[0u8; 65], b"AMP_AUTH:1:nonce");
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_extract_challenge_valid() {
-        let sig = [0u8; 65];
-        let mut full = sig.to_vec();
-        full.extend_from_slice(b"AMP_AUTH:42:some-nonce");
-        let result = extract_challenge(&full);
+    fn test_extract_nonce_valid() {
+        let result = extract_nonce_from_challenge("AMP_AUTH:42:some-nonce");
         assert_eq!(result, Some("some-nonce".to_string()));
     }
 
     #[test]
-    fn test_extract_challenge_no_payload() {
-        assert!(extract_challenge(&[0u8; 65]).is_none());
+    fn test_extract_nonce_no_payload() {
+        assert!(extract_nonce_from_challenge("").is_none());
     }
 
     #[test]
-    fn test_extract_challenge_wrong_prefix() {
-        let sig = [0u8; 65];
-        let mut full = sig.to_vec();
-        full.extend_from_slice(b"WRONG_PREFIX:42:nonce");
-        assert!(extract_challenge(&full).is_none());
+    fn test_extract_nonce_wrong_prefix() {
+        assert!(extract_nonce_from_challenge("WRONG_PREFIX:42:nonce").is_none());
     }
 }

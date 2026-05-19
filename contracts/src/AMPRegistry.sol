@@ -140,7 +140,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
             playerB: address(0),
             stakeAmount: actualStake,
             state: AMPTypes.MatchState.OPEN,
-            createdAt: block.timestamp
+            createdAt: uint64(block.timestamp)
         });
 
         emit MatchCreated(matchId, gameId, _msgSender(), actualStake);

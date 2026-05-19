@@ -238,10 +238,12 @@ async fn main() -> Result<()> {
     };
 
     let db = sled::open(&cfg.db_path)?;
+    let gas_manager = gas::GasManager::new(cfg.gas_bump_percent, cfg.gas_bump_timeout_secs);
     let queue = Arc::new(settlement::SettlementQueue::new(
         Arc::new(db),
         cfg.max_retries,
         cfg.base_retry_delay_ms,
+        gas_manager,
     ));
 
     queue.replay_pending()?;

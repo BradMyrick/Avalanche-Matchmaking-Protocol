@@ -23,27 +23,46 @@ impl Persistence {
         Ok(Self { db: Arc::new(db) })
     }
 
-    pub fn save<T: serde::Serialize>(&self, cf: &str, key: &str, value: &T) -> Result<()> {
-        let tree = self.db.open_tree(cf)?;
+    pub async fn save<T: serde::Serialize + Send + 'static>(&self, cf: &str, key: &str, value: &T) -> Result<()> {
+        let db = self.db.clone();
+        let cf = cf.to_string();
+        let key = key.to_string();
         let bytes = bincode::serialize(value)?;
-        tree.insert(key.as_bytes(), bytes.as_slice())?;
-        Ok(())
+        tokio::task::spawn_blocking(move || {
+            let tree = db.open_tree(&cf)?;
+            tree.insert(key.as_bytes(), bytes.as_slice())?;
+            Ok(())
+        })
+        .await?
     }
 
     #[allow(dead_code)]
-    pub fn load<T: DeserializeOwned>(&self, cf: &str, key: &str) -> Result<Option<T>> {
-        let tree = self.db.open_tree(cf)?;
-        match tree.get(key.as_bytes())? {
-            Some(bytes) => Ok(Some(bincode::deserialize(&bytes)?)),
-            None => Ok(None),
-        }
+    pub async fn load<T: DeserializeOwned + Send + 'static>(&self, cf: &str, key: &str) -> Result<Option<T>> {
+        let db = self.db.clone();
+        let cf = cf.to_string();
+        let key = key.to_string();
+        let result: Option<T> = tokio::task::spawn_blocking(move || {
+            let tree = db.open_tree(&cf)?;
+            match tree.get(key.as_bytes())? {
+                Some(bytes) => Ok::<Option<T>, anyhow::Error>(Some(bincode::deserialize(&bytes)?)),
+                None => Ok::<Option<T>, anyhow::Error>(None),
+            }
+        })
+        .await??;
+        Ok(result)
     }
 
     #[allow(dead_code)]
-    pub fn delete(&self, cf: &str, key: &str) -> Result<()> {
-        let tree = self.db.open_tree(cf)?;
-        tree.remove(key.as_bytes())?;
-        Ok(())
+    pub async fn delete(&self, cf: &str, key: &str) -> Result<()> {
+        let db = self.db.clone();
+        let cf = cf.to_string();
+        let key = key.to_string();
+        tokio::task::spawn_blocking(move || {
+            let tree = db.open_tree(&cf)?;
+            tree.remove(key.as_bytes())?;
+            Ok(())
+        })
+        .await?
     }
 
     pub fn load_all<T: DeserializeOwned>(&self, cf: &str) -> Result<Vec<(String, T)>> {

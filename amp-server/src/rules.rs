@@ -3,6 +3,7 @@ use crate::state::{
     PreferenceParams, QueueEntry, RegionParams, RuleParams, RuleType, SkillDecayParams,
     SkillParams, StoredBackfillPolicy, StoredRule, StoredRuleSet, TeamBalanceParams, now_ms,
 };
+use std::sync::Arc;
 
 pub struct RuleEvaluationResult {
     pub passes: bool,
@@ -12,7 +13,7 @@ pub struct RuleEvaluationResult {
 pub fn evaluate_rules(
     entry_a: &QueueEntry,
     entry_b: &QueueEntry,
-    ruleset: &StoredRuleSet,
+    ruleset: &Arc<StoredRuleSet>,
 ) -> RuleEvaluationResult {
     let mut quality = MatchQualityDetail::default();
     let queue_duration_a = now_ms().saturating_sub(entry_a.enqueued_at_ms);
@@ -363,8 +364,8 @@ mod tests {
         }
     }
 
-    fn default_ruleset() -> StoredRuleSet {
-        StoredRuleSet::default()
+    fn default_ruleset() -> Arc<StoredRuleSet> {
+        Arc::new(StoredRuleSet::default())
     }
 
     #[test]
@@ -381,7 +382,7 @@ mod tests {
     fn test_region_mismatch_fails() {
         let a = make_entry(1500.0, "na", "tank");
         let b = make_entry(1500.0, "eu", "dps");
-        let mut rs = default_ruleset();
+        let mut rs = (*default_ruleset()).clone();
         rs.rules.push(StoredRule {
             rule_id: "region".into(),
             name: "Region".into(),
@@ -394,6 +395,7 @@ mod tests {
             is_hard_constraint: true,
             priority: 1,
         });
+        let rs = Arc::new(rs);
         let result = evaluate_rules(&a, &b, &rs);
         assert!(!result.passes);
     }
@@ -405,7 +407,7 @@ mod tests {
         let mut b = make_entry(1500.0, "na", "dps");
         b.language = "en".to_string();
 
-        let mut rs = default_ruleset();
+        let mut rs = (*default_ruleset()).clone();
         rs.rules.push(StoredRule {
             rule_id: "lang".into(),
             name: "Language".into(),
@@ -419,6 +421,7 @@ mod tests {
             priority: 10,
         });
 
+        let rs = Arc::new(rs);
         let result = evaluate_rules(&a, &b, &rs);
         assert!(result.quality.language_score > 0.0);
     }
