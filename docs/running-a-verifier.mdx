@@ -1,46 +1,91 @@
 # Running a Verifier
 
-While AMP starts as a managed network, the protocol is designed for decentralization. In the future, studios or third-party infrastructure providers will be able to run their own AMP Verifiers to earn fees and support the network.
+While AMP starts as a managed network, the protocol is designed for decentralization. Studios or third-party infrastructure providers can run their own AMP Verifiers to earn fees and support the network.
 
 **Warning:** Running a verifier is currently in **Alpha**. The instructions below are for advanced users and developers looking to test the infra locally or on Fuji.
 
 ## Hardware Requirements
 
-- **CPU:** 4+ Cores (High clock speed preferred for `ASYNC_VERIFIER` replays).
-- **RAM:** 8GB minimum.
-- **Disk:** NVMe SSD (for fast transcript logging).
-- **Network:** Low latency, stable IP.
+- **CPU**: 4+ Cores (High clock speed preferred for `ASYNC_VERIFIER` replays).
+- **RAM**: 8GB minimum.
+- **Disk**: NVMe SSD (for sled-backed settlement queue and transcript logging).
+- **Network**: Low latency, stable IP.
 
 ## Configuration
 
-The Verifier is configured via an `amp-config.yaml` file:
+The Verifier (`amp-server`) is configured via environment variables:
 
-```yaml
-network:
-  listen_addr: "0.0.0.0:5555"
-  avax_rpc: "https://api.avax-test.network/ext/bc/C/rpc"
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `AMP_LISTEN_ADDR` | TCP listen address for Cap'n Proto RPC | `0.0.0.0:5555` |
+| `AMP_AVAX_RPC` | Avalanche RPC endpoint | `https://api.avax-test.network/ext/bc/C/rpc` |
+| `AMP_REGISTRY_ADDR` | AMPRegistry contract address | (required) |
+| `AMP_VERIFIER_KEY` | Private key for signing attestations (hex) | (required) |
+| `AMP_MATCH_TICK_MS` | Matchmaker tick interval in ms | `50` |
+| `AMP_MATCH_TTL_MS` | Match time-to-live in ms | `3600000` (1h) |
+| `AMP_MAX_ACTIVE_MATCHES` | Maximum concurrent matches | `10000` |
+| `AMP_LOG_LEVEL` | Log level (trace/debug/info/warn/error) | `info` |
+| `RUST_LOG` | Standard Rust log filter | `amp_server=info` |
 
-verifier:
-  private_key: "0x..." # The key used to sign attestations
-  registry_addr: "0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34"
+## Build & Run
 
-logging:
-  level: "info"
-  telemetry_path: "./logs/traces"
+### From Source
+
+```bash
+# Build
+cargo build --release --bin amp-server
+
+# Run
+AMP_LISTEN_ADDR=0.0.0.0:5555 \
+AMP_AVAX_RPC=https://api.avax-test.network/ext/bc/C/rpc \
+AMP_REGISTRY_ADDR=0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34 \
+AMP_VERIFIER_KEY=0x... \
+./target/release/amp-server
 ```
 
-## Setup & Execution
+### With Docker
 
-1.  **Clone the Repo:** `git clone https://github.com/BradMyrick/Avax-Build-Games-2026`
-2.  **Build the Server:**
-    ```bash
-    cargo build --release --bin amp-server
-    ```
-3.  **Run:**
-    ```bash
-    ./target/release/amp-server --config ./amp-config.yaml
-    ```
+```bash
+docker build -t amp-server -f amp-server/Dockerfile .
+docker run -d \
+  -e AMP_LISTEN_ADDR=0.0.0.0:5555 \
+  -e AMP_AVAX_RPC=https://api.avax-test.network/ext/bc/C/rpc \
+  -e AMP_REGISTRY_ADDR=0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34 \
+  -e AMP_VERIFIER_KEY=0x... \
+  -p 5555:5555 \
+  amp-server
+```
+
+### Local Development (Anvil)
+
+For local testing, use the provided script to spin up a local Avalanche fork:
+
+```bash
+./scripts/start-localnet.sh
+```
+
+This starts Anvil with the AMP contracts deployed and configures default verifier keys.
+
+## Settlement Relayer
+
+The `amp-relayer` runs alongside the verifier to submit settled outcomes on-chain. It features:
+
+- **Sled-backed queue**: Persistent settlement queue survives restarts.
+- **EIP-1559 gas**: Dynamic gas pricing with automatic fee bumping.
+- **Nonce tracking**: Per-account nonce management for concurrent transactions.
+- **Retry with backoff**: Failed transactions are retried up to 5 times with exponential backoff (500ms -- 4s).
+- **Dead-letter queue**: Permanently failed settlements are logged for manual intervention.
+- **Graceful shutdown**: In-flight transactions complete before the process exits.
+
+```bash
+cargo build --release --bin amp-relayer
+
+AMP_RELAYER_RPC=https://api.avax-test.network/ext/bc/C/rpc \
+AMP_RELAYER_REGISTRY=0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34 \
+AMP_RELAYER_KEY=0x... \
+./target/release/amp-relayer
+```
 
 ## Registration
 
-To be recognized by the `AMPSettlement` contract, your Verifier's public key must be whitelisted in the `AMPRegistry`. For the Beta/Fuji phase, please contact the AMP team to have your address added to the allowed verifier set.
+To be recognized by the `AMPSettlement` contract, your Verifier's public key must be whitelisted in the `AMPRegistry`. For the Beta/Fuji phase, contact the AMP team to have your address added to the allowed verifier set.

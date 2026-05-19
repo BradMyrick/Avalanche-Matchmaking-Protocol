@@ -10,12 +10,14 @@ import (
 	"capnproto.org/go/capnp/v3/rpc"
 )
 
+// AMPClient is a Cap'n Proto RPC client for the AMP matchmaking protocol.
 type AMPClient struct {
 	rpcConn     *rpc.Conn
 	bootstrap   capnp.Client
 	userSession capnp.Client
 }
 
+// NewClient connects to an AMP server at the given TCP address and returns a new AMPClient.
 func NewClient(ctx context.Context, addr string) (*AMPClient, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -30,6 +32,8 @@ func NewClient(ctx context.Context, addr string) (*AMPClient, error) {
 	}, nil
 }
 
+// Login authenticates with the AMP server using a game ID and a signed challenge.
+// The signedChallenge must be the server-issued nonce signed by the player's wallet.
 func (c *AMPClient) Login(ctx context.Context, gameID uint64, signedChallenge []byte) error {
 	send := capnp.Send{
 		Method: capnp.Method{
@@ -62,6 +66,8 @@ func (c *AMPClient) Login(ctx context.Context, gameID uint64, signedChallenge []
 	return nil
 }
 
+// RequestMatch submits a match request and blocks until a match is assigned.
+// Returns the assignment details and a MatchSession for interacting with the match.
 func (c *AMPClient) RequestMatch(ctx context.Context, req MatchRequest) (*MatchAssignment, *MatchSession, error) {
 	if !c.userSession.IsValid() {
 		return nil, nil, fmt.Errorf("not logged in; call Login first")
@@ -116,6 +122,7 @@ func (c *AMPClient) RequestMatch(ctx context.Context, req MatchRequest) (*MatchA
 	return assignment, matchSession, nil
 }
 
+// SubmitOutcome sends the final match outcome to the verifier. Returns the verifier's signed result.
 func (c *AMPClient) SubmitOutcome(ctx context.Context, matchSession *MatchSession, outcome Outcome) (*VerifierResult, error) {
 	if matchSession == nil || !matchSession.Session().IsValid() {
 		return nil, fmt.Errorf("matchSession is nil or invalid")
@@ -163,6 +170,7 @@ func (c *AMPClient) SubmitOutcome(ctx context.Context, matchSession *MatchSessio
 	return verifierResult, nil
 }
 
+// EmitTelemetry sends raw telemetry data for the given match session.
 func (c *AMPClient) EmitTelemetry(ctx context.Context, matchSession *MatchSession, data []byte) error {
 	if matchSession == nil || !matchSession.Session().IsValid() {
 		return fmt.Errorf("matchSession is nil or invalid")
@@ -191,6 +199,7 @@ func (c *AMPClient) EmitTelemetry(ctx context.Context, matchSession *MatchSessio
 	return nil
 }
 
+// EmitGameEvent emits a typed game event with associated data for the current match.
 func (c *AMPClient) EmitGameEvent(ctx context.Context, matchSession *MatchSession, eventType string, data []byte) error {
 	if matchSession == nil || !matchSession.Session().IsValid() {
 		return fmt.Errorf("matchSession is nil or invalid")
@@ -222,6 +231,7 @@ func (c *AMPClient) EmitGameEvent(ctx context.Context, matchSession *MatchSessio
 	return nil
 }
 
+// Reconnect re-establishes a MatchSession for an in-progress match after a disconnect.
 func (c *AMPClient) Reconnect(ctx context.Context, matchID []byte) (*MatchSession, error) {
 	if !c.userSession.IsValid() {
 		return nil, fmt.Errorf("not logged in; call Login first")
@@ -257,6 +267,8 @@ func (c *AMPClient) Reconnect(ctx context.Context, matchID []byte) (*MatchSessio
 	}, nil
 }
 
+// WaitForMatch requests a match with an optional timeout.
+// If timeout > 0, the context will be canceled after that duration.
 func (c *AMPClient) WaitForMatch(ctx context.Context, timeout time.Duration) (*MatchAssignment, *MatchSession, error) {
 	if timeout > 0 {
 		var cancel context.CancelFunc
@@ -267,6 +279,7 @@ func (c *AMPClient) WaitForMatch(ctx context.Context, timeout time.Duration) (*M
 	return c.RequestMatch(ctx, MatchRequest{})
 }
 
+// Close releases the RPC connection and all held capabilities.
 func (c *AMPClient) Close() error {
 	if c.userSession.IsValid() {
 		c.userSession.Release()

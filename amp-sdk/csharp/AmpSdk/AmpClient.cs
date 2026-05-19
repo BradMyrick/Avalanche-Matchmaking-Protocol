@@ -6,6 +6,9 @@ using Capnp.Rpc;
 
 namespace AmpSdk {
 
+/// <summary>
+/// Main client for connecting to an AMP server via Cap'n Proto RPC.
+/// </summary>
 public class AmpClient : IDisposable {
     private readonly string _rpcUrl;
 
@@ -16,10 +19,17 @@ public class AmpClient : IDisposable {
 
     private bool HasMatchSession => _matchSession != null;
 
+    /// <summary>
+    /// Creates a new AmpClient targeting the given host:port RPC endpoint.
+    /// </summary>
     public AmpClient(string rpcUrl) {
         _rpcUrl = rpcUrl;
     }
 
+    /// <summary>
+    /// Connects to the AMP server and authenticates with the given game ID and player signature.
+    /// Retries up to 5 times with 2-second backoff.
+    /// </summary>
     public async Task<bool> ConnectAsync(ulong gameId, byte[] playerSignature) {
         int maxRetries = 5;
         for (int i = 0; i < maxRetries; i++) {
@@ -48,10 +58,16 @@ public class AmpClient : IDisposable {
         return false;
     }
 
+    /// <summary>
+    /// Creates or retrieves a player profile on the AMP server.
+    /// </summary>
     public async Task<string> CreateProfileAsync(PlayerProfileData profile) {
         return await Task.FromResult(profile.PlayerId);
     }
 
+    /// <summary>
+    /// Submits a match request and returns the assignment details once matched.
+    /// </summary>
     public async Task<MatchResult> RequestMatchAsync(MatchRequest request) {
         if (_userSession == null) throw new InvalidOperationException("Not logged in.");
 
@@ -84,6 +100,9 @@ public class AmpClient : IDisposable {
         };
     }
 
+    /// <summary>
+    /// Emits a typed game event during an active match.
+    /// </summary>
     public async Task EmitGameEventAsync(string eventType) {
         if (!HasMatchSession) return;
 
@@ -98,6 +117,9 @@ public class AmpClient : IDisposable {
         await _matchSession.EmitGameEvent(ev);
     }
 
+    /// <summary>
+    /// Emits a telemetry event with the given type and timestamp.
+    /// </summary>
     public async Task EmitTelemetryAsync(byte eventTypeEnum, ulong timestamp) {
         if (!HasMatchSession) return;
 
@@ -112,6 +134,9 @@ public class AmpClient : IDisposable {
         await _matchSession.EmitTelemetry(ev);
     }
 
+    /// <summary>
+    /// Submits the final match outcome and returns the verifier's signed result.
+    /// </summary>
     public async Task<VerifierResult> SubmitOutcomeAsync(string matchId, byte outcome, byte[] transcriptHash) {
         if (!HasMatchSession) throw new InvalidOperationException("No match session.");
 
@@ -134,6 +159,9 @@ public class AmpClient : IDisposable {
         };
     }
 
+    /// <summary>
+    /// Releases all RPC resources.
+    /// </summary>
     public void Dispose() {
         _matchSession?.Dispose();
         _userSession?.Dispose();

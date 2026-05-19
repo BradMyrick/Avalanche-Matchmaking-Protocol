@@ -4,53 +4,80 @@ AMP is designed to be the fastest way to add secure, wagered matchmaking to your
 
 ## Prerequisites
 
-1.  **Avalanche Fuji Wallet:** You'll need a small amount of Fuji AVAX for contract interactions.
-2.  **Game Server/Client:** A C++ or C# based game engine.
-3.  **Cap'n Proto:** Familiarity with schema-based serialization.
+1. **Avalanche Fuji Wallet**: You'll need a small amount of Fuji AVAX for contract interactions.
+2. **Game Server/Client**: A C++, C#, Go, Python, or Rust based game engine.
+3. **Cap'n Proto**: Familiarity with schema-based serialization.
 
 ---
 
-## The 4-Step Flow
+## The 5-Step Flow
 
 ### 1. Register Your Game
 Before players can use AMP with your game, you must register it on the `AMPRegistry` contract.
 
-1.  Use the **AMP CLI** to prepare your `GameConfig`.
-2.  Define your match criteria (tick rate, max players, MMR window).
-3.  Submit the registration transaction to the Avalanche C-Chain.
-4.  You will receive a unique `gameId` for your project.
+1. Define your settlement mode (`RT_HASH_AGREE` or `ASYNC_VERIFIER`).
+2. Choose your verifiers (up to 10 addresses).
+3. Set the minimum stake amount and token (native AVAX or ERC-20).
+4. If using `RT_HASH_AGREE`, designate an arbiter address for dispute resolution.
+5. Submit the registration transaction to the Avalanche C-Chain.
 
-### 2. Implement the SDK
-Add the appropriate AMP SDK to your game project.
+You will receive a unique `gameId` for your project.
+
+### 2. Connect and Authenticate
+Add the appropriate AMP SDK to your game project and implement the challenge-response auth flow.
 
 ```csharp
-// Example: Initializing the AMP Client in C#
+// Example: C# SDK
 var ampClient = new AmpClient("fuji.amp.rpc.endpoint:50051");
-var session = await ampClient.LoginAsync(playerPrivateKey);
+
+// Step 1: Request a challenge from the server
+var challenge = await ampClient.RequestChallengeAsync(gameId);
+
+// Step 2: Sign the challenge with the player's wallet
+var signature = wallet.Sign(challenge.Nonce);
+
+// Step 3: Login with the signed challenge
+var connected = await ampClient.ConnectAsync(gameId, signature);
 ```
 
-### 3. Matchmaking & Escalation
-When a player requests a match:
+<Warning>
+The `requestChallenge` step is **required**. The server will reject `login` calls without a valid signed challenge. Challenges expire after 60 seconds.
+</Warning>
 
-1.  Call `session.RequestMatch(gameId, rulesetId)`.
-2.  The server validates the request and places the player in the global queue.
-3.  Once a match is found, the SDK receives a **MatchAssignment** with the match ID and opponent details.
+### 3. Request a Match
+When a player wants to find a match:
 
-### 4. Deterministic Outcomes
-During gameplay, ensure your state remains deterministic for verification.
+1. Call `session.RequestMatch(gameId, rulesetId)`.
+2. The server validates the request and places the player in the match queue (bucketed by `gameId` + `rulesetId`, sorted by MMR).
+3. The matchmaker runs every 50ms, using binary search for skill-compatible pairs.
+4. Once matched, the SDK receives a **MatchAssignment** with the match ID, opponent details, and a `MatchSession` capability.
 
-1.  The AMP Verifier Network monitors match progress.
-2.  At the end of the match, call `matchSession.SubmitFinalOutcome(winnerId, finalHash)`.
-3.  Successful results are committed on-chain for trustless settlement.
+### 4. Gameplay & Telemetry
+During gameplay:
+
+1. Use `matchSession.EmitGameEvent(eventType, data)` to log significant state changes.
+2. Use `matchSession.EmitTelemetry(telemetryEvent)` to stream performance data.
+3. For `RT_HASH_AGREE` mode, maintain a rolling hash of the match state.
+
+### 5. Submit Outcome & Settlement
+At the end of the match:
+
+1. Call `matchSession.SubmitOutcome(matchId, outcome, transcriptHash)`.
+2. The verifier validates the outcome and signs an attestation.
+3. The `amp-relayer` submits the attestation to `AMPSettlement` on-chain.
+4. Funds are released from escrow to the winner.
 
 ---
 
 ## Integration Checklist
 
-- [ ] Game registered on Fuji Testnet.
+- [ ] Game registered on Fuji Testnet with verifiers and settlement mode.
 - [ ] AMP SDK linked in project.
-- [ ] Player can "Login" and get a valid session.
-- [ ] Matchmaker successfully pairs two clients.
-- [ ] Settlement contract reflects verified outcomes.
+- [ ] Challenge-response auth implemented (`requestChallenge` -> sign -> `login`).
+- [ ] Player can authenticate and get a valid `UserSession`.
+- [ ] Matchmaker successfully pairs two clients via `RequestMatch`.
+- [ ] Game events and telemetry streaming during match.
+- [ ] Outcome submission returns verifier signature.
+- [ ] Settlement contract reflects verified outcomes on-chain.
 
-**Tip:** Use the **Local Development Flow** (Anvil) to test your integration before deploying to the public testnet. It's faster and provides a isolated sandbox.
+**Tip:** Use the **Local Development Flow** (`./scripts/start-localnet.sh` with Anvil) to test your integration before deploying to the public testnet. It's faster and provides an isolated sandbox.
