@@ -122,10 +122,7 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
         let state = self.state.clone();
         Promise::from_future(async move {
             let id = player_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-            let mut profile_entry = state
-                .players
-                .entry(id.clone())
-                .or_insert_with(StoredPlayerProfile::default);
+            let mut profile_entry = state.players.entry(id.clone()).or_default();
             if !display_name.is_empty() {
                 profile_entry.display_name = display_name;
             }

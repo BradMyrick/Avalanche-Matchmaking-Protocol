@@ -182,6 +182,7 @@ async fn run_settlement_processor(
     cancel: tokio_util::sync::CancellationToken,
 ) {
     let nonce_manager = Arc::new(nonce::NonceManager::new());
+    let poll_interval = std::time::Duration::from_millis(cfg.base_retry_delay_ms);
 
     loop {
         tokio::select! {
@@ -189,7 +190,7 @@ async fn run_settlement_processor(
                 info!("Settlement processor shutting down...");
                 return;
             }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+            _ = tokio::time::sleep(poll_interval) => {}
         }
 
         match queue.process_next(&state, &nonce_manager).await {

@@ -196,7 +196,7 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
                 let ruleset = rulesets_snapshot
                     .get(&key.1)
                     .cloned()
-                    .unwrap_or_else(|| StoredRuleSet::default_arc());
+                    .unwrap_or_else(StoredRuleSet::default_arc);
 
                 loop {
                     let result = queue.try_match_bucket(
@@ -310,7 +310,7 @@ async fn sign_match_outcome(
     let async_result_typehash: [u8; 32] = ethers_core::utils::keccak256(
         "AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)".as_bytes(),
     );
-    let struct_hash = ethers_core::utils::keccak256(&ethers_core::abi::encode(&[
+    let struct_hash = ethers_core::utils::keccak256(ethers_core::abi::encode(&[
         ethers_core::abi::Token::FixedBytes(async_result_typehash.to_vec()),
         ethers_core::abi::Token::Uint(match_id_val),
         ethers_core::abi::Token::Uint(U256::from(outcome)),
@@ -321,7 +321,7 @@ async fn sign_match_outcome(
         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
             .as_bytes(),
     );
-    let domain_separator = ethers_core::utils::keccak256(&ethers_core::abi::encode(&[
+    let domain_separator = ethers_core::utils::keccak256(ethers_core::abi::encode(&[
         ethers_core::abi::Token::FixedBytes(eip712_domain_typehash.to_vec()),
         ethers_core::abi::Token::String("AMPSettlement".to_string()),
         ethers_core::abi::Token::String("1".to_string()),
@@ -733,10 +733,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
                     let player_id = format!("0x{}", hex::encode(address.as_bytes()));
 
                     {
-                        let mut profile = state
-                            .players
-                            .entry(player_id.clone())
-                            .or_insert_with(state::StoredPlayerProfile::default);
+                        let mut profile = state.players.entry(player_id.clone()).or_default();
                         profile.wallet_address = address.as_bytes().to_vec();
                         profile.is_online = true;
                         profile.last_login = state::now_ns();
