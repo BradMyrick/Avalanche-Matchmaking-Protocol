@@ -1,8 +1,7 @@
 use anyhow::Result;
 use capnp::capability::Promise;
 use capnp_rpc::{RpcSystem, pry, rpc_twoparty_capnp, twoparty};
-use ethers_core::types::{H256, U256};
-use ethers_core::utils::hash_message;
+use ethers_core::types::{Address, H256, U256};
 use ethers_signers::LocalWallet;
 use lazy_static::lazy_static;
 use std::env;
@@ -289,6 +288,12 @@ async fn sign_match_outcome(
 ) -> Result<Vec<u8>> {
     let key = env::var("VERIFIER_KEY")?;
     let wallet: LocalWallet = key.parse()?;
+    let chain_id: u64 = env::var("AMP_CHAIN_ID")
+        .unwrap_or_else(|_| "43113".to_string())
+        .parse()?;
+    let settlement_addr: Address = env::var("AMP_SETTLEMENT_ADDRESS")?
+        .parse()?;
+
     let match_id_val = if let Ok(val) = U256::from_dec_str(match_id) {
         val
     } else {
@@ -299,13 +304,33 @@ async fn sign_match_outcome(
     } else {
         H256::zero()
     };
-    let encoded = ethers_core::abi::encode(&[
+
+    let async_result_typehash: [u8; 32] = ethers_core::utils::keccak256(
+        "AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)".as_bytes(),
+    );
+    let struct_hash = ethers_core::utils::keccak256(&ethers_core::abi::encode(&[
+        ethers_core::abi::Token::FixedBytes(async_result_typehash.to_vec()),
         ethers_core::abi::Token::Uint(match_id_val),
         ethers_core::abi::Token::Uint(U256::from(outcome)),
         ethers_core::abi::Token::FixedBytes(t_hash.as_bytes().to_vec()),
-    ]);
-    let struct_hash = ethers_core::utils::keccak256(&encoded);
-    let digest = hash_message(struct_hash);
+    ]));
+
+    let eip712_domain_typehash: [u8; 32] = ethers_core::utils::keccak256(
+        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)".as_bytes(),
+    );
+    let domain_separator = ethers_core::utils::keccak256(&ethers_core::abi::encode(&[
+        ethers_core::abi::Token::FixedBytes(eip712_domain_typehash.to_vec()),
+        ethers_core::abi::Token::String("AMPSettlement".to_string()),
+        ethers_core::abi::Token::String("1".to_string()),
+        ethers_core::abi::Token::Uint(U256::from(chain_id)),
+        ethers_core::abi::Token::Address(settlement_addr),
+    ]));
+
+    let mut digest_input = vec![0x19, 0x01];
+    digest_input.extend_from_slice(&domain_separator);
+    digest_input.extend_from_slice(&struct_hash);
+    let digest = H256::from_slice(&ethers_core::utils::keccak256(&digest_input));
+
     let signature = wallet.sign_hash(digest)?;
     Ok(signature.to_vec())
 }

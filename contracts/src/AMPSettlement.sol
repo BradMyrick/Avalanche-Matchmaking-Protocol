@@ -55,6 +55,13 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
     address public immutable registry;
     uint16 public protocolFeeBps;
     address public protocolFeeRecipient;
+    bytes32 private _cachedDomainSeparator;
+    uint256 private _cachedChainId;
+
+    bytes32 public constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 public constant ASYNC_RESULT_TYPEHASH =
+        keccak256("AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)");
 
     mapping(uint256 => AMPTypes.Settlement) public settlements;
     mapping(uint256 => mapping(address => AMPTypes.RealTimeHashResult)) public rtResults;
@@ -69,6 +76,8 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         registry = _registry;
         protocolFeeBps = 100;
         protocolFeeRecipient = _msgSender();
+        _cachedChainId = block.chainid;
+        _cachedDomainSeparator = _buildDomainSeparator();
     }
 
     uint16 public constant MAX_PROTOCOL_FEE_BPS = 500;
@@ -97,8 +106,10 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         if (state != AMPTypes.MatchState.READY) revert MatchNotSettlable();
         if (playerB == address(0)) revert NoOpponent();
 
-        bytes32 structHash = keccak256(abi.encode(result.matchId, result.outcome, result.transcriptHash));
-        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(structHash);
+        bytes32 structHash = keccak256(
+            abi.encode(ASYNC_RESULT_TYPEHASH, result.matchId, result.outcome, result.transcriptHash)
+        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
         address signer = ECDSA.recover(digest, result.signature);
 
         if (!IAMPRegistry(registry).isVerifier(gameId, signer)) revert InvalidVerifierSignature();
@@ -213,6 +224,33 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         }
 
         IAMPRegistry(registry).settleMatch(matchId, AMPTypes.MatchState.SETTLED, recipients, amounts, protocolFee);
+    }
+
+    function _buildDomainSeparator() internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                EIP712_DOMAIN_TYPEHASH,
+                keccak256("AMPSettlement"),
+                keccak256("1"),
+                block.chainid,
+                address(this)
+            )
+        );
+    }
+
+    function domainSeparator() external view returns (bytes32) {
+        if (block.chainid == _cachedChainId) {
+            return _cachedDomainSeparator;
+        }
+        return _buildDomainSeparator();
+    }
+
+    function _domainSeparatorV4() internal returns (bytes32) {
+        if (block.chainid != _cachedChainId) {
+            _cachedChainId = block.chainid;
+            _cachedDomainSeparator = _buildDomainSeparator();
+        }
+        return _cachedDomainSeparator;
     }
 
     function _msgSender() internal view virtual override(Context, ERC2771Context) returns (address) {

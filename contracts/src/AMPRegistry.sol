@@ -24,19 +24,20 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     error CannotJoinOwnMatch();
     error StakeMismatch();
     error NotPlayerA();
-    error RefundFailed();
     error DisputeTimeoutNotReached();
     error MatchNotExpirable();
     error NotExpiredYet();
     error NoFeesToWithdraw();
     error TransferFailed();
     error MatchNotSettlable();
+    error NoPendingWithdrawal();
 
     address public settlement;
     uint256 public nextGameId;
     uint256 public nextMatchId;
 
     mapping(address => uint256) public feeBalances;
+    mapping(address => mapping(address => uint256)) public pendingWithdrawals;
 
     bool private locked;
 
@@ -59,6 +60,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     event MatchExpired(uint256 indexed matchId);
     event FeesWithdrawn(address indexed token, uint256 amount, address indexed wallet);
     event SettlementUpdated(address indexed settlementAddress);
+    event WithdrawalClaimed(address indexed token, address indexed account, uint256 amount);
 
     modifier onlySettlement() {
         if (_msgSender() != settlement) revert NotSettlement();
@@ -129,8 +131,9 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         } else {
             if (stakeAmount < game.minStake) revert StakeTooLow();
             if (msg.value != 0) revert NativeTokenSentForERC20();
+            uint256 balBefore = IERC20(game.stakeToken).balanceOf(address(this));
             IERC20(game.stakeToken).safeTransferFrom(_msgSender(), address(this), stakeAmount);
-            actualStake = stakeAmount;
+            actualStake = IERC20(game.stakeToken).balanceOf(address(this)) - balBefore;
         }
 
         matchId = nextMatchId++;
@@ -157,7 +160,10 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
             if (msg.value != m.stakeAmount) revert StakeMismatch();
         } else {
             if (msg.value != 0) revert NativeTokenSentForERC20();
+            uint256 balBefore = IERC20(game.stakeToken).balanceOf(address(this));
             IERC20(game.stakeToken).safeTransferFrom(_msgSender(), address(this), m.stakeAmount);
+            uint256 received = IERC20(game.stakeToken).balanceOf(address(this)) - balBefore;
+            if (received != m.stakeAmount) revert StakeMismatch();
         }
 
         m.playerB = _msgSender();
@@ -177,12 +183,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         uint256 refund = m.stakeAmount;
         m.stakeAmount = 0;
 
-        if (game.stakeToken == address(0)) {
-            (bool success,) = m.playerA.call{value: refund}("");
-            if (!success) revert RefundFailed();
-        } else {
-            IERC20(game.stakeToken).safeTransfer(m.playerA, refund);
-        }
+        pendingWithdrawals[game.stakeToken][m.playerA] += refund;
 
         emit MatchCancelled(matchId, m.playerA, refund);
     }
@@ -199,23 +200,11 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
 
         m.state = AMPTypes.MatchState.EXPIRED;
 
-        address[] memory recipients = new address[](2);
-        recipients[0] = m.playerA;
-        recipients[1] = m.playerB;
-        uint256[] memory amounts = new uint256[](2);
-
-        amounts[0] = m.stakeAmount;
-        amounts[1] = m.playerB == address(0) ? 0 : m.stakeAmount;
-
-        for (uint256 i = 0; i < recipients.length; i++) {
-            if (amounts[i] > 0) {
-                if (game.stakeToken == address(0)) {
-                    (bool success,) = recipients[i].call{value: amounts[i]}("");
-                    if (!success) revert RefundFailed();
-                } else {
-                    IERC20(game.stakeToken).safeTransfer(recipients[i], amounts[i]);
-                }
-            }
+        address token = game.stakeToken;
+        uint256 amount = m.stakeAmount;
+        pendingWithdrawals[token][m.playerA] += amount;
+        if (m.playerB != address(0)) {
+            pendingWithdrawals[token][m.playerB] += amount;
         }
 
         emit MatchExpired(matchId);
@@ -234,6 +223,21 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         }
 
         emit FeesWithdrawn(token, amount, owner());
+    }
+
+    function withdraw(address token) external nonReentrant {
+        uint256 amount = pendingWithdrawals[token][_msgSender()];
+        if (amount == 0) revert NoPendingWithdrawal();
+        pendingWithdrawals[token][_msgSender()] = 0;
+
+        if (token == address(0)) {
+            (bool success,) = _msgSender().call{value: amount}("");
+            if (!success) revert TransferFailed();
+        } else {
+            IERC20(token).safeTransfer(_msgSender(), amount);
+        }
+
+        emit WithdrawalClaimed(token, _msgSender(), amount);
     }
 
     function setSettlement(address settlementAddress) external onlyOwner {
@@ -256,16 +260,12 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         m.state = newState;
 
         AMPTypes.Game storage game = games[m.gameId];
-        feeBalances[game.stakeToken] += protocolFee;
+        address token = game.stakeToken;
+        feeBalances[token] += protocolFee;
 
         for (uint256 i = 0; i < recipients.length; i++) {
             if (amounts[i] > 0) {
-                if (game.stakeToken == address(0)) {
-                    (bool success,) = recipients[i].call{value: amounts[i]}("");
-                    if (!success) revert TransferFailed();
-                } else {
-                    IERC20(game.stakeToken).safeTransfer(recipients[i], amounts[i]);
-                }
+                pendingWithdrawals[token][recipients[i]] += amounts[i];
             }
         }
     }
