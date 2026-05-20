@@ -1,3 +1,4 @@
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -103,6 +104,21 @@ pub struct StoredRuleSet {
     pub version: String,
     pub is_active: bool,
     pub max_skill_diff: f32,
+}
+
+impl StoredRuleSet {
+    pub fn new_sorted(mut self) -> Arc<Self> {
+        self.rules.sort_by(|a, b| {
+            b.is_hard_constraint
+                .cmp(&a.is_hard_constraint)
+                .then_with(|| a.priority.cmp(&b.priority))
+        });
+        Arc::new(self)
+    }
+
+    pub fn default_arc() -> Arc<Self> {
+        Self::default().new_sorted()
+    }
 }
 
 impl Default for StoredRuleSet {
@@ -392,18 +408,18 @@ pub const MATCH_TTL_MS: u64 = 3_600_000;
 pub const SETTLED_ARCHIVE_TREE: &str = "settled_matches";
 
 pub struct InnerState {
-    pub players: HashMap<AmpId, StoredPlayerProfile>,
-    pub rulesets: HashMap<AmpId, StoredRuleSet>,
-    pub active_matches: HashMap<String, ActiveMatch>,
+    pub players: DashMap<AmpId, StoredPlayerProfile>,
+    pub rulesets: RwLock<HashMap<AmpId, Arc<StoredRuleSet>>>,
+    pub active_matches: RwLock<HashMap<String, ActiveMatch>>,
     persistence: Option<Persistence>,
 }
 
 impl InnerState {
     pub fn new(persistence: Option<Persistence>) -> Self {
-        let mut state = Self {
-            players: HashMap::new(),
-            rulesets: HashMap::new(),
-            active_matches: HashMap::new(),
+        let state = Self {
+            players: DashMap::new(),
+            rulesets: RwLock::new(HashMap::new()),
+            active_matches: RwLock::new(HashMap::new()),
             persistence,
         };
         if let Some(ref p) = state.persistence {
@@ -413,83 +429,89 @@ impl InnerState {
                 }
             }
             if let Ok(rulesets) = p.load_all::<StoredRuleSet>("rulesets") {
-                for (id, rs) in rulesets {
-                    state.rulesets.insert(id, rs);
+                let mut rs = state.rulesets.blocking_write();
+                for (id, r) in rulesets {
+                    rs.insert(id, r.new_sorted());
                 }
             }
             if let Ok(matches) = p.load_all::<ActiveMatch>("matches") {
+                let mut am = state.active_matches.blocking_write();
                 for (id, m) in matches {
-                    state.active_matches.insert(id, m);
+                    am.insert(id, m);
                 }
             }
         }
         state
     }
 
-    pub fn persist_player(&self, id: &str, profile: &StoredPlayerProfile) {
+    pub async fn persist_player(&self, id: &str, profile: &StoredPlayerProfile) {
         if let Some(ref p) = self.persistence
-            && let Err(e) = p.save("players", id, profile)
+            && let Err(e) = p.save("players", id, profile).await
         {
             warn!(target: "persist", "Failed to persist player {}: {}", id, e);
         }
     }
 
     #[allow(dead_code)]
-    pub fn persist_ruleset(&self, id: &str, ruleset: &StoredRuleSet) {
+    pub async fn persist_ruleset(&self, id: &str, ruleset: &StoredRuleSet) {
         if let Some(ref p) = self.persistence
-            && let Err(e) = p.save("rulesets", id, ruleset)
+            && let Err(e) = p.save("rulesets", id, ruleset).await
         {
             warn!(target: "persist", "Failed to persist ruleset {}: {}", id, e);
         }
     }
 
-    pub fn persist_match(&self, id: &str, m: &ActiveMatch) {
+    pub async fn persist_match(&self, id: &str, m: &ActiveMatch) {
         if let Some(ref p) = self.persistence
-            && let Err(e) = p.save("matches", id, m)
+            && let Err(e) = p.save("matches", id, m).await
         {
             warn!(target: "persist", "Failed to persist match {}: {}", id, e);
         }
     }
 
-    pub fn archive_settled_match(&mut self, id: &str, m: &ActiveMatch) {
+    pub async fn archive_settled_match(&self, id: &str, m: &ActiveMatch) {
         if let Some(ref p) = self.persistence
-            && let Err(e) = p.save(SETTLED_ARCHIVE_TREE, id, m)
+            && let Err(e) = p.save(SETTLED_ARCHIVE_TREE, id, m).await
         {
             warn!(target: "persist", "Failed to archive settled match {}: {}", id, e);
         }
-        self.active_matches.remove(id);
+        self.active_matches.write().await.remove(id);
         if let Some(ref p) = self.persistence
-            && let Err(e) = p.delete("matches", id)
+            && let Err(e) = p.delete("matches", id).await
         {
             warn!(target: "persist", "Failed to delete active match {}: {}", id, e);
         }
     }
 
-    pub fn cleanup_expired_matches(&mut self) -> usize {
+    pub async fn cleanup_expired_matches(&self) -> usize {
         let now = now_ms();
-        let expired: Vec<String> = self
-            .active_matches
-            .iter()
-            .filter(|(_, m)| {
-                if m.settled
-                    && let Some(settled_at) = m.settled_at_ms
-                {
-                    return now.saturating_sub(settled_at) > MATCH_TTL_MS;
-                }
-                if let Some(expires_at) = m.expires_at_ms {
-                    return now > expires_at && !m.settled;
-                }
-                false
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
+        let expired: Vec<String> = {
+            let matches = self.active_matches.read().await;
+            matches
+                .iter()
+                .filter(|(_, m)| {
+                    if m.settled
+                        && let Some(settled_at) = m.settled_at_ms
+                    {
+                        return now.saturating_sub(settled_at) > MATCH_TTL_MS;
+                    }
+                    if let Some(expires_at) = m.expires_at_ms {
+                        return now > expires_at && !m.settled;
+                    }
+                    false
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
 
         let count = expired.len();
         for id in expired {
-            if let Some(m) = self.active_matches.remove(&id) {
+            let mut matches = self.active_matches.write().await;
+            if let Some(m) = matches.remove(&id) {
+                drop(matches);
                 if let Some(ref p) = self.persistence {
-                    let _ = p.save(SETTLED_ARCHIVE_TREE, &id, &m);
-                    let _ = p.delete("matches", &id);
+                    let _ = p.save(SETTLED_ARCHIVE_TREE, &id, &m).await;
+                    let _ = p.delete("matches", &id).await;
                 }
                 warn!(target: "cleanup", "Expired match {} (settled={}, created={}ms ago)", id, m.settled, now.saturating_sub(m.created_at_ms));
             }
@@ -498,9 +520,9 @@ impl InnerState {
     }
 
     #[allow(dead_code)]
-    pub fn delete_match(&self, id: &str) {
+    pub async fn delete_match(&self, id: &str) {
         if let Some(ref p) = self.persistence
-            && let Err(e) = p.delete("matches", id)
+            && let Err(e) = p.delete("matches", id).await
         {
             warn!(target: "persist", "Failed to delete match {}: {}", id, e);
         }
@@ -509,8 +531,8 @@ impl InnerState {
 
 use tracing::warn;
 
-pub type AppState = Arc<RwLock<InnerState>>;
+pub type AppState = Arc<InnerState>;
 
 pub fn new_state(persistence: Option<Persistence>) -> AppState {
-    Arc::new(RwLock::new(InnerState::new(persistence)))
+    Arc::new(InnerState::new(persistence))
 }

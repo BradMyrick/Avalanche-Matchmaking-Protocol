@@ -43,8 +43,8 @@ contract AMPSettlementTest is Test {
         view
         returns (bytes memory)
     {
-        bytes32 structHash = keccak256(abi.encode(matchId, outcome, transcriptHash));
-        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", structHash));
+        bytes32 structHash = keccak256(abi.encode(settlement.ASYNC_RESULT_TYPEHASH(), matchId, outcome, transcriptHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", settlement.domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privKey, digest);
         return abi.encodePacked(r, s, v);
     }
@@ -61,6 +61,13 @@ contract AMPSettlementTest is Test {
         registry.joinMatch{value: 1 ether}(matchId);
     }
 
+    function _withdrawNative(address player, uint256 expectedAmount) internal {
+        uint256 balanceBefore = player.balance;
+        vm.prank(player);
+        registry.withdraw(address(0));
+        assertEq(player.balance, balanceBefore + expectedAmount);
+    }
+
     function testFullAsyncFlow() public {
         uint256 matchId = _setupAsyncGameAndMatch();
         AMPTypes.OutcomeCode outcome = AMPTypes.OutcomeCode.WIN_A;
@@ -69,13 +76,12 @@ contract AMPSettlementTest is Test {
         AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
             matchId: matchId, outcome: outcome, transcriptHash: transcriptHash, signature: signature
         });
-        uint256 playerABalanceBefore = playerA.balance;
-        uint256 feeBalanceBefore = registry.feeBalances(address(0));
         settlement.submitAsyncResult(matchId, result);
         (, AMPTypes.OutcomeCode actualOutcome,,) = settlement.settlements(matchId);
         assertEq(uint256(actualOutcome), uint256(outcome));
-        assertEq(playerA.balance, playerABalanceBefore + 1.98 ether);
-        assertEq(registry.feeBalances(address(0)), feeBalanceBefore + 0.02 ether);
+        assertEq(registry.pendingWithdrawals(address(0), playerA), 1.98 ether);
+        assertEq(registry.feeBalances(address(0)), 0.02 ether);
+        _withdrawNative(playerA, 1.98 ether);
     }
 
     function testResolveDispute() public {
@@ -90,12 +96,12 @@ contract AMPSettlementTest is Test {
         settlement.submitRealTimeHashResult(matchId, resultA);
         vm.prank(playerB);
         settlement.submitRealTimeHashResult(matchId, resultB);
-        uint256 playerBBalanceBefore = playerB.balance;
         vm.prank(admin);
         settlement.resolveDispute(matchId, AMPTypes.OutcomeCode.WIN_B);
-        assertEq(playerB.balance, playerBBalanceBefore + 1.98 ether);
+        assertEq(registry.pendingWithdrawals(address(0), playerB), 1.98 ether);
         (, AMPTypes.OutcomeCode outcome,,) = settlement.settlements(matchId);
         assertEq(uint256(outcome), uint256(AMPTypes.OutcomeCode.WIN_B));
+        _withdrawNative(playerB, 1.98 ether);
     }
 
     function testDrawOutcome() public {
@@ -106,11 +112,11 @@ contract AMPSettlementTest is Test {
         AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
             matchId: matchId, outcome: outcome, transcriptHash: transcriptHash, signature: signature
         });
-        uint256 balanceA = playerA.balance;
-        uint256 balanceB = playerB.balance;
         settlement.submitAsyncResult(matchId, result);
-        assertEq(playerA.balance, balanceA + 0.99 ether);
-        assertEq(playerB.balance, balanceB + 0.99 ether);
+        assertEq(registry.pendingWithdrawals(address(0), playerA), 0.99 ether);
+        assertEq(registry.pendingWithdrawals(address(0), playerB), 0.99 ether);
+        _withdrawNative(playerA, 0.99 ether);
+        _withdrawNative(playerB, 0.99 ether);
     }
 
     function testCancelledOutcome() public {
@@ -121,12 +127,12 @@ contract AMPSettlementTest is Test {
         AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
             matchId: matchId, outcome: outcome, transcriptHash: transcriptHash, signature: signature
         });
-        uint256 balanceA = playerA.balance;
-        uint256 balanceB = playerB.balance;
         settlement.submitAsyncResult(matchId, result);
-        assertEq(playerA.balance, balanceA + 1 ether);
-        assertEq(playerB.balance, balanceB + 1 ether);
+        assertEq(registry.pendingWithdrawals(address(0), playerA), 1 ether);
+        assertEq(registry.pendingWithdrawals(address(0), playerB), 1 ether);
         assertEq(registry.feeBalances(address(0)), 0);
+        _withdrawNative(playerA, 1 ether);
+        _withdrawNative(playerB, 1 ether);
     }
 
     function testInvalidVerifierSignature() public {
@@ -139,7 +145,7 @@ contract AMPSettlementTest is Test {
             transcriptHash: bytes32(uint256(0x11)),
             signature: signature
         });
-        vm.expectRevert("Invalid verifier signature");
+        vm.expectRevert(AMPSettlement.InvalidVerifierSignature.selector);
         settlement.submitAsyncResult(matchId, result);
     }
 
@@ -149,7 +155,7 @@ contract AMPSettlementTest is Test {
         AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
             matchId: matchId, outcome: AMPTypes.OutcomeCode.WIN_A, transcriptHash: bytes32(0), signature: signature
         });
-        vm.expectRevert("Wrong mode");
+        vm.expectRevert(AMPSettlement.WrongMode.selector);
         settlement.submitAsyncResult(matchId, result);
     }
 
@@ -161,14 +167,14 @@ contract AMPSettlementTest is Test {
         AMPTypes.RealTimeHashResult memory resultB = AMPTypes.RealTimeHashResult({
             matchId: matchId, outcome: AMPTypes.OutcomeCode.WIN_A, transcriptHash: bytes32(uint256(0xabc))
         });
-        uint256 balanceA = playerA.balance;
         vm.prank(playerA);
         settlement.submitRealTimeHashResult(matchId, resultA);
         vm.prank(playerB);
         settlement.submitRealTimeHashResult(matchId, resultB);
         (, AMPTypes.OutcomeCode outcome,,) = settlement.settlements(matchId);
         assertEq(uint256(outcome), uint256(AMPTypes.OutcomeCode.WIN_A));
-        assertEq(playerA.balance, balanceA + 1.98 ether);
+        assertEq(registry.pendingWithdrawals(address(0), playerA), 1.98 ether);
+        _withdrawNative(playerA, 1.98 ether);
     }
 
     function testRTNotPlayer() public {
@@ -177,7 +183,7 @@ contract AMPSettlementTest is Test {
             matchId: matchId, outcome: AMPTypes.OutcomeCode.WIN_A, transcriptHash: bytes32(uint256(0x1))
         });
         vm.prank(nonPlayer);
-        vm.expectRevert("Not a player");
+        vm.expectRevert(AMPSettlement.NotAPlayer.selector);
         settlement.submitRealTimeHashResult(matchId, result);
     }
 
@@ -194,7 +200,7 @@ contract AMPSettlementTest is Test {
         vm.prank(playerB);
         settlement.submitRealTimeHashResult(matchId, resultB);
         vm.prank(nonPlayer);
-        vm.expectRevert("Not arbiter");
+        vm.expectRevert(AMPSettlement.NotArbiter.selector);
         settlement.resolveDispute(matchId, AMPTypes.OutcomeCode.WIN_A);
     }
 
@@ -207,15 +213,15 @@ contract AMPSettlementTest is Test {
         AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
             matchId: matchId, outcome: outcome, transcriptHash: transcriptHash, signature: signature
         });
-        uint256 balanceA = playerA.balance;
         settlement.submitAsyncResult(matchId, result);
-        assertEq(playerA.balance, balanceA + 2 ether);
+        assertEq(registry.pendingWithdrawals(address(0), playerA), 2 ether);
         assertEq(registry.feeBalances(address(0)), 0);
+        _withdrawNative(playerA, 2 ether);
     }
 
     function testFeeInvalidBps() public {
-        vm.expectRevert("Invalid bps");
-        settlement.updateProtocolFeeBps(10001);
+        vm.expectRevert(AMPSettlement.FeeExceedsMax.selector);
+        settlement.updateProtocolFeeBps(501);
     }
 
     function testUpdateFeeRecipient() public {
@@ -245,7 +251,13 @@ contract AMPSettlementTest is Test {
         AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
             matchId: 999, outcome: outcome, transcriptHash: transcriptHash, signature: signature
         });
-        vm.expectRevert("Match ID mismatch");
+        vm.expectRevert(AMPSettlement.MatchIdMismatch.selector);
         settlement.submitAsyncResult(matchId, result);
+    }
+
+    function testWithdrawNoPending() public {
+        vm.prank(playerA);
+        vm.expectRevert(AMPRegistry.NoPendingWithdrawal.selector);
+        registry.withdraw(address(0));
     }
 }

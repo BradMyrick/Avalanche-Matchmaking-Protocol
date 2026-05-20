@@ -1,3 +1,4 @@
+use crate::error::RelayerError;
 use ethers::prelude::*;
 use tracing::info;
 
@@ -29,29 +30,38 @@ pub fn derive_custodial_signer(
         .with_chain_id(chain_id)
 }
 
-pub async fn ensure_gas(custodial_addr: Address, state: &RelayerState) -> anyhow::Result<()> {
+pub async fn ensure_gas(custodial_addr: Address, state: &RelayerState) -> Result<(), RelayerError> {
+    if state.pending_topups.contains(&custodial_addr) {
+        return Ok(());
+    }
+
     let balance = state
         .master_client
         .provider()
         .get_balance(custodial_addr, None)
         .await?;
-    let threshold = ethers::utils::parse_ether(0.05)?;
+    let threshold =
+        ethers::utils::parse_ether(0.05).map_err(|e| RelayerError::Transaction(e.to_string()))?;
 
     if balance < threshold {
-        let topup = ethers::utils::parse_ether(0.2)?;
+        state.pending_topups.insert(custodial_addr);
+        let topup = ethers::utils::parse_ether(0.2)
+            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
         info!(
             "Custodial wallet {} low on gas ({:?}). Topping up...",
             custodial_addr, balance
         );
-
         let tx = TransactionRequest::new().to(custodial_addr).value(topup);
 
         state
             .master_client
             .send_transaction(tx, None)
-            .await?
-            .await?;
+            .await
+            .map_err(|e| RelayerError::Transaction(e.to_string()))?
+            .await
+            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
         info!("Top-up successful for {}", custodial_addr);
+        state.pending_topups.remove(&custodial_addr);
     }
 
     Ok(())

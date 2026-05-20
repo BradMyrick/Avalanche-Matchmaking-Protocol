@@ -26,7 +26,7 @@ using Security = import "security.capnp";
 interface GameSessionService {
     # The entry point for any client connecting to the system.
     
-    login @0 (gameId :UInt64, signedChallenge :Signature) -> (session :UserSession);
+    login @0 (gameId :UInt64, signature :Data, challengePayload :Data) -> (session :UserSession);
     # Authenticates the user for a specific game. 
     # The signature must verify against a challenge (e.g. nonce) for the game's admin address.
     # Returns a UserSession capability which holds the user's identity and game context.

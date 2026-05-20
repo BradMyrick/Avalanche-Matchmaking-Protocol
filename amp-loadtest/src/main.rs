@@ -286,12 +286,12 @@ async fn login(
     let challenge_resp = challenge_req.send().promise.await?;
     let challenge_bytes = challenge_resp.get()?.get_challenge()?.to_vec();
 
-    let mut sig_bytes = vec![0u8; 65];
-    sig_bytes.extend_from_slice(&challenge_bytes);
+    let sig_bytes = vec![0u8; 65];
 
     let mut req = service.login_request();
     req.get().set_game_id(client_id);
-    req.get().set_signed_challenge(&sig_bytes);
+    req.get().set_signature(&sig_bytes);
+    req.get().set_challenge_payload(&challenge_bytes);
     let response = req.send().promise.await?;
     let session = response.get()?.get_session()?;
     Ok(session)

@@ -35,7 +35,7 @@ contract AMPRegistryTest is Test {
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         assertEq(matchId, 0);
-        (, address pA, address pB, uint256 stake, AMPTypes.MatchState state,) = registry.matches(matchId);
+        (, address pA, AMPTypes.MatchState state, address pB,, uint256 stake) = registry.matches(matchId);
         assertEq(pA, playerA);
         assertEq(pB, address(0));
         assertEq(stake, 0.1 ether);
@@ -50,7 +50,7 @@ contract AMPRegistryTest is Test {
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);
-        (, address pA, address pB,, AMPTypes.MatchState state,) = registry.matches(matchId);
+        (, address pA, AMPTypes.MatchState state, address pB,,) = registry.matches(matchId);
         assertEq(pA, playerA);
         assertEq(pB, playerB);
         assertEq(uint256(state), uint256(AMPTypes.MatchState.READY));
@@ -61,7 +61,7 @@ contract AMPRegistryTest is Test {
         for (uint256 i = 0; i < 11; i++) {
             verifiers[i] = address(uint160(i + 1));
         }
-        vm.expectRevert("Too many verifiers");
+        vm.expectRevert(AMPRegistry.TooManyVerifiers.selector);
         registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
     }
 
@@ -91,7 +91,7 @@ contract AMPRegistryTest is Test {
         address[] memory newVerifiers = new address[](1);
         newVerifiers[0] = address(0x456);
         vm.prank(playerA);
-        vm.expectRevert("Not game admin");
+        vm.expectRevert(AMPRegistry.NotGameAdmin.selector);
         registry.updateGameVerifiers(gameId, newVerifiers);
     }
 
@@ -113,11 +113,14 @@ contract AMPRegistryTest is Test {
             registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
-        uint256 balanceBefore = playerA.balance;
         vm.prank(playerA);
         registry.cancelMatch(matchId);
+        assertEq(registry.pendingWithdrawals(address(0), playerA), 0.1 ether);
+        uint256 balanceBefore = playerA.balance;
+        vm.prank(playerA);
+        registry.withdraw(address(0));
         assertEq(playerA.balance, balanceBefore + 0.1 ether);
-        (,,,, AMPTypes.MatchState state,) = registry.matches(matchId);
+        (,, AMPTypes.MatchState state,,,) = registry.matches(matchId);
         assertEq(uint256(state), uint256(AMPTypes.MatchState.SETTLED));
     }
 
@@ -128,7 +131,7 @@ contract AMPRegistryTest is Test {
         vm.prank(playerA);
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
-        vm.expectRevert("Not player A");
+        vm.expectRevert(AMPRegistry.NotPlayerA.selector);
         registry.cancelMatch(matchId);
     }
 
@@ -140,13 +143,19 @@ contract AMPRegistryTest is Test {
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);
-        uint256 balanceA = playerA.balance;
-        uint256 balanceB = playerB.balance;
         vm.warp(block.timestamp + 1 hours + 1);
         registry.expireMatch(matchId);
+        assertEq(registry.pendingWithdrawals(address(0), playerA), 0.1 ether);
+        assertEq(registry.pendingWithdrawals(address(0), playerB), 0.1 ether);
+        uint256 balanceA = playerA.balance;
+        uint256 balanceB = playerB.balance;
+        vm.prank(playerA);
+        registry.withdraw(address(0));
+        vm.prank(playerB);
+        registry.withdraw(address(0));
         assertEq(playerA.balance, balanceA + 0.1 ether);
         assertEq(playerB.balance, balanceB + 0.1 ether);
-        (,,,, AMPTypes.MatchState state,) = registry.matches(matchId);
+        (,, AMPTypes.MatchState state,,,) = registry.matches(matchId);
         assertEq(uint256(state), uint256(AMPTypes.MatchState.EXPIRED));
     }
 
@@ -158,7 +167,7 @@ contract AMPRegistryTest is Test {
         uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);
-        vm.expectRevert("Not expired yet");
+        vm.expectRevert(AMPRegistry.NotExpiredYet.selector);
         registry.expireMatch(matchId);
     }
 

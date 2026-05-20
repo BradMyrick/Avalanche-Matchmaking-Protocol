@@ -11,6 +11,7 @@ use tracing::{error, info};
 
 mod config;
 mod custodial;
+mod error;
 mod gas;
 mod nonce;
 mod settlement;
@@ -32,6 +33,8 @@ abigen!(
     "../contracts/out/AMPSettlement.sol/AMPSettlement.json"
 );
 
+use dashmap::DashSet;
+
 abigen!(
     AMPRegistryContract,
     "../contracts/out/AMPRegistry.sol/AMPRegistry.json"
@@ -42,6 +45,7 @@ pub struct RelayerState {
     settlement: AMPSettlementContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
     registry: AMPRegistryContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
     master_client: Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
+    pending_topups: Arc<DashSet<Address>>,
 }
 
 struct RelayerImpl {
@@ -117,6 +121,7 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
                 retry_count: 0,
                 enqueued_at_ms: now,
                 last_attempt_at_ms: None,
+                status: settlement::SettlementStatus::Queued,
             };
 
             queue
@@ -176,8 +181,8 @@ async fn run_settlement_processor(
     cfg: config::Config,
     cancel: tokio_util::sync::CancellationToken,
 ) {
-    let gas_manager = gas::GasManager::new(cfg.gas_bump_percent, cfg.gas_bump_timeout_secs);
     let nonce_manager = Arc::new(nonce::NonceManager::new());
+    let poll_interval = std::time::Duration::from_millis(cfg.base_retry_delay_ms);
 
     loop {
         tokio::select! {
@@ -185,13 +190,10 @@ async fn run_settlement_processor(
                 info!("Settlement processor shutting down...");
                 return;
             }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+            _ = tokio::time::sleep(poll_interval) => {}
         }
 
-        match queue
-            .process_next(&state, &gas_manager, &nonce_manager)
-            .await
-        {
+        match queue.process_next(&state, &nonce_manager).await {
             Ok(true) => {}
             Ok(false) => {}
             Err(e) => {
@@ -230,13 +232,16 @@ async fn main() -> Result<()> {
         settlement,
         registry,
         master_client,
+        pending_topups: Arc::new(DashSet::new()),
     };
 
     let db = sled::open(&cfg.db_path)?;
+    let gas_manager = gas::GasManager::new(cfg.gas_bump_percent, cfg.gas_bump_timeout_secs);
     let queue = Arc::new(settlement::SettlementQueue::new(
         Arc::new(db),
         cfg.max_retries,
         cfg.base_retry_delay_ms,
+        gas_manager,
     ));
 
     queue.replay_pending()?;
@@ -258,16 +263,16 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("AMP Relayer (Cap'n Proto RPC) listening on {}", addr);
 
+    tokio::spawn(run_settlement_processor(
+        state_processor,
+        queue_processor,
+        cfg_processor,
+        cancel_processor,
+    ));
+
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            tokio::task::spawn_local(run_settlement_processor(
-                state_processor,
-                queue_processor,
-                cfg_processor,
-                cancel_processor,
-            ));
-
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!("Received shutdown signal");

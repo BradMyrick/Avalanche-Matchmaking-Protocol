@@ -25,10 +25,7 @@ interface IAMPRegistry {
 
     function isVerifier(uint256 gameId, address verifier) external view returns (bool);
 
-    function matches(uint256 id)
-        external
-        view
-        returns (uint256, address, address, uint256, AMPTypes.MatchState, uint256);
+    function matches(uint256 id) external view returns (uint256, address, AMPTypes.MatchState, address, uint64, uint256);
 
     function settleMatch(
         uint256 matchId,
@@ -40,9 +37,28 @@ interface IAMPRegistry {
 }
 
 contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
+    error FeeExceedsMax();
+    error InvalidRecipient();
+    error MatchIdMismatch();
+    error WrongMode();
+    error MatchNotSettlable();
+    error NoOpponent();
+    error InvalidVerifierSignature();
+    error MatchAlreadySettled();
+    error NotArbiter();
+    error NotDisputed();
+    error NotAPlayer();
+
     address public immutable registry;
     uint16 public protocolFeeBps;
     address public protocolFeeRecipient;
+    bytes32 private _cachedDomainSeparator;
+    uint256 private _cachedChainId;
+
+    bytes32 public constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 public constant ASYNC_RESULT_TYPEHASH =
+        keccak256("AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)");
 
     mapping(uint256 => AMPTypes.Settlement) public settlements;
     mapping(uint256 => mapping(address => AMPTypes.RealTimeHashResult)) public rtResults;
@@ -57,37 +73,48 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         registry = _registry;
         protocolFeeBps = 100;
         protocolFeeRecipient = _msgSender();
+        _cachedChainId = block.chainid;
+        _cachedDomainSeparator = _buildDomainSeparator();
     }
 
+    uint16 public constant MAX_PROTOCOL_FEE_BPS = 500;
+
     function updateProtocolFeeBps(uint16 feeBps) external onlyOwner {
-        require(feeBps <= 10000, "Invalid bps");
+        if (feeBps > MAX_PROTOCOL_FEE_BPS) revert FeeExceedsMax();
         protocolFeeBps = feeBps;
         emit ProtocolFeeUpdated(feeBps);
     }
 
     function updateProtocolFeeRecipient(address recipient) external onlyOwner {
-        require(recipient != address(0), "Invalid recipient");
+        if (recipient == address(0)) revert InvalidRecipient();
         protocolFeeRecipient = recipient;
         emit ProtocolFeeRecipientUpdated(recipient);
     }
 
     function submitAsyncResult(uint256 matchId, AMPTypes.AsyncResult calldata result) external whenNotPaused {
-        require(result.matchId == matchId, "Match ID mismatch");
+        if (result.matchId != matchId) revert MatchIdMismatch();
 
-        (uint256 gameId, address playerA, address playerB, uint256 stakeAmount, AMPTypes.MatchState state,) =
-            IAMPRegistry(registry).matches(matchId);
+        (
+            uint256 gameId,
+            address playerA,
+            AMPTypes.MatchState state,
+            address playerB,
+            uint64 createdAt,
+            uint256 stakeAmount
+        ) = IAMPRegistry(registry).matches(matchId);
 
         (, AMPTypes.SettlementMode mode,,,,) = IAMPRegistry(registry).games(gameId);
 
-        require(mode == AMPTypes.SettlementMode.ASYNC_VERIFIER, "Wrong mode");
-        require(state == AMPTypes.MatchState.READY, "Match not settlable");
-        require(playerB != address(0), "No opponent joined");
+        if (mode != AMPTypes.SettlementMode.ASYNC_VERIFIER) revert WrongMode();
+        if (state != AMPTypes.MatchState.READY) revert MatchNotSettlable();
+        if (playerB == address(0)) revert NoOpponent();
 
-        bytes32 structHash = keccak256(abi.encode(result.matchId, result.outcome, result.transcriptHash));
-        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(structHash);
+        bytes32 structHash =
+            keccak256(abi.encode(ASYNC_RESULT_TYPEHASH, result.matchId, result.outcome, result.transcriptHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
         address signer = ECDSA.recover(digest, result.signature);
 
-        require(IAMPRegistry(registry).isVerifier(gameId, signer), "Invalid verifier signature");
+        if (!IAMPRegistry(registry).isVerifier(gameId, signer)) revert InvalidVerifierSignature();
 
         settlements[matchId] = AMPTypes.Settlement({
             matchId: matchId, outcome: result.outcome, transcriptHash: result.transcriptHash, settledAt: block.timestamp
@@ -102,15 +129,21 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         external
         whenNotPaused
     {
-        require(result.matchId == matchId, "Match ID mismatch");
-        (uint256 gameId, address playerA, address playerB, uint256 stakeAmount, AMPTypes.MatchState state,) =
-            IAMPRegistry(registry).matches(matchId);
+        if (result.matchId != matchId) revert MatchIdMismatch();
+        (
+            uint256 gameId,
+            address playerA,
+            AMPTypes.MatchState state,
+            address playerB,
+            uint64 createdAt,
+            uint256 stakeAmount
+        ) = IAMPRegistry(registry).matches(matchId);
 
         (, AMPTypes.SettlementMode mode,,,,) = IAMPRegistry(registry).games(gameId);
 
-        require(mode == AMPTypes.SettlementMode.RT_HASH_AGREE, "Wrong mode");
-        require(state == AMPTypes.MatchState.READY, "Match not ready");
-        require(_msgSender() == playerA || _msgSender() == playerB, "Not a player");
+        if (mode != AMPTypes.SettlementMode.RT_HASH_AGREE) revert WrongMode();
+        if (state != AMPTypes.MatchState.READY) revert MatchNotSettlable();
+        if (_msgSender() != playerA && _msgSender() != playerB) revert NotAPlayer();
 
         rtResults[matchId][_msgSender()] = result;
 
@@ -138,13 +171,19 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
     }
 
     function resolveDispute(uint256 matchId, AMPTypes.OutcomeCode enforcedOutcome) external {
-        (uint256 gameId, address playerA, address playerB, uint256 stakeAmount, AMPTypes.MatchState state,) =
-            IAMPRegistry(registry).matches(matchId);
+        (
+            uint256 gameId,
+            address playerA,
+            AMPTypes.MatchState state,
+            address playerB,
+            uint64 createdAt,
+            uint256 stakeAmount
+        ) = IAMPRegistry(registry).matches(matchId);
 
         (,,,, address arbiter,) = IAMPRegistry(registry).games(gameId);
 
-        require(state == AMPTypes.MatchState.DISPUTED, "Not disputed");
-        require(_msgSender() == arbiter, "Not arbiter");
+        if (state != AMPTypes.MatchState.DISPUTED) revert NotDisputed();
+        if (_msgSender() != arbiter) revert NotArbiter();
 
         settlements[matchId] = AMPTypes.Settlement({
             matchId: matchId, outcome: enforcedOutcome, transcriptHash: bytes32(0), settledAt: block.timestamp
@@ -199,6 +238,27 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         }
 
         IAMPRegistry(registry).settleMatch(matchId, AMPTypes.MatchState.SETTLED, recipients, amounts, protocolFee);
+    }
+
+    function _buildDomainSeparator() internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(EIP712_DOMAIN_TYPEHASH, keccak256("AMPSettlement"), keccak256("1"), block.chainid, address(this))
+        );
+    }
+
+    function domainSeparator() external view returns (bytes32) {
+        if (block.chainid == _cachedChainId) {
+            return _cachedDomainSeparator;
+        }
+        return _buildDomainSeparator();
+    }
+
+    function _domainSeparatorV4() internal returns (bytes32) {
+        if (block.chainid != _cachedChainId) {
+            _cachedChainId = block.chainid;
+            _cachedDomainSeparator = _buildDomainSeparator();
+        }
+        return _cachedDomainSeparator;
     }
 
     function _msgSender() internal view virtual override(Context, ERC2771Context) returns (address) {

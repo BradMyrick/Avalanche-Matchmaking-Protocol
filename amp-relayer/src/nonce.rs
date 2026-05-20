@@ -1,3 +1,4 @@
+use crate::error::RelayerError;
 use ethers::prelude::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -17,7 +18,7 @@ impl NonceManager {
         &self,
         addr: &Address,
         provider: &Provider<Http>,
-    ) -> anyhow::Result<U256> {
+    ) -> Result<U256, RelayerError> {
         let cached = {
             let cache = self.cache.lock().unwrap();
             cache.get(addr).copied()
