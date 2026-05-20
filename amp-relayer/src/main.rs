@@ -192,10 +192,7 @@ async fn run_settlement_processor(
             _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
         }
 
-        match queue
-            .process_next(&state, &nonce_manager)
-            .await
-        {
+        match queue.process_next(&state, &nonce_manager).await {
             Ok(true) => {}
             Ok(false) => {}
             Err(e) => {

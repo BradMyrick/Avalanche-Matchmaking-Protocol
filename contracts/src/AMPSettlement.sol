@@ -25,10 +25,7 @@ interface IAMPRegistry {
 
     function isVerifier(uint256 gameId, address verifier) external view returns (bool);
 
-    function matches(uint256 id)
-        external
-        view
-        returns (uint256, address, AMPTypes.MatchState, address, uint64, uint256);
+    function matches(uint256 id) external view returns (uint256, address, AMPTypes.MatchState, address, uint64, uint256);
 
     function settleMatch(
         uint256 matchId,
@@ -97,8 +94,14 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
     function submitAsyncResult(uint256 matchId, AMPTypes.AsyncResult calldata result) external whenNotPaused {
         if (result.matchId != matchId) revert MatchIdMismatch();
 
-        (uint256 gameId, address playerA, AMPTypes.MatchState state, address playerB, uint64 createdAt, uint256 stakeAmount) =
-            IAMPRegistry(registry).matches(matchId);
+        (
+            uint256 gameId,
+            address playerA,
+            AMPTypes.MatchState state,
+            address playerB,
+            uint64 createdAt,
+            uint256 stakeAmount
+        ) = IAMPRegistry(registry).matches(matchId);
 
         (, AMPTypes.SettlementMode mode,,,,) = IAMPRegistry(registry).games(gameId);
 
@@ -106,9 +109,8 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         if (state != AMPTypes.MatchState.READY) revert MatchNotSettlable();
         if (playerB == address(0)) revert NoOpponent();
 
-        bytes32 structHash = keccak256(
-            abi.encode(ASYNC_RESULT_TYPEHASH, result.matchId, result.outcome, result.transcriptHash)
-        );
+        bytes32 structHash =
+            keccak256(abi.encode(ASYNC_RESULT_TYPEHASH, result.matchId, result.outcome, result.transcriptHash));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
         address signer = ECDSA.recover(digest, result.signature);
 
@@ -128,8 +130,14 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         whenNotPaused
     {
         if (result.matchId != matchId) revert MatchIdMismatch();
-        (uint256 gameId, address playerA, AMPTypes.MatchState state, address playerB, uint64 createdAt, uint256 stakeAmount) =
-            IAMPRegistry(registry).matches(matchId);
+        (
+            uint256 gameId,
+            address playerA,
+            AMPTypes.MatchState state,
+            address playerB,
+            uint64 createdAt,
+            uint256 stakeAmount
+        ) = IAMPRegistry(registry).matches(matchId);
 
         (, AMPTypes.SettlementMode mode,,,,) = IAMPRegistry(registry).games(gameId);
 
@@ -163,8 +171,14 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
     }
 
     function resolveDispute(uint256 matchId, AMPTypes.OutcomeCode enforcedOutcome) external {
-        (uint256 gameId, address playerA, AMPTypes.MatchState state, address playerB, uint64 createdAt, uint256 stakeAmount) =
-            IAMPRegistry(registry).matches(matchId);
+        (
+            uint256 gameId,
+            address playerA,
+            AMPTypes.MatchState state,
+            address playerB,
+            uint64 createdAt,
+            uint256 stakeAmount
+        ) = IAMPRegistry(registry).matches(matchId);
 
         (,,,, address arbiter,) = IAMPRegistry(registry).games(gameId);
 
@@ -228,13 +242,7 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
 
     function _buildDomainSeparator() internal view returns (bytes32) {
         return keccak256(
-            abi.encode(
-                EIP712_DOMAIN_TYPEHASH,
-                keccak256("AMPSettlement"),
-                keccak256("1"),
-                block.chainid,
-                address(this)
-            )
+            abi.encode(EIP712_DOMAIN_TYPEHASH, keccak256("AMPSettlement"), keccak256("1"), block.chainid, address(this))
         );
     }
 

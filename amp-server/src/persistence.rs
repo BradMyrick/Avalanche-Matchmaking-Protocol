@@ -23,7 +23,12 @@ impl Persistence {
         Ok(Self { db: Arc::new(db) })
     }
 
-    pub async fn save<T: serde::Serialize + Send + 'static>(&self, cf: &str, key: &str, value: &T) -> Result<()> {
+    pub async fn save<T: serde::Serialize + Send + 'static>(
+        &self,
+        cf: &str,
+        key: &str,
+        value: &T,
+    ) -> Result<()> {
         let db = self.db.clone();
         let cf = cf.to_string();
         let key = key.to_string();
@@ -37,7 +42,11 @@ impl Persistence {
     }
 
     #[allow(dead_code)]
-    pub async fn load<T: DeserializeOwned + Send + 'static>(&self, cf: &str, key: &str) -> Result<Option<T>> {
+    pub async fn load<T: DeserializeOwned + Send + 'static>(
+        &self,
+        cf: &str,
+        key: &str,
+    ) -> Result<Option<T>> {
         let db = self.db.clone();
         let cf = cf.to_string();
         let key = key.to_string();

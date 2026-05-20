@@ -174,7 +174,7 @@ pub struct OutcomeSubmission {
 /// let client = AmpClient::connect("127.0.0.1:50051").await?;
 /// let (challenge, _expires) = client.request_challenge(1).await?;
 /// // sign challenge with your wallet, then:
-/// let session = client.login(1, &signature).await?;
+/// let session = client.login(1, &signature, &challenge).await?;
 /// ```
 pub struct AmpClient {
     client: service_capnp::game_session_service::Client,
@@ -226,14 +226,20 @@ impl AmpClient {
     /// Authenticate with the server using a signed challenge.
     ///
     /// `signature` must be the 65-byte ECDSA signature over the challenge bytes
-    /// returned by [`request_challenge`](Self::request_challenge), with the
-    /// challenge bytes appended after the 65-byte secp256k1 signature.
+    /// returned by [`request_challenge`](Self::request_challenge).
+    /// `challenge_payload` is the raw challenge bytes that were signed.
     ///
     /// On success, returns a [`UserSession`] for matchmaking operations.
-    pub async fn login(&self, game_id: u64, signature: &[u8]) -> AmpResult<UserSession> {
+    pub async fn login(
+        &self,
+        game_id: u64,
+        signature: &[u8],
+        challenge_payload: &[u8],
+    ) -> AmpResult<UserSession> {
         let mut request = self.client.login_request();
         request.get().set_game_id(game_id);
-        request.get().set_signed_challenge(signature);
+        request.get().set_signature(signature);
+        request.get().set_challenge_payload(challenge_payload);
         let response = request
             .send()
             .promise

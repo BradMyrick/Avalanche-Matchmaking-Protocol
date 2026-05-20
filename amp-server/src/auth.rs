@@ -46,9 +46,14 @@ impl AuthService {
         (msg_bytes, expires_at)
     }
 
-    pub async fn verify_login(&self, game_id: u64, sig_bytes: &[u8], challenge_payload: &[u8]) -> Result<Address> {
-        let address =
-            recover_address_from_sig(sig_bytes, challenge_payload).context("failed to recover address from signature")?;
+    pub async fn verify_login(
+        &self,
+        game_id: u64,
+        sig_bytes: &[u8],
+        challenge_payload: &[u8],
+    ) -> Result<Address> {
+        let address = recover_address_from_sig(sig_bytes, challenge_payload)
+            .context("failed to recover address from signature")?;
 
         let address_hex = hex::encode(address.as_bytes());
         info!(target: "auth", "Recovered address: 0x{}", address_hex);

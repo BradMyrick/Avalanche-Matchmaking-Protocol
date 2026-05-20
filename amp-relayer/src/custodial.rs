@@ -40,11 +40,13 @@ pub async fn ensure_gas(custodial_addr: Address, state: &RelayerState) -> Result
         .provider()
         .get_balance(custodial_addr, None)
         .await?;
-    let threshold = ethers::utils::parse_ether(0.05).map_err(|e| RelayerError::Transaction(e.to_string()))?;
+    let threshold =
+        ethers::utils::parse_ether(0.05).map_err(|e| RelayerError::Transaction(e.to_string()))?;
 
     if balance < threshold {
         state.pending_topups.insert(custodial_addr);
-        let topup = ethers::utils::parse_ether(0.2).map_err(|e| RelayerError::Transaction(e.to_string()))?;
+        let topup = ethers::utils::parse_ether(0.2)
+            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
         info!(
             "Custodial wallet {} low on gas ({:?}). Topping up...",
             custodial_addr, balance

@@ -194,7 +194,9 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         if (m.state == AMPTypes.MatchState.DISPUTED) {
             if (block.timestamp < m.createdAt + game.matchTimeout * 3) revert DisputeTimeoutNotReached();
         } else {
-            if (m.state != AMPTypes.MatchState.OPEN && m.state != AMPTypes.MatchState.READY) revert MatchNotExpirable();
+            if (m.state != AMPTypes.MatchState.OPEN && m.state != AMPTypes.MatchState.READY) {
+                revert MatchNotExpirable();
+            }
             if (block.timestamp < m.createdAt + game.matchTimeout) revert NotExpiredYet();
         }
 

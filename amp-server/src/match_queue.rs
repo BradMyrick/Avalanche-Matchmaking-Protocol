@@ -1,6 +1,6 @@
 use crate::state::{MatchQualityDetail, QueueEntry, StoredRuleSet};
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 type BucketKey = (String, String);
 

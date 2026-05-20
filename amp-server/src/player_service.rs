@@ -278,8 +278,9 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
     ) -> Promise<(), ::capnp::Error> {
         let state = self.state.clone();
         Promise::from_future(async move {
-            let online_players: Vec<dashmap::mapref::multiple::RefMulti<AmpId, StoredPlayerProfile>> =
-                state.players.iter().filter(|p| p.is_online).collect();
+            let online_players: Vec<
+                dashmap::mapref::multiple::RefMulti<AmpId, StoredPlayerProfile>,
+            > = state.players.iter().filter(|p| p.is_online).collect();
             let mut list = results.get().init_players(online_players.len() as u32);
             for (i, profile) in online_players.iter().enumerate() {
                 let mut entry = list.reborrow().get(i as u32);

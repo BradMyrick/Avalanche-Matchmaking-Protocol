@@ -182,13 +182,9 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {}
             }
 
-            let rulesets_snapshot = {
-                state.rulesets.read().await.clone()
-            };
+            let rulesets_snapshot = { state.rulesets.read().await.clone() };
 
-            let active_count = {
-                state.active_matches.read().await.len()
-            };
+            let active_count = { state.active_matches.read().await.len() };
 
             let mut queue = MATCH_QUEUE.lock().await;
             if queue.len() < 2 {
@@ -197,7 +193,10 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
 
             let keys = queue.bucket_keys();
             for key in keys {
-                let ruleset = rulesets_snapshot.get(&key.1).cloned().unwrap_or_else(|| StoredRuleSet::default_arc());
+                let ruleset = rulesets_snapshot
+                    .get(&key.1)
+                    .cloned()
+                    .unwrap_or_else(|| StoredRuleSet::default_arc());
 
                 loop {
                     let result = queue.try_match_bucket(
@@ -246,7 +245,11 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
                         settled_at_ms: None,
                         expires_at_ms: Some(now + state::MATCH_TTL_MS),
                     };
-                    state.active_matches.write().await.insert(match_id, active.clone());
+                    state
+                        .active_matches
+                        .write()
+                        .await
+                        .insert(match_id, active.clone());
                     state.persist_match(&active.match_id, &active).await;
                 }
             }
@@ -291,8 +294,7 @@ async fn sign_match_outcome(
     let chain_id: u64 = env::var("AMP_CHAIN_ID")
         .unwrap_or_else(|_| "43113".to_string())
         .parse()?;
-    let settlement_addr: Address = env::var("AMP_SETTLEMENT_ADDRESS")?
-        .parse()?;
+    let settlement_addr: Address = env::var("AMP_SETTLEMENT_ADDRESS")?.parse()?;
 
     let match_id_val = if let Ok(val) = U256::from_dec_str(match_id) {
         val
@@ -316,7 +318,8 @@ async fn sign_match_outcome(
     ]));
 
     let eip712_domain_typehash: [u8; 32] = ethers_core::utils::keccak256(
-        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)".as_bytes(),
+        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+            .as_bytes(),
     );
     let domain_separator = ethers_core::utils::keccak256(&ethers_core::abi::encode(&[
         ethers_core::abi::Token::FixedBytes(eip712_domain_typehash.to_vec()),
@@ -470,7 +473,9 @@ impl match_session::Server for MatchSessionImpl {
                                 expires_at_ms: m.expires_at_ms,
                             };
                             drop(matches);
-                            state.archive_settled_match(&match_id_for_update, &m_clone).await;
+                            state
+                                .archive_settled_match(&match_id_for_update, &m_clone)
+                                .await;
                         }
                     }
 
@@ -720,7 +725,10 @@ impl game_session_service::Server for GameSessionServiceImpl {
         let auth = self.auth_service.clone();
 
         Promise::from_future(async move {
-            match auth.verify_login(game_id, &sig_bytes, &challenge_payload).await {
+            match auth
+                .verify_login(game_id, &sig_bytes, &challenge_payload)
+                .await
+            {
                 Ok(address) => {
                     let player_id = format!("0x{}", hex::encode(address.as_bytes()));
 

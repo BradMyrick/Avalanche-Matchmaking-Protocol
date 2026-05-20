@@ -45,7 +45,12 @@ pub struct SettlementQueue {
 }
 
 impl SettlementQueue {
-    pub fn new(db: Arc<Db>, max_retries: u32, base_retry_delay_ms: u64, gas_manager: GasManager) -> Self {
+    pub fn new(
+        db: Arc<Db>,
+        max_retries: u32,
+        base_retry_delay_ms: u64,
+        gas_manager: GasManager,
+    ) -> Self {
         Self {
             db,
             max_retries,
@@ -129,12 +134,7 @@ impl SettlementQueue {
         };
 
         let result = self
-            .submit_settlement(
-                &settlement,
-                match_id_parsed,
-                state,
-                nonce_manager,
-            )
+            .submit_settlement(&settlement, match_id_parsed, state, nonce_manager)
             .await;
 
         match result {
