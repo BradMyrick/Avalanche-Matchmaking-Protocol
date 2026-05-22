@@ -247,7 +247,7 @@ async fn start_matchmaker_loop(
     mut rx: tokio::sync::mpsc::Receiver<QueueEntry>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut q = match_queue::IndexedQueue::new();
         let mut rulesets_cache = arc_swap::cache::Cache::new(state.rulesets.clone());
         let mut active_matches_cache = arc_swap::cache::Cache::new(state.active_matches.clone());
@@ -365,7 +365,7 @@ fn start_cleanup_loop(
     });
 }
 
-struct SigningConfig {
+pub(crate) struct SigningConfig {
     wallet: LocalWallet,
     chain_id: u64,
     settlement_addr: Address,
@@ -418,12 +418,10 @@ async fn sign_match_outcome(
     digest_input.extend_from_slice(&struct_hash);
     let digest = H256::from_slice(&ethers_core::utils::keccak256(&digest_input));
 
-    let signature = tokio::task::spawn_blocking(move || {
-        config.wallet.sign_hash(digest)
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("Spawn blocking failed: {}", e))??;
-    
+    let signature = tokio::task::spawn_blocking(move || config.wallet.sign_hash(digest))
+        .await
+        .map_err(|e| anyhow::anyhow!("Spawn blocking failed: {}", e))??;
+
     Ok(signature.to_vec())
 }
 
@@ -458,7 +456,7 @@ async fn start_relayer_worker(
                         Some(t) => t,
                         None => return,
                     };
-                    
+
                     let mut retries = 0;
                     loop {
                         if client_opt.is_none() {
@@ -473,7 +471,7 @@ async fn start_relayer_worker(
                                 let mut rpc_system = RpcSystem::new(Box::new(network), None);
                                 let c: relayer_capnp::relayer_service::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
                                 tokio::task::spawn_local(rpc_system);
-                                
+
                                 if !api_key.is_empty() {
                                     let mut auth_req = c.authenticate_request();
                                     auth_req.get().set_api_key(api_key.as_bytes());
@@ -503,7 +501,7 @@ async fn start_relayer_worker(
 
                         if let Some(client) = &client_opt {
                             let mut req = client.submit_outcome_request();
-                            
+
                             let match_id_val = if let Ok(val) = U256::from_dec_str(&task.match_id) {
                                 let mut b = [0u8; 32];
                                 val.to_big_endian(&mut b);
@@ -516,7 +514,7 @@ async fn start_relayer_worker(
                             req.get().set_outcome(task.outcome);
                             req.get().set_transcript_hash(&task.transcript_hash);
                             req.get().set_signature(&task.signature);
-                            
+
                             if req.send().promise.await.is_err() {
                                 client_opt = None; // Reconnect
                             } else {
@@ -538,7 +536,7 @@ async fn start_telemetry_worker(
     tokio::task::spawn_local(async move {
         let telemetry_addr =
             env::var("TELEMETRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4317".to_string());
-        
+
         let mut client_opt: Option<amp_telemetry_capnp::telemetry_receiver::Client> = None;
 
         loop {
@@ -549,7 +547,7 @@ async fn start_telemetry_worker(
                         Some(e) => e,
                         None => return,
                     };
-                    
+
                     if client_opt.is_none() {
                         if let Ok(stream) = tokio::net::TcpStream::connect(&telemetry_addr).await {
                             let (reader, writer) = stream.into_split();
@@ -646,7 +644,7 @@ impl match_session::Server for MatchSessionImpl {
                     {
                         let match_id_for_update = m_id.clone();
                         let mut m_clone_opt = None;
-                        
+
                         let updated = state.update_active_match(&match_id_for_update, |m| {
                             if !m.settled {
                                 m.settled = true;
@@ -656,7 +654,9 @@ impl match_session::Server for MatchSessionImpl {
                         });
 
                         if updated.is_none() || m_clone_opt.is_none() {
-                            return Err(::capnp::Error::failed("Match already settled or not found".into()));
+                            return Err(::capnp::Error::failed(
+                                "Match already settled or not found".into(),
+                            ));
                         }
 
                         if let Some(m_clone) = m_clone_opt {
@@ -666,12 +666,15 @@ impl match_session::Server for MatchSessionImpl {
                         }
                     }
 
-                    if let Err(e) = relayer_tx.send(RelayerTask {
-                        match_id: m_id.clone(),
-                        outcome: outcome_val,
-                        transcript_hash: r_hash,
-                        signature: sig,
-                    }).await {
+                    if let Err(e) = relayer_tx
+                        .send(RelayerTask {
+                            match_id: m_id.clone(),
+                            outcome: outcome_val,
+                            transcript_hash: r_hash,
+                            signature: sig,
+                        })
+                        .await
+                    {
                         warn!("Failed to queue relayer task for {}: {}", m_id, e);
                     }
                     Ok(())
@@ -786,20 +789,25 @@ impl user_session::Server for UserSessionImpl {
             }
 
             let (tx, rx) = oneshot::channel();
-            if let Err(_) = queue.try_send(QueueEntry {
-                player_id: p_id.clone(),
-                game_id: game_id.to_string(),
-                ruleset_id: ruleset_id.clone(),
-                mmr,
-                mmr_uncertainty: mmr_unc,
-                region,
-                preferred_role: role,
-                language,
-                max_ping_ms: max_ping,
-                enqueued_at_ms: now_ms(),
-                sender: tx,
-            }) {
-                return Err(::capnp::Error::failed("Server under heavy load, queue full".into()));
+            if queue
+                .try_send(QueueEntry {
+                    player_id: p_id.clone(),
+                    game_id: game_id.to_string(),
+                    ruleset_id: ruleset_id.clone(),
+                    mmr,
+                    mmr_uncertainty: mmr_unc,
+                    region,
+                    preferred_role: role,
+                    language,
+                    max_ping_ms: max_ping,
+                    enqueued_at_ms: now_ms(),
+                    sender: tx,
+                })
+                .is_err()
+            {
+                return Err(::capnp::Error::failed(
+                    "Server under heavy load, queue full".into(),
+                ));
             }
 
             if let Ok(payload) = rx.await {
@@ -1109,9 +1117,8 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-
 #[derive(Clone)]
-pub struct ServiceContext {
+pub(crate) struct ServiceContext {
     pub state: AppState,
     pub player_service: Arc<player_service::PlayerServiceImpl>,
     pub auth_service: Arc<auth::AuthService>,
@@ -1161,8 +1168,7 @@ async fn accept_loop(
                 match acc.accept(stream).await {
                     Ok(tls_stream) => {
                         let (reader, writer) = tokio::io::split(tls_stream);
-                        serve_rpc(reader, writer, ctx_clone.clone())
-                        .await;
+                        serve_rpc(reader, writer, ctx_clone.clone()).await;
                     }
                     Err(e) => {
                         error!("TLS handshake failed for {}: {}", ip, e);
@@ -1170,18 +1176,14 @@ async fn accept_loop(
                 }
             } else {
                 let (reader, writer) = stream.into_split();
-                serve_rpc(reader, writer, ctx_clone)
-                .await;
+                serve_rpc(reader, writer, ctx_clone).await;
             }
         });
     }
 }
 
-async fn serve_rpc<R, W>(
-    reader: R,
-    writer: W,
-    ctx: ServiceContext,
-) where
+async fn serve_rpc<R, W>(reader: R, writer: W, ctx: ServiceContext)
+where
     R: tokio::io::AsyncRead + Unpin + 'static,
     W: tokio::io::AsyncWrite + Unpin + 'static,
 {
@@ -1211,9 +1213,9 @@ async fn serve_rpc<R, W>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{InnerState, StoredRuleSet};
     use std::sync::Arc;
     use tokio::sync::oneshot;
-    use crate::state::{StoredRuleSet, InnerState};
 
     #[tokio::test]
     async fn test_matchmaker_actor_mpsc() {
@@ -1222,7 +1224,7 @@ mod tests {
 
         let mut rs = StoredRuleSet::default();
         rs.rules.push(crate::state::StoredRule::default_skill());
-        
+
         let mut map = std::collections::HashMap::new();
         map.insert("test_game".into(), Arc::new(rs));
         app_state.rulesets.store(Arc::new(map));
@@ -1230,17 +1232,14 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let cancel = tokio_util::sync::CancellationToken::new();
         let cancel_clone = cancel.clone();
-        
+
         let state_clone = app_state.clone();
-        
-        let local = tokio::task::LocalSet::new();
-        local.spawn_local(async move {
-            start_matchmaker_loop(state_clone, rx, cancel_clone).await;
-        });
-        
+
+        tokio::spawn(start_matchmaker_loop(state_clone, rx, cancel_clone));
+
         let (p1_tx, p1_rx) = oneshot::channel();
         let (p2_tx, p2_rx) = oneshot::channel();
-        
+
         tx.send(QueueEntry {
             player_id: "p1".into(),
             game_id: "test_game".into(),
@@ -1253,8 +1252,10 @@ mod tests {
             max_ping_ms: 100,
             enqueued_at_ms: crate::state::now_ms(),
             sender: p1_tx,
-        }).await.unwrap();
-        
+        })
+        .await
+        .unwrap();
+
         tx.send(QueueEntry {
             player_id: "p2".into(),
             game_id: "test_game".into(),
@@ -1267,17 +1268,17 @@ mod tests {
             max_ping_ms: 100,
             enqueued_at_ms: crate::state::now_ms(),
             sender: p2_tx,
-        }).await.unwrap();
-        
-        local.run_until(async move {
-            let m1 = p1_rx.await.unwrap();
-            let m2 = p2_rx.await.unwrap();
-            
-            assert_eq!(m1.match_id, m2.match_id); // Both should receive the same match ID
-            
-            let active = app_state.active_matches.load();
-            assert!(active.contains_key(&m1.match_id));
-            cancel.cancel();
-        }).await;
+        })
+        .await
+        .unwrap();
+
+        let m1 = p1_rx.await.unwrap();
+        let m2 = p2_rx.await.unwrap();
+
+        assert_eq!(m1.match_id, m2.match_id);
+
+        let active = app_state.active_matches.load();
+        assert!(active.contains_key(&m1.match_id));
+        cancel.cancel();
     }
 }

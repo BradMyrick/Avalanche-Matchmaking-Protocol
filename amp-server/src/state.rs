@@ -1,10 +1,10 @@
+use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::oneshot;
-use arc_swap::ArcSwap;
 
 use crate::persistence::Persistence;
 
@@ -261,7 +261,6 @@ pub struct LanguageParams {
     pub prefer_same: bool,
     pub weight: f32,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScheduleParams {
@@ -550,7 +549,7 @@ impl InnerState {
                     }
                 }
             }
-            
+
             // Do persistence (async)
             for (id, m) in to_persist {
                 if let Some(ref p) = self.persistence {
