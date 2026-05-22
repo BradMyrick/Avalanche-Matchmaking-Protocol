@@ -5,7 +5,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
 use ethers::prelude::*;
-use futures::FutureExt;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{error, info};
 
@@ -263,6 +262,25 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("AMP Relayer (Cap'n Proto RPC) listening on {}", addr);
 
+    let tls_acceptor = match (&cfg.tls_cert_file, &cfg.tls_key_file) {
+        (Some(cert_path), Some(key_path)) => match create_tls_acceptor(cert_path, key_path) {
+            Ok(acceptor) => {
+                info!("TLS enabled (cert={}, key={})", cert_path, key_path);
+                Some(acceptor)
+            }
+            Err(e) => {
+                tracing::warn!("TLS configuration failed, falling back to plain TCP: {}", e);
+                None
+            }
+        },
+        _ => {
+            info!(
+                "TLS not configured (set RELAYER_TLS_CERT_FILE and RELAYER_TLS_KEY_FILE to enable)"
+            );
+            None
+        }
+    };
+
     tokio::spawn(run_settlement_processor(
         state_processor,
         queue_processor,
@@ -280,7 +298,7 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     info!("Shutdown complete.");
                 }
-                result = accept_loop(listener, relayer_client) => {
+                result = accept_loop(listener, relayer_client, tls_acceptor) => {
                     result?;
                 }
             }
@@ -294,20 +312,86 @@ async fn main() -> Result<()> {
 async fn accept_loop(
     listener: tokio::net::TcpListener,
     relayer_client: relayer_capnp::relayer_service::Client,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
 ) -> Result<()> {
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, peer) = listener.accept().await?;
         stream.set_nodelay(true)?;
-        let (reader, writer) = stream.into_split();
 
-        let network = twoparty::VatNetwork::new(
-            reader.compat(),
-            writer.compat_write(),
-            rpc_twoparty_capnp::Side::Server,
-            Default::default(),
-        );
+        let client = relayer_client.clone();
+        let acceptor = tls_acceptor.clone();
 
-        let rpc_system = RpcSystem::new(Box::new(network), Some(relayer_client.clone().client));
-        tokio::task::spawn_local(rpc_system.map(|_| ()));
+        tokio::task::spawn_local(async move {
+            if let Some(ref acc) = acceptor {
+                match acc.accept(stream).await {
+                    Ok(tls_stream) => {
+                        let (reader, writer) = tokio::io::split(tls_stream);
+                        run_rpc(reader, writer, client).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("TLS handshake failed for {}: {}", peer, e);
+                    }
+                }
+            } else {
+                let (reader, writer) = stream.into_split();
+                run_rpc(reader, writer, client).await;
+            }
+        });
     }
+}
+
+async fn run_rpc<R, W>(reader: R, writer: W, relayer_client: relayer_capnp::relayer_service::Client)
+where
+    R: tokio::io::AsyncRead + Unpin + 'static,
+    W: tokio::io::AsyncWrite + Unpin + 'static,
+{
+    let network = twoparty::VatNetwork::new(
+        reader.compat(),
+        writer.compat_write(),
+        rpc_twoparty_capnp::Side::Server,
+        Default::default(),
+    );
+    let rpc_system = RpcSystem::new(Box::new(network), Some(relayer_client.client));
+    let _ = rpc_system.await;
+}
+
+fn create_tls_acceptor(
+    cert_path: &str,
+    key_path: &str,
+) -> std::io::Result<tokio_rustls::TlsAcceptor> {
+    use std::sync::Arc;
+
+    let cert_pem = std::fs::read(cert_path)?;
+    let key_pem = std::fs::read(key_path)?;
+
+    let certs: Vec<rustls::Certificate> = rustls_pemfile::certs(&mut &cert_pem[..])?
+        .into_iter()
+        .map(rustls::Certificate)
+        .collect();
+
+    let key = rustls_pemfile::rsa_private_keys(&mut &key_pem[..])?
+        .into_iter()
+        .next()
+        .map(rustls::PrivateKey)
+        .or_else(|| {
+            rustls_pemfile::ec_private_keys(&mut &key_pem[..])
+                .ok()
+                .and_then(|keys| keys.into_iter().next().map(rustls::PrivateKey))
+        })
+        .or_else(|| {
+            rustls_pemfile::pkcs8_private_keys(&mut &key_pem[..])
+                .ok()
+                .and_then(|keys| keys.into_iter().next().map(rustls::PrivateKey))
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no private key found in PEM")
+        })?;
+
+    let config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+    Ok(tokio_rustls::TlsAcceptor::from(Arc::new(config)))
 }

@@ -13,6 +13,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 hdrhistogram = "7"
+ethers-core = "2.0"
+ethers-signers = "2.0"
 
 [build-dependencies]
 capnpc = "0.19"

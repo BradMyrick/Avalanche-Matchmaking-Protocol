@@ -3,7 +3,6 @@ use capnp::capability::Promise;
 use capnp_rpc::{RpcSystem, pry, rpc_twoparty_capnp, twoparty};
 use ethers_core::types::{Address, H256, U256};
 use ethers_signers::LocalWallet;
-use lazy_static::lazy_static;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -157,19 +156,130 @@ pub mod security_capnp {
 
 use service_capnp::*;
 
-lazy_static! {
-    static ref MATCH_QUEUE: Arc<tokio::sync::Mutex<match_queue::IndexedQueue>> =
-        Arc::new(tokio::sync::Mutex::new(match_queue::IndexedQueue::new()));
+type MatchQueue = Arc<tokio::sync::Mutex<match_queue::IndexedQueue>>;
+
+mod rate_limit {
+    use std::collections::HashMap;
+    use std::net::IpAddr;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
+
+    pub struct ConnectionRateLimiter {
+        inner: Mutex<Inner>,
+        max_per_ip_per_minute: usize,
+        current_connections: AtomicUsize,
+        max_concurrent: usize,
+    }
+
+    struct Inner {
+        ip_windows: HashMap<IpAddr, Vec<Instant>>,
+    }
+
+    pub struct ConnectionGuard(Arc<ConnectionRateLimiter>);
+
+    impl Drop for ConnectionGuard {
+        fn drop(&mut self) {
+            self.0.current_connections.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    impl ConnectionRateLimiter {
+        pub fn new(max_concurrent: usize, max_per_ip_per_minute: usize) -> Self {
+            Self {
+                inner: Mutex::new(Inner {
+                    ip_windows: HashMap::new(),
+                }),
+                max_per_ip_per_minute,
+                current_connections: AtomicUsize::new(0),
+                max_concurrent,
+            }
+        }
+
+        pub fn check_and_acquire(self: &Arc<Self>, ip: IpAddr) -> Option<ConnectionGuard> {
+            let mut inner = self.inner.lock().unwrap();
+            let now = Instant::now();
+            let window = inner.ip_windows.entry(ip).or_default();
+            window.retain(|t| now.duration_since(*t).as_secs() < 60);
+            if window.len() >= self.max_per_ip_per_minute {
+                return None;
+            }
+            if self.current_connections.load(Ordering::Relaxed) >= self.max_concurrent {
+                return None;
+            }
+            window.push(now);
+            self.current_connections.fetch_add(1, Ordering::Relaxed);
+            Some(ConnectionGuard(self.clone()))
+        }
+    }
 }
 
-async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::CancellationToken) {
+mod tls {
+    use std::fs;
+    use std::io;
+    use std::sync::Arc;
+    use tokio_rustls::TlsAcceptor;
+
+    pub fn create_tls_acceptor(cert_path: &str, key_path: &str) -> io::Result<TlsAcceptor> {
+        let cert_pem = fs::read(cert_path)?;
+        let key_pem = fs::read(key_path)?;
+
+        let certs: Vec<rustls::Certificate> = rustls_pemfile::certs(&mut &cert_pem[..])?
+            .into_iter()
+            .map(rustls::Certificate)
+            .collect();
+
+        let key = rustls_pemfile::rsa_private_keys(&mut &key_pem[..])?
+            .into_iter()
+            .next()
+            .map(rustls::PrivateKey)
+            .or_else(|| {
+                rustls_pemfile::ec_private_keys(&mut &key_pem[..])
+                    .ok()
+                    .and_then(|keys| keys.into_iter().next().map(rustls::PrivateKey))
+            })
+            .or_else(|| {
+                rustls_pemfile::pkcs8_private_keys(&mut &key_pem[..])
+                    .ok()
+                    .and_then(|keys| keys.into_iter().next().map(rustls::PrivateKey))
+            })
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "no private key found in PEM")
+            })?;
+
+        let config = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        Ok(TlsAcceptor::from(Arc::new(config)))
+    }
+}
+
+fn load_secret(env_var: &str, file_env_var: &str) -> Result<String> {
+    if let Ok(path) = env::var(file_env_var) {
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("failed to read {} from {}: {}", env_var, path, e))?;
+        return Ok(contents.trim().to_string());
+    }
+    env::var(env_var)
+        .map_err(|e| anyhow::anyhow!("{} (or {}) not set: {}", env_var, file_env_var, e))
+}
+
+async fn start_matchmaker_loop(
+    state: AppState,
+    queue: MatchQueue,
+    cancel: tokio_util::sync::CancellationToken,
+) {
     tokio::spawn(async move {
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => {
                     info!("Matchmaker loop shutting down, draining queue...");
-                    let mut queue = MATCH_QUEUE.lock().await;
-                    for entry in queue.drain_all() {
+                    let mut q = queue.lock().await;
+                    for entry in q.drain_all() {
                         let _ = entry.sender.send(MatchFoundPayload {
                             match_id: String::new(),
                             opponent_ids: vec![],
@@ -186,12 +296,12 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
 
             let active_count = { state.active_matches.read().await.len() };
 
-            let mut queue = MATCH_QUEUE.lock().await;
-            if queue.len() < 2 {
+            let mut q = queue.lock().await;
+            if q.len() < 2 {
                 continue;
             }
 
-            let keys = queue.bucket_keys();
+            let keys = q.bucket_keys();
             for key in keys {
                 let ruleset = rulesets_snapshot
                     .get(&key.1)
@@ -199,12 +309,8 @@ async fn start_matchmaker_loop(state: AppState, cancel: tokio_util::sync::Cancel
                     .unwrap_or_else(StoredRuleSet::default_arc);
 
                 loop {
-                    let result = queue.try_match_bucket(
-                        &key,
-                        &ruleset,
-                        state::MAX_ACTIVE_MATCHES,
-                        active_count,
-                    );
+                    let result =
+                        q.try_match_bucket(&key, &ruleset, state::MAX_ACTIVE_MATCHES, active_count);
                     let m = match result {
                         Some(m) => m,
                         None => break,
@@ -289,7 +395,7 @@ async fn sign_match_outcome(
     outcome: u8,
     transcript_hash: &[u8],
 ) -> Result<Vec<u8>> {
-    let key = env::var("VERIFIER_KEY")?;
+    let key = load_secret("VERIFIER_KEY", "VERIFIER_KEY_FILE")?;
     let wallet: LocalWallet = key.parse()?;
     let chain_id: u64 = env::var("AMP_CHAIN_ID")
         .unwrap_or_else(|_| "43113".to_string())
@@ -558,6 +664,7 @@ struct UserSessionImpl {
     game_id: u64,
     state: AppState,
     player_service: Arc<player_service::PlayerServiceImpl>,
+    match_queue: MatchQueue,
 }
 
 impl user_session::Server for UserSessionImpl {
@@ -571,6 +678,7 @@ impl user_session::Server for UserSessionImpl {
         let p_id = self.player_id.clone();
         let app_state = self.state.clone();
         let p_service = self.player_service.clone();
+        let queue = self.match_queue.clone();
 
         let ruleset_id_bytes = req.get_rule_set_id().unwrap_or(&[]);
         let ruleset_id = String::from_utf8_lossy(ruleset_id_bytes).to_string();
@@ -606,7 +714,7 @@ impl user_session::Server for UserSessionImpl {
             }
 
             let (tx, rx) = oneshot::channel();
-            MATCH_QUEUE.lock().await.push(QueueEntry {
+            queue.lock().await.push(QueueEntry {
                 player_id: p_id.clone(),
                 game_id: game_id.to_string(),
                 ruleset_id: ruleset_id.clone(),
@@ -691,6 +799,7 @@ struct GameSessionServiceImpl {
     state: AppState,
     player_service: Arc<player_service::PlayerServiceImpl>,
     auth_service: Arc<auth::AuthService>,
+    match_queue: MatchQueue,
 }
 
 impl game_session_service::Server for GameSessionServiceImpl {
@@ -723,6 +832,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
         let state = self.state.clone();
         let p_service = self.player_service.clone();
         let auth = self.auth_service.clone();
+        let queue = self.match_queue.clone();
 
         Promise::from_future(async move {
             match auth
@@ -748,6 +858,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
                         game_id,
                         state,
                         player_service: p_service,
+                        match_queue: queue,
                     });
                     results.get().set_session(session);
                     Ok(())
@@ -793,14 +904,56 @@ async fn main() -> Result<()> {
     });
     let auth_service = Arc::new(auth::AuthService::new());
 
+    let match_queue: MatchQueue =
+        Arc::new(tokio::sync::Mutex::new(match_queue::IndexedQueue::new()));
+
     let cancel = tokio_util::sync::CancellationToken::new();
     let cancel_clone = cancel.clone();
 
-    start_matchmaker_loop(state.clone(), cancel.clone()).await;
+    start_matchmaker_loop(state.clone(), match_queue.clone(), cancel.clone()).await;
     start_cleanup_loop(state.clone(), auth_service.clone(), cancel.clone());
+
+    let tls_acceptor = match (
+        env::var("AMP_TLS_CERT_FILE").ok(),
+        env::var("AMP_TLS_KEY_FILE").ok(),
+    ) {
+        (Some(cert_path), Some(key_path)) => {
+            match tls::create_tls_acceptor(&cert_path, &key_path) {
+                Ok(acceptor) => {
+                    info!("TLS enabled (cert={}, key={})", cert_path, key_path);
+                    Some(acceptor)
+                }
+                Err(e) => {
+                    warn!("TLS configuration failed, falling back to plain TCP: {}", e);
+                    None
+                }
+            }
+        }
+        _ => {
+            info!("TLS not configured (set AMP_TLS_CERT_FILE and AMP_TLS_KEY_FILE to enable)");
+            None
+        }
+    };
+
+    let max_concurrent: usize = env::var("AMP_MAX_CONCURRENT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000);
+    let max_per_ip: usize = env::var("AMP_MAX_PER_IP_PER_MIN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+    let rate_limiter = Arc::new(rate_limit::ConnectionRateLimiter::new(
+        max_concurrent,
+        max_per_ip,
+    ));
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("Listening on {}", addr);
+    info!(
+        "Rate limiting: max {} concurrent, max {} per IP/min",
+        max_concurrent, max_per_ip
+    );
 
     let local = tokio::task::LocalSet::new();
 
@@ -822,7 +975,7 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     info!("Shutdown complete.");
                 }
-                _ = accept_loop(listener, state, p_service, auth_service) => {}
+                _ = accept_loop(listener, state, p_service, auth_service, match_queue, tls_acceptor, rate_limiter) => {}
             }
         })
         .await;
@@ -835,30 +988,83 @@ async fn accept_loop(
     state: AppState,
     p_service: Arc<player_service::PlayerServiceImpl>,
     auth_service: Arc<auth::AuthService>,
+    match_queue: MatchQueue,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    rate_limiter: Arc<rate_limit::ConnectionRateLimiter>,
 ) {
-    while let Ok((stream, _)) = listener.accept().await {
+    loop {
+        let (stream, peer) = match listener.accept().await {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Accept error: {}", e);
+                continue;
+            }
+        };
+
+        let ip = peer.ip();
+        let _guard = match rate_limiter.check_and_acquire(ip) {
+            Some(g) => g,
+            None => {
+                warn!("Rate limit exceeded for {}", ip);
+                drop(stream);
+                continue;
+            }
+        };
+
         stream.set_nodelay(true).unwrap_or(());
         let s_clone = state.clone();
         let ps_clone = p_service.clone();
         let auth_clone = auth_service.clone();
+        let q_clone = match_queue.clone();
+        let acceptor = tls_acceptor.clone();
+        let _guard = _guard;
+
         tokio::task::spawn_local(async move {
-            let (reader, writer) = stream.into_split();
-            let network = twoparty::VatNetwork::new(
-                reader.compat(),
-                writer.compat_write(),
-                rpc_twoparty_capnp::Side::Server,
-                Default::default(),
-            );
-            let service: game_session_service::Client =
-                capnp_rpc::new_client(GameSessionServiceImpl {
-                    state: s_clone,
-                    player_service: ps_clone,
-                    auth_service: auth_clone,
-                });
-            let rpc_system = RpcSystem::new(Box::new(network), Some(service.client));
-            if let Err(e) = rpc_system.await {
-                error!("RPC error: {}", e);
+            if let Some(ref acc) = acceptor {
+                match acc.accept(stream).await {
+                    Ok(tls_stream) => {
+                        let (reader, writer) = tokio::io::split(tls_stream);
+                        serve_rpc(reader, writer, s_clone, ps_clone, auth_clone, q_clone).await;
+                    }
+                    Err(e) => {
+                        error!("TLS handshake failed for {}: {}", ip, e);
+                    }
+                }
+            } else {
+                let (reader, writer) = stream.into_split();
+                serve_rpc(reader, writer, s_clone, ps_clone, auth_clone, q_clone).await;
             }
         });
+    }
+}
+
+async fn serve_rpc<R, W>(
+    reader: R,
+    writer: W,
+    state: AppState,
+    p_service: Arc<player_service::PlayerServiceImpl>,
+    auth_service: Arc<auth::AuthService>,
+    match_queue: MatchQueue,
+) where
+    R: tokio::io::AsyncRead + Unpin + 'static,
+    W: tokio::io::AsyncWrite + Unpin + 'static,
+{
+    use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+    let network = twoparty::VatNetwork::new(
+        reader.compat(),
+        writer.compat_write(),
+        rpc_twoparty_capnp::Side::Server,
+        Default::default(),
+    );
+    let service: game_session_service::Client = capnp_rpc::new_client(GameSessionServiceImpl {
+        state,
+        player_service: p_service,
+        auth_service,
+        match_queue,
+    });
+    let rpc_system = RpcSystem::new(Box::new(network), Some(service.client));
+    if let Err(e) = rpc_system.await {
+        error!("RPC error: {}", e);
     }
 }

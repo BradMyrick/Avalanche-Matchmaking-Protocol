@@ -13,10 +13,25 @@ pub struct Config {
     pub base_retry_delay_ms: u64,
     pub gas_bump_percent: u64,
     pub gas_bump_timeout_secs: u64,
+    pub tls_cert_file: Option<String>,
+    pub tls_key_file: Option<String>,
+}
+
+fn load_secret(env_var: &str, file_env_var: &str) -> anyhow::Result<String> {
+    if let Ok(path) = env::var(file_env_var) {
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("failed to read key from {}: {}", path, e))?;
+        return Ok(contents.trim().to_string());
+    }
+    env::var(env_var)
+        .map_err(|e| anyhow::anyhow!("{} (or {}) not set: {}", env_var, file_env_var, e))
 }
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
+        let tls_cert_file = env::var("RELAYER_TLS_CERT_FILE").ok();
+        let tls_key_file = env::var("RELAYER_TLS_KEY_FILE").ok();
+
         Ok(Self {
             rpc_addr: format!(
                 "0.0.0.0:{}",
@@ -24,7 +39,7 @@ impl Config {
             ),
             fuji_rpc_url: env::var("FUJI_RPC_URL")
                 .unwrap_or_else(|_| "http://localhost:8545".to_string()),
-            relayer_private_key: env::var("RELAYER_PRIVATE_KEY")?,
+            relayer_private_key: load_secret("RELAYER_PRIVATE_KEY", "RELAYER_PRIVATE_KEY_FILE")?,
             contract_settlement: env::var("CONTRACT_SETTLEMENT")?,
             contract_registry: env::var("CONTRACT_REGISTRY")?,
             db_path: env::var("RELAYER_DB_PATH").unwrap_or_else(|_| "./relayer-data".to_string()),
@@ -44,6 +59,8 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(30),
+            tls_cert_file,
+            tls_key_file,
         })
     }
 }

@@ -13,7 +13,6 @@ anyhow = "1.0.100"
 uuid = { version = "1.20.0", features = ["v4"] }
 futures-util = "0.3.32"
 ethers-signers = "2.0.14"
-lazy_static = "1.5.0"
 amp-telemetry = { path = "../amp-telemetry" }
 tracing = "0.1.44"
 tracing-subscriber = "0.3"
@@ -24,6 +23,9 @@ dashmap = "6.0"
 thiserror = "2"
 hex = "0.4"
 dotenv = "0.15"
+tokio-rustls = "0.24"
+rustls-pemfile = "1"
+rustls = "0.21"
 
 [build-dependencies]
 capnpc = "0.19"

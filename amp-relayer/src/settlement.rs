@@ -1,5 +1,6 @@
 use crate::error::RelayerError;
 use ethers::prelude::*;
+use ethers::types::transaction::eip2718::TypedTransaction;
 use serde::{Deserialize, Serialize};
 use sled::Db;
 use std::sync::Arc;
@@ -215,26 +216,49 @@ impl SettlementQueue {
             Arc::new(custodial_client),
         );
 
-        let (max_fee, _priority_fee) = self
+        // Estimate EIP-1559 fees: (max_fee_per_gas, max_priority_fee_per_gas)
+        let (max_fee, priority_fee) = self
             .gas_manager
             .estimate_eip1559_fees(&provider)
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;
 
-        let effective_max_fee = if settlement.retry_count > 0 {
-            let bump_factor =
-                (100 + self.gas_manager.bump_percent * settlement.retry_count as u64) as u128;
-            max_fee * U256::from(bump_factor) / U256::from(100)
+        // Apply gas bumping on retries using proper EIP-1559 fee fields
+        let (effective_max_fee, effective_priority_fee) = if settlement.retry_count > 0 {
+            self.gas_manager
+                .bump_fees(max_fee, priority_fee, settlement.retry_count)
         } else {
-            max_fee
+            (max_fee, priority_fee)
         };
 
-        let tx = settlement_custodial
-            .submit_async_result(match_id, async_result)
-            .nonce(nonce)
-            .gas_price(effective_max_fee);
+        // Build the contract call with proper EIP-1559 fields.
+        //
+        // IMPORTANT: We use `max_fee_per_gas` + `max_priority_fee_per_gas` instead of
+        // the legacy `gas_price`. Avalanche C-Chain supports EIP-1559 since the Avalanche
+        // Upgrade (Apricot). Using EIP-1559:
+        //   - Provides better fee estimation and prevents overpaying
+        //   - Allows priority fee to be set independently of max fee
+        //   - Ensures compatibility with future network upgrades
+        //   - Avoids the legacy gas price path which may be deprecated
+        let mut call = settlement_custodial.submit_async_result(match_id, async_result);
 
-        let pending = tx
+        if let TypedTransaction::Legacy(ref legacy) = call.tx {
+            let eip1559 = ethers::prelude::Eip1559TransactionRequest {
+                from: legacy.from,
+                to: legacy.to.clone(),
+                gas: legacy.gas,
+                max_fee_per_gas: Some(effective_max_fee),
+                max_priority_fee_per_gas: Some(effective_priority_fee),
+                value: legacy.value,
+                data: legacy.data.clone(),
+                nonce: Some(nonce),
+                chain_id: None,
+                access_list: Default::default(),
+            };
+            call.tx = TypedTransaction::Eip1559(eip1559);
+        }
+
+        let pending = call
             .send()
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;
