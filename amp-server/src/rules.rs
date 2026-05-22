@@ -57,7 +57,9 @@ pub fn evaluate_rules(
             entry_b,
             effective_skill_diff,
         );
-        hard_pass = true;
+        if !hard_pass {
+            hard_pass = true;
+        }
     }
 
     if total_weight > 0.0 {

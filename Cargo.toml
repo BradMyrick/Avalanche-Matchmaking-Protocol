@@ -4,6 +4,7 @@ members = [
     "amp-telemetry",
     "amp-server",
     "amp-relayer",
+    "amp-tls",
     "trace-viewer",
     "amp-sdk/rust",
     "amp-loadtest",

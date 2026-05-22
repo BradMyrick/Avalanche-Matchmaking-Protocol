@@ -20,9 +20,8 @@ futures = "0.3"
 tokio-util = { version = "0.7", features = ["compat", "rt"] }
 sled = "0.34"
 dashmap = "6.0"
-tokio-rustls = "0.24"
-rustls-pemfile = "1"
-rustls = "0.21"
+amp-tls = { path = "../amp-tls" }
+sha2 = "0.10"
 
 [build-dependencies]
 capnpc = "0.19"

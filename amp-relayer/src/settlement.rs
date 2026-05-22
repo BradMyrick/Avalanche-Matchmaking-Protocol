@@ -63,6 +63,13 @@ impl SettlementQueue {
     pub fn enqueue(&self, settlement: PendingSettlement) -> Result<(), RelayerError> {
         let cf = self.db.open_tree(CF_PENDING)?;
         let key = settlement.match_id.clone();
+        if cf.contains_key(&key)? {
+            warn!(
+                "Settlement for match {:?} already enqueued, skipping duplicate",
+                hex::encode(&key)
+            );
+            return Ok(());
+        }
         let value = bincode::serialize(&settlement)?;
         cf.insert(&key, &value as &[u8])?;
         info!("Enqueued settlement for match {:?}", hex::encode(&key));
@@ -130,8 +137,11 @@ impl SettlementQueue {
         let match_id_parsed = if settlement.match_id.len() == 32 {
             U256::from_big_endian(&settlement.match_id)
         } else {
-            let s = std::str::from_utf8(&settlement.match_id).unwrap_or("");
-            U256::from_dec_str(s).unwrap_or(U256::zero())
+            let s = std::str::from_utf8(&settlement.match_id)
+                .map_err(|e| RelayerError::Transaction(format!("invalid match_id UTF-8: {}", e)))?;
+            U256::from_dec_str(s).map_err(|e| {
+                RelayerError::Transaction(format!("invalid match_id '{}': {}", s, e))
+            })?
         };
 
         let result = self
@@ -145,6 +155,17 @@ impl SettlementQueue {
                 Ok(true)
             }
             Err(e) => {
+                nonce_manager.reset(
+                    &custodial::derive_custodial_signer(
+                        state.master_client.signer(),
+                        "settlement",
+                        settlement.outcome as u64,
+                        state.master_client.signer().chain_id(),
+                    )
+                    .map(|w| w.address())
+                    .unwrap_or_default(),
+                );
+
                 let mut retry = settlement.clone();
                 retry.retry_count += 1;
                 retry.last_attempt_at_ms = Some(
@@ -189,7 +210,8 @@ impl SettlementQueue {
             "settlement",
             game_id.as_u64(),
             chain_id,
-        );
+        )
+        .map_err(|e| RelayerError::Transaction(format!("custodial derivation failed: {}", e)))?;
         let custodial_addr = custodial_wallet.address();
 
         custodial::ensure_gas(custodial_addr, state).await?;
@@ -199,10 +221,14 @@ impl SettlementQueue {
 
         let nonce = nonce_manager.next_nonce(&custodial_addr, &provider).await?;
 
-        let mut t_hash = [0u8; 32];
-        if settlement.transcript_hash.len() == 32 {
-            t_hash.copy_from_slice(&settlement.transcript_hash);
+        if settlement.transcript_hash.len() != 32 {
+            return Err(RelayerError::Transaction(format!(
+                "invalid transcript_hash length: expected 32, got {}",
+                settlement.transcript_hash.len()
+            )));
         }
+        let mut t_hash = [0u8; 32];
+        t_hash.copy_from_slice(&settlement.transcript_hash);
 
         let async_result = AsyncResult {
             match_id,

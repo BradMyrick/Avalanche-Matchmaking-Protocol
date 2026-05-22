@@ -93,7 +93,11 @@ pub fn glicko2_update(
     let mut fa = f(a_iter);
     let mut fb = f(b_iter);
     for _ in 0..100 {
-        let c = a_iter + (a_iter - b_iter) * fa / (fb - fa);
+        let denom = fb - fa;
+        if denom.abs() < epsilon {
+            break;
+        }
+        let c = a_iter + (a_iter - b_iter) * fa / denom;
         let fc = f(c);
         if fc * fb < 0.0 {
             a_iter = b_iter;

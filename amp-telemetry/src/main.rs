@@ -5,6 +5,7 @@ use capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
 use futures_util::AsyncReadExt;
 use std::io::{BufWriter, Read, Write};
 use std::net::ToSocketAddrs;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::task::LocalSet;
@@ -38,16 +39,32 @@ impl telemetry_receiver::Server for TelemetryReceiverImpl {
         };
 
         let mut out_msg = capnp::message::Builder::new_default();
-        out_msg.set_root(event_reader).unwrap();
+        if out_msg.set_root(event_reader).is_err() {
+            return capnp::capability::Promise::ok(());
+        }
 
         let mut packed_buf: Vec<u8> = Vec::new();
-        serialize_packed::write_message(&mut packed_buf, &out_msg).unwrap();
+        if serialize_packed::write_message(&mut packed_buf, &out_msg).is_err() {
+            return capnp::capability::Promise::ok(());
+        }
 
         let len = packed_buf.len() as u32;
-        let mut writer = self.log_writer.lock().unwrap();
-        writer.write_all(&len.to_le_bytes()).unwrap();
-        writer.write_all(&packed_buf).unwrap();
-        writer.flush().unwrap();
+        let mut writer = self.log_writer.lock().unwrap_or_else(|e| e.into_inner());
+        if writer.write_all(&len.to_le_bytes()).is_err() {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "write failed".to_string(),
+            ));
+        }
+        if writer.write_all(&packed_buf).is_err() {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "write failed".to_string(),
+            ));
+        }
+        if writer.flush().is_err() {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "flush failed".to_string(),
+            ));
+        }
 
         let match_id = match event_reader.get_match_id() {
             Ok(data) => hex::encode(data),
@@ -87,6 +104,12 @@ fn export_json(path: &str) -> Result<()> {
             Err(e) => return Err(e.into()),
         }
         let len = u32::from_le_bytes(len_buf) as usize;
+        if len > 16 * 1024 * 1024 {
+            return Err(anyhow::anyhow!(
+                "corrupt log: record length {} exceeds 16 MiB",
+                len
+            ));
+        }
 
         let mut msg_buf = vec![0u8; len];
         file.read_exact(&mut msg_buf)?;
@@ -163,12 +186,24 @@ async fn main() -> Result<()> {
         addr, log_path
     );
 
+    let max_connections = std::env::var("TELEMETRY_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100usize);
+    let active_count = Arc::new(AtomicUsize::new(0));
+
     let local = LocalSet::new();
     local
         .run_until(async move {
             loop {
                 if let Ok((stream, _)) = listener.accept().await {
                     stream.set_nodelay(true).unwrap_or(());
+                    let current = active_count.load(Ordering::Relaxed);
+                    if current >= max_connections {
+                        continue;
+                    }
+                    active_count.fetch_add(1, Ordering::Relaxed);
+                    let counter = active_count.clone();
                     let (reader, writer) = stream.compat().split();
                     let network = twoparty::VatNetwork::new(
                         reader,
@@ -178,7 +213,10 @@ async fn main() -> Result<()> {
                     );
                     let rpc_system =
                         RpcSystem::new(Box::new(network), Some(receiver.clone().client));
-                    tokio::task::spawn_local(rpc_system);
+                    tokio::task::spawn_local(async move {
+                        let _ = rpc_system.await;
+                        counter.fetch_sub(1, Ordering::Relaxed);
+                    });
                 }
             }
         })

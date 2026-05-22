@@ -181,7 +181,7 @@ mod rate_limit {
 
     impl Drop for ConnectionGuard {
         fn drop(&mut self) {
-            self.0.current_connections.fetch_sub(1, Ordering::Relaxed);
+            self.0.current_connections.fetch_sub(1, Ordering::Release);
         }
     }
 
@@ -197,64 +197,38 @@ mod rate_limit {
             }
         }
 
-        pub fn check_and_acquire(self: &Arc<Self>, ip: IpAddr) -> Option<ConnectionGuard> {
-            let mut inner = self.inner.lock().unwrap();
+        pub fn check_ip(&self, ip: IpAddr) -> bool {
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             let now = Instant::now();
             let window = inner.ip_windows.entry(ip).or_default();
             window.retain(|t| now.duration_since(*t).as_secs() < 60);
             if window.len() >= self.max_per_ip_per_minute {
-                return None;
-            }
-            if self.current_connections.load(Ordering::Relaxed) >= self.max_concurrent {
-                return None;
+                return false;
             }
             window.push(now);
-            self.current_connections.fetch_add(1, Ordering::Relaxed);
-            Some(ConnectionGuard(self.clone()))
+            true
         }
-    }
-}
 
-mod tls {
-    use std::fs;
-    use std::io;
-    use std::sync::Arc;
-    use tokio_rustls::TlsAcceptor;
-
-    pub fn create_tls_acceptor(cert_path: &str, key_path: &str) -> io::Result<TlsAcceptor> {
-        let cert_pem = fs::read(cert_path)?;
-        let key_pem = fs::read(key_path)?;
-
-        let certs: Vec<rustls::Certificate> = rustls_pemfile::certs(&mut &cert_pem[..])?
-            .into_iter()
-            .map(rustls::Certificate)
-            .collect();
-
-        let key = rustls_pemfile::rsa_private_keys(&mut &key_pem[..])?
-            .into_iter()
-            .next()
-            .map(rustls::PrivateKey)
-            .or_else(|| {
-                rustls_pemfile::ec_private_keys(&mut &key_pem[..])
-                    .ok()
-                    .and_then(|keys| keys.into_iter().next().map(rustls::PrivateKey))
-            })
-            .or_else(|| {
-                rustls_pemfile::pkcs8_private_keys(&mut &key_pem[..])
-                    .ok()
-                    .and_then(|keys| keys.into_iter().next().map(rustls::PrivateKey))
-            })
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::NotFound, "no private key found in PEM")
-            })?;
-
-        let config = rustls::ServerConfig::builder()
-            .with_safe_defaults()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-        Ok(TlsAcceptor::from(Arc::new(config)))
+        pub fn try_acquire_slot(self: &Arc<Self>) -> Option<ConnectionGuard> {
+            loop {
+                let current = self.current_connections.load(Ordering::Acquire);
+                if current >= self.max_concurrent {
+                    return None;
+                }
+                if self
+                    .current_connections
+                    .compare_exchange_weak(
+                        current,
+                        current + 1,
+                        Ordering::AcqRel,
+                        Ordering::Relaxed,
+                    )
+                    .is_ok()
+                {
+                    return Some(ConnectionGuard(self.clone()));
+                }
+            }
+        }
     }
 }
 
@@ -294,7 +268,7 @@ async fn start_matchmaker_loop(
 
             let rulesets_snapshot = { state.rulesets.read().await.clone() };
 
-            let active_count = { state.active_matches.read().await.len() };
+            let mut active_count = { state.active_matches.read().await.len() };
 
             let mut q = queue.lock().await;
             if q.len() < 2 {
@@ -357,6 +331,7 @@ async fn start_matchmaker_loop(
                         .await
                         .insert(match_id, active.clone());
                     state.persist_match(&active.match_id, &active).await;
+                    active_count += 1;
                 }
             }
         }
@@ -390,17 +365,21 @@ fn start_cleanup_loop(
     });
 }
 
+struct SigningConfig {
+    wallet: LocalWallet,
+    chain_id: u64,
+    settlement_addr: Address,
+}
+
 async fn sign_match_outcome(
+    config: &SigningConfig,
     match_id: &str,
     outcome: u8,
     transcript_hash: &[u8],
 ) -> Result<Vec<u8>> {
-    let key = load_secret("VERIFIER_KEY", "VERIFIER_KEY_FILE")?;
-    let wallet: LocalWallet = key.parse()?;
-    let chain_id: u64 = env::var("AMP_CHAIN_ID")
-        .unwrap_or_else(|_| "43113".to_string())
-        .parse()?;
-    let settlement_addr: Address = env::var("AMP_SETTLEMENT_ADDRESS")?.parse()?;
+    let wallet = &config.wallet;
+    let chain_id = config.chain_id;
+    let settlement_addr = config.settlement_addr;
 
     let match_id_val = if let Ok(val) = U256::from_dec_str(match_id) {
         val
@@ -452,6 +431,12 @@ async fn notify_relayer_rpc(
 ) -> Result<()> {
     let relayer_rpc_addr =
         env::var("RELAYER_RPC_ADDR").unwrap_or_else(|_| "localhost:50052".to_string());
+    let api_key = match env::var("RELAYER_API_KEY_FILE") {
+        Ok(path) => std::fs::read_to_string(&path)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+        Err(_) => env::var("RELAYER_API_KEY").unwrap_or_default(),
+    };
     let stream = tokio::net::TcpStream::connect(&relayer_rpc_addr).await?;
     let (reader, writer) = stream.into_split();
     let network = twoparty::VatNetwork::new(
@@ -464,6 +449,16 @@ async fn notify_relayer_rpc(
     let client: relayer_capnp::relayer_service::Client =
         rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
     tokio::task::spawn_local(rpc_system);
+
+    if !api_key.is_empty() {
+        let mut auth_req = client.authenticate_request();
+        auth_req.get().set_api_key(api_key.as_bytes());
+        let auth_resp = auth_req.send().promise.await?;
+        if !auth_resp.get()?.get_ok() {
+            anyhow::bail!("relayer authentication failed: invalid API key");
+        }
+    }
+
     let mut req = client.submit_outcome_request();
     let match_id_val = if let Ok(val) = U256::from_dec_str(match_id) {
         let mut b = [0u8; 32];
@@ -514,6 +509,7 @@ struct MatchSessionImpl {
     players: Vec<String>,
     player_service: Arc<player_service::PlayerServiceImpl>,
     state: AppState,
+    signing_config: Arc<SigningConfig>,
 }
 
 impl match_session::Server for MatchSessionImpl {
@@ -533,9 +529,10 @@ impl match_session::Server for MatchSessionImpl {
         let p_ids = self.players.clone();
         let p_service = self.player_service.clone();
         let state = self.state.clone();
+        let signing_config = self.signing_config.clone();
 
         Promise::from_future(async move {
-            match sign_match_outcome(&m_id, outcome_val, &r_hash).await {
+            match sign_match_outcome(&signing_config, &m_id, outcome_val, &r_hash).await {
                 Ok(sig) => {
                     results.get().set_signature(&sig);
 
@@ -551,12 +548,18 @@ impl match_session::Server for MatchSessionImpl {
                         };
                         let score2 = 1.0 - score1;
 
-                        let _ = p_service
+                        if let Err(e) = p_service
                             .record_match_result(p1, p2, &g_id, score1, 0)
-                            .await;
-                        let _ = p_service
+                            .await
+                        {
+                            warn!("Failed to update MMR for {}: {}", p1, e);
+                        }
+                        if let Err(e) = p_service
                             .record_match_result(p2, p1, &g_id, score2, 0)
-                            .await;
+                            .await
+                        {
+                            warn!("Failed to update MMR for {}: {}", p2, e);
+                        }
                     }
 
                     {
@@ -665,6 +668,7 @@ struct UserSessionImpl {
     state: AppState,
     player_service: Arc<player_service::PlayerServiceImpl>,
     match_queue: MatchQueue,
+    signing_config: Arc<SigningConfig>,
 }
 
 impl user_session::Server for UserSessionImpl {
@@ -679,6 +683,7 @@ impl user_session::Server for UserSessionImpl {
         let app_state = self.state.clone();
         let p_service = self.player_service.clone();
         let queue = self.match_queue.clone();
+        let signing_config = self.signing_config.clone();
 
         let ruleset_id_bytes = req.get_rule_set_id().unwrap_or(&[]);
         let ruleset_id = String::from_utf8_lossy(ruleset_id_bytes).to_string();
@@ -746,6 +751,7 @@ impl user_session::Server for UserSessionImpl {
                         .collect(),
                     player_service: p_service,
                     state: app_state,
+                    signing_config: signing_config.clone(),
                 });
                 results.get().set_session(session);
                 Ok(())
@@ -765,17 +771,25 @@ impl user_session::Server for UserSessionImpl {
         let p_service = self.player_service.clone();
         let _game_id = self.game_id;
         let player_id = self.player_id.clone();
+        let signing_config = self.signing_config.clone();
 
         Promise::from_future(async move {
             let matches = state.active_matches.read().await;
             match matches.get(&match_id) {
                 Some(m) if !m.settled => {
+                    if !m.players.contains(&player_id) {
+                        return Err(::capnp::Error::failed(format!(
+                            "Player {} is not a participant in match {}",
+                            player_id, match_id
+                        )));
+                    }
                     let session = capnp_rpc::new_client(MatchSessionImpl {
                         match_id: match_id.clone(),
                         game_id: m.game_id.clone(),
                         players: m.players.clone(),
                         player_service: p_service,
                         state: state.clone(),
+                        signing_config: signing_config.clone(),
                     });
                     drop(matches);
                     results.get().set_session(session);
@@ -800,6 +814,7 @@ struct GameSessionServiceImpl {
     player_service: Arc<player_service::PlayerServiceImpl>,
     auth_service: Arc<auth::AuthService>,
     match_queue: MatchQueue,
+    signing_config: Arc<SigningConfig>,
 }
 
 impl game_session_service::Server for GameSessionServiceImpl {
@@ -833,6 +848,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
         let p_service = self.player_service.clone();
         let auth = self.auth_service.clone();
         let queue = self.match_queue.clone();
+        let signing_config = self.signing_config.clone();
 
         Promise::from_future(async move {
             match auth
@@ -859,6 +875,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
                         state,
                         player_service: p_service,
                         match_queue: queue,
+                        signing_config,
                     });
                     results.get().set_session(session);
                     Ok(())
@@ -889,7 +906,7 @@ async fn main() -> Result<()> {
     let persistence_result = persistence::Persistence::open(&db_path);
     let persist = match persistence_result {
         Ok(p) => {
-            info!("RocksDB persistence layer initialized");
+            info!("Sled persistence layer initialized");
             Some(p)
         }
         Err(e) => {
@@ -910,6 +927,14 @@ async fn main() -> Result<()> {
     let cancel = tokio_util::sync::CancellationToken::new();
     let cancel_clone = cancel.clone();
 
+    let signing_config = Arc::new(SigningConfig {
+        wallet: load_secret("VERIFIER_KEY", "VERIFIER_KEY_FILE")?.parse()?,
+        chain_id: env::var("AMP_CHAIN_ID")
+            .unwrap_or_else(|_| "43113".to_string())
+            .parse()?,
+        settlement_addr: env::var("AMP_SETTLEMENT_ADDRESS")?.parse()?,
+    });
+
     start_matchmaker_loop(state.clone(), match_queue.clone(), cancel.clone()).await;
     start_cleanup_loop(state.clone(), auth_service.clone(), cancel.clone());
 
@@ -918,14 +943,18 @@ async fn main() -> Result<()> {
         env::var("AMP_TLS_KEY_FILE").ok(),
     ) {
         (Some(cert_path), Some(key_path)) => {
-            match tls::create_tls_acceptor(&cert_path, &key_path) {
+            match amp_tls::create_tls_acceptor(&cert_path, &key_path) {
                 Ok(acceptor) => {
                     info!("TLS enabled (cert={}, key={})", cert_path, key_path);
                     Some(acceptor)
                 }
                 Err(e) => {
-                    warn!("TLS configuration failed, falling back to plain TCP: {}", e);
-                    None
+                    anyhow::bail!(
+                        "TLS configuration failed (cert={}, key={}): {}. Fix the certificates or remove AMP_TLS_CERT_FILE/AMP_TLS_KEY_FILE to use plain TCP.",
+                        cert_path,
+                        key_path,
+                        e
+                    );
                 }
             }
         }
@@ -975,7 +1004,7 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     info!("Shutdown complete.");
                 }
-                _ = accept_loop(listener, state, p_service, auth_service, match_queue, tls_acceptor, rate_limiter) => {}
+                _ = accept_loop(listener, state, p_service, auth_service, match_queue, tls_acceptor, rate_limiter, signing_config) => {}
             }
         })
         .await;
@@ -983,14 +1012,16 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn accept_loop(
     listener: tokio::net::TcpListener,
     state: AppState,
     p_service: Arc<player_service::PlayerServiceImpl>,
     auth_service: Arc<auth::AuthService>,
     match_queue: MatchQueue,
-    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    tls_acceptor: Option<amp_tls::TlsAcceptor>,
     rate_limiter: Arc<rate_limit::ConnectionRateLimiter>,
+    signing_config: Arc<SigningConfig>,
 ) {
     loop {
         let (stream, peer) = match listener.accept().await {
@@ -1002,14 +1033,11 @@ async fn accept_loop(
         };
 
         let ip = peer.ip();
-        let _guard = match rate_limiter.check_and_acquire(ip) {
-            Some(g) => g,
-            None => {
-                warn!("Rate limit exceeded for {}", ip);
-                drop(stream);
-                continue;
-            }
-        };
+        if !rate_limiter.check_ip(ip) {
+            warn!("Rate limit exceeded for {}", ip);
+            drop(stream);
+            continue;
+        }
 
         stream.set_nodelay(true).unwrap_or(());
         let s_clone = state.clone();
@@ -1017,14 +1045,26 @@ async fn accept_loop(
         let auth_clone = auth_service.clone();
         let q_clone = match_queue.clone();
         let acceptor = tls_acceptor.clone();
-        let _guard = _guard;
+        let limiter = rate_limiter.clone();
+        let sc_clone = signing_config.clone();
 
         tokio::task::spawn_local(async move {
+            let _guard = match limiter.try_acquire_slot() {
+                Some(g) => g,
+                None => {
+                    warn!("Max concurrent connections reached, rejecting {}", ip);
+                    return;
+                }
+            };
+
             if let Some(ref acc) = acceptor {
                 match acc.accept(stream).await {
                     Ok(tls_stream) => {
                         let (reader, writer) = tokio::io::split(tls_stream);
-                        serve_rpc(reader, writer, s_clone, ps_clone, auth_clone, q_clone).await;
+                        serve_rpc(
+                            reader, writer, s_clone, ps_clone, auth_clone, q_clone, sc_clone,
+                        )
+                        .await;
                     }
                     Err(e) => {
                         error!("TLS handshake failed for {}: {}", ip, e);
@@ -1032,7 +1072,10 @@ async fn accept_loop(
                 }
             } else {
                 let (reader, writer) = stream.into_split();
-                serve_rpc(reader, writer, s_clone, ps_clone, auth_clone, q_clone).await;
+                serve_rpc(
+                    reader, writer, s_clone, ps_clone, auth_clone, q_clone, sc_clone,
+                )
+                .await;
             }
         });
     }
@@ -1045,6 +1088,7 @@ async fn serve_rpc<R, W>(
     p_service: Arc<player_service::PlayerServiceImpl>,
     auth_service: Arc<auth::AuthService>,
     match_queue: MatchQueue,
+    signing_config: Arc<SigningConfig>,
 ) where
     R: tokio::io::AsyncRead + Unpin + 'static,
     W: tokio::io::AsyncWrite + Unpin + 'static,
@@ -1062,6 +1106,7 @@ async fn serve_rpc<R, W>(
         player_service: p_service,
         auth_service,
         match_queue,
+        signing_config,
     });
     let rpc_system = RpcSystem::new(Box::new(network), Some(service.client));
     if let Err(e) = rpc_system.await {

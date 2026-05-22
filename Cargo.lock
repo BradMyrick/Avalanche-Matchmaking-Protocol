@@ -7,6 +7,7 @@ name = "AMP-Server"
 version = "0.1.0"
 dependencies = [
  "amp-telemetry",
+ "amp-tls",
  "anyhow",
  "bincode",
  "capnp",
@@ -18,13 +19,10 @@ dependencies = [
  "ethers-signers",
  "futures-util",
  "hex",
- "rustls",
- "rustls-pemfile",
  "serde",
  "sled",
  "thiserror 2.0.18",
  "tokio",
- "tokio-rustls",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
@@ -95,6 +93,7 @@ dependencies = [
 name = "amp-relayer"
 version = "0.1.0"
 dependencies = [
+ "amp-tls",
  "anyhow",
  "bincode",
  "capnp",
@@ -105,13 +104,11 @@ dependencies = [
  "ethers",
  "futures",
  "hex",
- "rustls",
- "rustls-pemfile",
  "serde",
+ "sha2",
  "sled",
  "thiserror 2.0.18",
  "tokio",
- "tokio-rustls",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
@@ -130,7 +127,7 @@ dependencies = [
  "hex",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
@@ -150,6 +147,15 @@ dependencies = [
  "hex",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "amp-tls"
+version = "0.1.0"
+dependencies = [
+ "rustls",
+ "rustls-pemfile",
+ "tokio-rustls",
 ]
 
 [[package]]

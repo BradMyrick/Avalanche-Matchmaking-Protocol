@@ -82,13 +82,6 @@ func (c *AMPClient) RequestMatch(ctx context.Context, req MatchRequest) (*MatchA
 		},
 		ArgsSize: capnp.ObjectSize{PointerCount: 1},
 		PlaceArgs: func(s capnp.Struct) error {
-			msg, seg, err := capnp.NewMessage(capnp.SingleSegment(nil))
-			if err != nil {
-				return err
-			}
-			_ = msg
-			_ = seg
-
 			return s.SetData(0, req.GameID)
 		},
 	}
@@ -137,14 +130,7 @@ func (c *AMPClient) SubmitOutcome(ctx context.Context, matchSession *MatchSessio
 		},
 		ArgsSize: capnp.ObjectSize{PointerCount: 1},
 		PlaceArgs: func(s capnp.Struct) error {
-			msg, seg, err := capnp.NewMessage(capnp.SingleSegment(nil))
-			if err != nil {
-				return err
-			}
-			_ = msg
-			_ = seg
-			_ = outcome
-			return nil
+			return s.SetData(0, outcome.Data)
 		},
 	}
 

@@ -4,7 +4,15 @@ using Go = import "go.capnp";
 $Go.package("generated");
 $Go.import("amp-sdk/go/generated");
 
+using Rust = import "rust.capnp";
+$Rust.parentModule("relayer_capnp");
+
 interface RelayerService {
+    authenticate @3 (apiKey :Data) -> (ok :Bool);
+    # Authenticate the connection with an API key.
+    # Must be called before submitOutcome or getCustodialAddress.
+    # authenticate(apiKey)
+
     getGameAdmin @0 (gameId :UInt64) -> (admin :Data);
     # Returns the on-chain admin address for a given game.
     # getGameAdmin(gameId)

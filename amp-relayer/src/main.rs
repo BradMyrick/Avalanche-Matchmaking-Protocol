@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -50,9 +51,33 @@ pub struct RelayerState {
 struct RelayerImpl {
     state: RelayerState,
     queue: Arc<settlement::SettlementQueue>,
+    authenticated: Cell<bool>,
+    api_keys: Arc<std::collections::HashSet<String>>,
 }
 
 impl relayer_capnp::relayer_service::Server for RelayerImpl {
+    fn authenticate(
+        &mut self,
+        params: relayer_capnp::relayer_service::AuthenticateParams,
+        mut results: relayer_capnp::relayer_service::AuthenticateResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let params_reader = capnp_rpc::pry!(params.get());
+        let api_key_bytes = capnp_rpc::pry!(params_reader.get_api_key());
+        let api_key = capnp_rpc::pry!(std::str::from_utf8(api_key_bytes));
+
+        let hashed = config::hash_api_key(api_key);
+        let ok = self.api_keys.contains(&hashed);
+        if ok {
+            self.authenticated.set(true);
+            info!("Relayer client authenticated successfully");
+        } else {
+            tracing::warn!("Authentication failed: invalid API key");
+        }
+
+        results.get().set_ok(ok);
+        capnp::capability::Promise::ok(())
+    }
+
     fn get_game_admin(
         &mut self,
         params: relayer_capnp::relayer_service::GetGameAdminParams,
@@ -80,13 +105,22 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
         params: relayer_capnp::relayer_service::GetCustodialAddressParams,
         mut results: relayer_capnp::relayer_service::GetCustodialAddressResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
+        if !self.authenticated.get() && !self.api_keys.is_empty() {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "unauthorized: call authenticate() first".to_string(),
+            ));
+        }
+
         let game_id = capnp_rpc::pry!(params.get()).get_game_id();
         let chain_id = self.state.master_client.signer().chain_id();
-        let wallet = custodial::derive_custodial_signer(
-            self.state.master_client.signer(),
-            "settlement",
-            game_id,
-            chain_id,
+        let wallet = capnp_rpc::pry!(
+            custodial::derive_custodial_signer(
+                self.state.master_client.signer(),
+                "settlement",
+                game_id,
+                chain_id,
+            )
+            .map_err(|e| capnp::Error::failed(format!("custodial derivation failed: {}", e)))
         );
 
         results.get().set_address(wallet.address().as_bytes());
@@ -98,6 +132,12 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
         params: relayer_capnp::relayer_service::SubmitOutcomeParams,
         mut results: relayer_capnp::relayer_service::SubmitOutcomeResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
+        if !self.authenticated.get() && !self.api_keys.is_empty() {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "unauthorized: call authenticate() first".to_string(),
+            ));
+        }
+
         let params_reader = capnp_rpc::pry!(params.get());
         let match_id_bytes = capnp_rpc::pry!(params_reader.get_match_id()).to_vec();
         let outcome = params_reader.get_outcome();
@@ -156,6 +196,16 @@ async fn run_cli_mode(args: Vec<String>) -> Result<()> {
         local
             .run_until(async move {
                 tokio::task::spawn_local(rpc_system);
+
+                if let Ok(api_key) = env::var("RELAYER_API_KEY") {
+                    let mut auth_req = client.authenticate_request();
+                    auth_req.get().set_api_key(api_key.as_bytes());
+                    let auth_resp = auth_req.send().promise.await?;
+                    if !auth_resp.get()?.get_ok() {
+                        anyhow::bail!("authentication failed: invalid API key");
+                    }
+                }
+
                 if args[1] == "query-custodial" {
                     let mut req = client.get_custodial_address_request();
                     req.get().set_game_id(game_id);
@@ -252,27 +302,28 @@ async fn main() -> Result<()> {
     let queue_processor = queue.clone();
     let cfg_processor = cfg.clone();
 
-    let relayer_impl = RelayerImpl {
-        state,
-        queue: queue.clone(),
-    };
-    let relayer_client: relayer_capnp::relayer_service::Client =
-        capnp_rpc::new_client(relayer_impl);
+    let api_keys = Arc::new(cfg.api_keys.clone());
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("AMP Relayer (Cap'n Proto RPC) listening on {}", addr);
 
     let tls_acceptor = match (&cfg.tls_cert_file, &cfg.tls_key_file) {
-        (Some(cert_path), Some(key_path)) => match create_tls_acceptor(cert_path, key_path) {
-            Ok(acceptor) => {
-                info!("TLS enabled (cert={}, key={})", cert_path, key_path);
-                Some(acceptor)
+        (Some(cert_path), Some(key_path)) => {
+            match amp_tls::create_tls_acceptor(cert_path, key_path) {
+                Ok(acceptor) => {
+                    info!("TLS enabled (cert={}, key={})", cert_path, key_path);
+                    Some(acceptor)
+                }
+                Err(e) => {
+                    anyhow::bail!(
+                        "TLS configuration failed (cert={}, key={}): {}. Fix the certificates or remove RELAYER_TLS_CERT_FILE/RELAYER_TLS_KEY_FILE to use plain TCP.",
+                        cert_path,
+                        key_path,
+                        e
+                    );
+                }
             }
-            Err(e) => {
-                tracing::warn!("TLS configuration failed, falling back to plain TCP: {}", e);
-                None
-            }
-        },
+        }
         _ => {
             info!(
                 "TLS not configured (set RELAYER_TLS_CERT_FILE and RELAYER_TLS_KEY_FILE to enable)"
@@ -298,7 +349,7 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     info!("Shutdown complete.");
                 }
-                result = accept_loop(listener, relayer_client, tls_acceptor) => {
+                result = accept_loop(listener, state.clone(), queue.clone(), api_keys.clone(), tls_acceptor) => {
                     result?;
                 }
             }
@@ -311,17 +362,30 @@ async fn main() -> Result<()> {
 
 async fn accept_loop(
     listener: tokio::net::TcpListener,
-    relayer_client: relayer_capnp::relayer_service::Client,
-    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    state: RelayerState,
+    queue: Arc<settlement::SettlementQueue>,
+    api_keys: Arc<std::collections::HashSet<String>>,
+    tls_acceptor: Option<amp_tls::TlsAcceptor>,
 ) -> Result<()> {
     loop {
         let (stream, peer) = listener.accept().await?;
         stream.set_nodelay(true)?;
 
-        let client = relayer_client.clone();
+        let state = state.clone();
+        let queue = queue.clone();
+        let api_keys = api_keys.clone();
         let acceptor = tls_acceptor.clone();
 
         tokio::task::spawn_local(async move {
+            let relayer_impl = RelayerImpl {
+                state,
+                queue,
+                authenticated: Cell::new(false),
+                api_keys,
+            };
+            let client: relayer_capnp::relayer_service::Client =
+                capnp_rpc::new_client(relayer_impl);
+
             if let Some(ref acc) = acceptor {
                 match acc.accept(stream).await {
                     Ok(tls_stream) => {
@@ -353,45 +417,4 @@ where
     );
     let rpc_system = RpcSystem::new(Box::new(network), Some(relayer_client.client));
     let _ = rpc_system.await;
-}
-
-fn create_tls_acceptor(
-    cert_path: &str,
-    key_path: &str,
-) -> std::io::Result<tokio_rustls::TlsAcceptor> {
-    use std::sync::Arc;
-
-    let cert_pem = std::fs::read(cert_path)?;
-    let key_pem = std::fs::read(key_path)?;
-
-    let certs: Vec<rustls::Certificate> = rustls_pemfile::certs(&mut &cert_pem[..])?
-        .into_iter()
-        .map(rustls::Certificate)
-        .collect();
-
-    let key = rustls_pemfile::rsa_private_keys(&mut &key_pem[..])?
-        .into_iter()
-        .next()
-        .map(rustls::PrivateKey)
-        .or_else(|| {
-            rustls_pemfile::ec_private_keys(&mut &key_pem[..])
-                .ok()
-                .and_then(|keys| keys.into_iter().next().map(rustls::PrivateKey))
-        })
-        .or_else(|| {
-            rustls_pemfile::pkcs8_private_keys(&mut &key_pem[..])
-                .ok()
-                .and_then(|keys| keys.into_iter().next().map(rustls::PrivateKey))
-        })
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "no private key found in PEM")
-        })?;
-
-    let config = rustls::ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-    Ok(tokio_rustls::TlsAcceptor::from(Arc::new(config)))
 }

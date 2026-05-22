@@ -77,14 +77,15 @@ Contracts use OpenZeppelin v5.6.1 with `Ownable2Step`, `Pausable`, and `ERC2771C
 cargo build --release
 
 # Run the verifier
-AMP_LISTEN_ADDR=0.0.0.0:5555 \
-AMP_REGISTRY_ADDR=0x... \
-AMP_VERIFIER_KEY=0x... \
-./target/release/amp-server
+AMP_ADDR=0.0.0.0:5555 \
+CONTRACT_REGISTRY=0x... \
+VERIFIER_KEY=0x... \
+./target/release/AMP-Server
 
 # Run the relayer
-AMP_RELAYER_REGISTRY=0x... \
-AMP_RELAYER_KEY=0x... \
+CONTRACT_REGISTRY=0x... \
+CONTRACT_SETTLEMENT=0x... \
+RELAYER_PRIVATE_KEY=0x... \
 ./target/release/amp-relayer
 ```
 

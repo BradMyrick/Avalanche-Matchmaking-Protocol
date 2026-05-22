@@ -1,0 +1,9 @@
+[package]
+name = "amp-tls"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio-rustls = "0.24"
+rustls-pemfile = "1"
+rustls = "0.21"

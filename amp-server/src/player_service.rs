@@ -232,6 +232,12 @@ impl player_profile_capnp::player_profile_service::Server for PlayerServiceImpl 
         let opponent_id = String::from_utf8_lossy(pry!(p.get_opponent_id())).to_string();
         let game_id = String::from_utf8_lossy(pry!(p.get_game_id())).to_string();
         let score = p.get_score();
+        if !(0.0..=1.0).contains(&score) {
+            return Promise::err(::capnp::Error::failed(format!(
+                "score must be between 0.0 and 1.0, got {}",
+                score
+            )));
+        }
         let play_time_ms = p.get_play_time_ms();
 
         let state = self.state.clone();

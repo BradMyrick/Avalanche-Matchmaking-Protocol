@@ -93,7 +93,7 @@ pub fn derive_custodial_signer(
     purpose: &str,
     game_id: u64,
     chain_id: u64,
-) -> LocalWallet {
+) -> anyhow::Result<LocalWallet> {
     let master_bytes = master_key.signer().to_bytes();
 
     // Build info binding for HKDF-Expand: purpose || 0x00 || gameId (big-endian)
@@ -110,9 +110,9 @@ pub fn derive_custodial_signer(
     let mut derived_key = [0u8; 32];
     derived_key.copy_from_slice(&derived_key_bytes);
 
-    LocalWallet::from_bytes(&derived_key)
-        .unwrap()
-        .with_chain_id(chain_id)
+    Ok(LocalWallet::from_bytes(&derived_key)
+        .map_err(|e| anyhow::anyhow!("HKDF derived invalid key: {}", e))?
+        .with_chain_id(chain_id))
 }
 
 /// Ensure the custodial wallet has sufficient gas to submit transactions.
@@ -143,15 +143,16 @@ pub async fn ensure_gas(custodial_addr: Address, state: &RelayerState) -> Result
         );
         let tx = TransactionRequest::new().to(custodial_addr).value(topup);
 
-        state
+        let result = state
             .master_client
             .send_transaction(tx, None)
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?
             .await
-            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
-        info!("Top-up successful for {}", custodial_addr);
+            .map_err(|e| RelayerError::Transaction(e.to_string()));
         state.pending_topups.remove(&custodial_addr);
+        info!("Top-up successful for {}", custodial_addr);
+        result?;
     }
 
     Ok(())
@@ -170,31 +171,31 @@ mod tests {
     #[test]
     fn test_deterministic_derivation() {
         let master = make_test_wallet();
-        let a = derive_custodial_signer(&master, "settlement", 1, 43114);
-        let b = derive_custodial_signer(&master, "settlement", 1, 43114);
+        let a = derive_custodial_signer(&master, "settlement", 1, 43114).unwrap();
+        let b = derive_custodial_signer(&master, "settlement", 1, 43114).unwrap();
         assert_eq!(a.address(), b.address());
     }
 
     #[test]
     fn test_different_games_different_keys() {
         let master = make_test_wallet();
-        let a = derive_custodial_signer(&master, "settlement", 1, 43114);
-        let b = derive_custodial_signer(&master, "settlement", 2, 43114);
+        let a = derive_custodial_signer(&master, "settlement", 1, 43114).unwrap();
+        let b = derive_custodial_signer(&master, "settlement", 2, 43114).unwrap();
         assert_ne!(a.address(), b.address());
     }
 
     #[test]
     fn test_different_purposes_different_keys() {
         let master = make_test_wallet();
-        let a = derive_custodial_signer(&master, "settlement", 1, 43114);
-        let b = derive_custodial_signer(&master, "gas-fund", 1, 43114);
+        let a = derive_custodial_signer(&master, "settlement", 1, 43114).unwrap();
+        let b = derive_custodial_signer(&master, "gas-fund", 1, 43114).unwrap();
         assert_ne!(a.address(), b.address());
     }
 
     #[test]
     fn test_derived_key_is_valid() {
         let master = make_test_wallet();
-        let derived = derive_custodial_signer(&master, "settlement", 42, 43114);
+        let derived = derive_custodial_signer(&master, "settlement", 42, 43114).unwrap();
         assert_ne!(derived.address(), master.address());
         assert_eq!(derived.chain_id(), 43114);
     }
@@ -242,7 +243,7 @@ mod tests {
         preimage.extend_from_slice(&master_bytes);
         let raw_hash = ethers::utils::keccak256(preimage);
 
-        let derived = derive_custodial_signer(&master, "settlement", 1, 43114);
+        let derived = derive_custodial_signer(&master, "settlement", 1, 43114).unwrap();
         let derived_bytes = derived.signer().to_bytes();
 
         assert_ne!(

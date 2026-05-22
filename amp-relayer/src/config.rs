@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::env;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +16,7 @@ pub struct Config {
     pub gas_bump_timeout_secs: u64,
     pub tls_cert_file: Option<String>,
     pub tls_key_file: Option<String>,
+    pub api_keys: HashSet<String>,
 }
 
 fn load_secret(env_var: &str, file_env_var: &str) -> anyhow::Result<String> {
@@ -61,6 +63,44 @@ impl Config {
                 .unwrap_or(30),
             tls_cert_file,
             tls_key_file,
+            api_keys: load_api_keys(),
         })
     }
+}
+
+fn load_api_keys() -> HashSet<String> {
+    let mut keys = HashSet::new();
+
+    if let Ok(key) = env::var("RELAYER_API_KEY") {
+        keys.insert(hash_api_key(&key));
+    }
+
+    if let Ok(path) = env::var("RELAYER_API_KEY_FILE")
+        && let Ok(contents) = std::fs::read_to_string(&path)
+    {
+        for line in contents.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                keys.insert(hash_api_key(trimmed));
+            }
+        }
+    }
+
+    if let Ok(extra) = env::var("RELAYER_API_KEYS") {
+        for key in extra.split(',') {
+            let trimmed = key.trim();
+            if !trimmed.is_empty() {
+                keys.insert(hash_api_key(trimmed));
+            }
+        }
+    }
+
+    keys
+}
+
+pub fn hash_api_key(key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
