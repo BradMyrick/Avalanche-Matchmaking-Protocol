@@ -156,7 +156,7 @@ pub mod security_capnp {
 
 use service_capnp::*;
 
-type MatchQueue = Arc<tokio::sync::Mutex<match_queue::IndexedQueue>>;
+type MatchQueue = tokio::sync::mpsc::Sender<QueueEntry>;
 
 mod rate_limit {
     use std::collections::HashMap;
@@ -244,15 +244,17 @@ fn load_secret(env_var: &str, file_env_var: &str) -> Result<String> {
 
 async fn start_matchmaker_loop(
     state: AppState,
-    queue: MatchQueue,
+    mut rx: tokio::sync::mpsc::Receiver<QueueEntry>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
-    tokio::spawn(async move {
+    tokio::task::spawn_local(async move {
+        let mut q = match_queue::IndexedQueue::new();
+        let mut rulesets_cache = arc_swap::cache::Cache::new(state.rulesets.clone());
+        let mut active_matches_cache = arc_swap::cache::Cache::new(state.active_matches.clone());
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => {
                     info!("Matchmaker loop shutting down, draining queue...");
-                    let mut q = queue.lock().await;
                     for entry in q.drain_all() {
                         let _ = entry.sender.send(MatchFoundPayload {
                             match_id: String::new(),
@@ -266,11 +268,13 @@ async fn start_matchmaker_loop(
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {}
             }
 
-            let rulesets_snapshot = { state.rulesets.read().await.clone() };
+            while let Ok(entry) = rx.try_recv() {
+                q.push(entry);
+            }
 
-            let mut active_count = { state.active_matches.read().await.len() };
+            let rulesets_snapshot = rulesets_cache.load();
+            let mut active_count = active_matches_cache.load().len();
 
-            let mut q = queue.lock().await;
             if q.len() < 2 {
                 continue;
             }
@@ -325,11 +329,7 @@ async fn start_matchmaker_loop(
                         settled_at_ms: None,
                         expires_at_ms: Some(now + state::MATCH_TTL_MS),
                     };
-                    state
-                        .active_matches
-                        .write()
-                        .await
-                        .insert(match_id, active.clone());
+                    state.insert_active_match(match_id, active.clone());
                     state.persist_match(&active.match_id, &active).await;
                     active_count += 1;
                 }
@@ -372,12 +372,11 @@ struct SigningConfig {
 }
 
 async fn sign_match_outcome(
-    config: &SigningConfig,
+    config: Arc<SigningConfig>,
     match_id: &str,
     outcome: u8,
     transcript_hash: &[u8],
 ) -> Result<Vec<u8>> {
-    let wallet = &config.wallet;
     let chain_id = config.chain_id;
     let settlement_addr = config.settlement_addr;
 
@@ -419,88 +418,167 @@ async fn sign_match_outcome(
     digest_input.extend_from_slice(&struct_hash);
     let digest = H256::from_slice(&ethers_core::utils::keccak256(&digest_input));
 
-    let signature = wallet.sign_hash(digest)?;
+    let signature = tokio::task::spawn_blocking(move || {
+        config.wallet.sign_hash(digest)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Spawn blocking failed: {}", e))??;
+    
     Ok(signature.to_vec())
 }
 
-async fn notify_relayer_rpc(
-    match_id: &str,
+pub struct RelayerTask {
+    match_id: String,
     outcome: u8,
-    transcript_hash: &[u8],
-    signature: &[u8],
-) -> Result<()> {
-    let relayer_rpc_addr =
-        env::var("RELAYER_RPC_ADDR").unwrap_or_else(|_| "localhost:50052".to_string());
-    let api_key = match env::var("RELAYER_API_KEY_FILE") {
-        Ok(path) => std::fs::read_to_string(&path)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default(),
-        Err(_) => env::var("RELAYER_API_KEY").unwrap_or_default(),
-    };
-    let stream = tokio::net::TcpStream::connect(&relayer_rpc_addr).await?;
-    let (reader, writer) = stream.into_split();
-    let network = twoparty::VatNetwork::new(
-        reader.compat(),
-        writer.compat_write(),
-        rpc_twoparty_capnp::Side::Client,
-        Default::default(),
-    );
-    let mut rpc_system = RpcSystem::new(Box::new(network), None);
-    let client: relayer_capnp::relayer_service::Client =
-        rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-    tokio::task::spawn_local(rpc_system);
-
-    if !api_key.is_empty() {
-        let mut auth_req = client.authenticate_request();
-        auth_req.get().set_api_key(api_key.as_bytes());
-        let auth_resp = auth_req.send().promise.await?;
-        if !auth_resp.get()?.get_ok() {
-            anyhow::bail!("relayer authentication failed: invalid API key");
-        }
-    }
-
-    let mut req = client.submit_outcome_request();
-    let match_id_val = if let Ok(val) = U256::from_dec_str(match_id) {
-        let mut b = [0u8; 32];
-        val.to_big_endian(&mut b);
-        b.to_vec()
-    } else {
-        match_id.as_bytes().to_vec()
-    };
-    req.get().set_match_id(&match_id_val);
-    req.get().set_outcome(outcome);
-    req.get().set_transcript_hash(transcript_hash);
-    req.get().set_signature(signature);
-    let _ = req.send().promise.await?;
-    info!("Notified relayer for match {}", match_id);
-    Ok(())
+    transcript_hash: Vec<u8>,
+    signature: Vec<u8>,
 }
 
-async fn forward_telemetry(event: &[u8]) {
-    let telemetry_addr =
-        env::var("TELEMETRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4317".to_string());
-    if let Ok(stream) = tokio::net::TcpStream::connect(&telemetry_addr).await {
-        let (reader, writer) = stream.into_split();
-        let network = twoparty::VatNetwork::new(
-            reader.compat(),
-            writer.compat_write(),
-            rpc_twoparty_capnp::Side::Client,
-            Default::default(),
-        );
-        let mut rpc_system = RpcSystem::new(Box::new(network), None);
-        let client: amp_telemetry_capnp::telemetry_receiver::Client =
-            rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-        tokio::task::spawn_local(rpc_system);
-        let mut req = client.log_event_request();
-        let mut evt = req.get().init_event();
-        evt.set_event_data(event);
-        let _ = req.send().promise.await;
-    } else {
-        warn!(
-            "Failed to connect to telemetry service at {}",
-            telemetry_addr
-        );
-    }
+async fn start_relayer_worker(
+    mut rx: tokio::sync::mpsc::Receiver<RelayerTask>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    tokio::task::spawn_local(async move {
+        let relayer_rpc_addr =
+            env::var("RELAYER_RPC_ADDR").unwrap_or_else(|_| "localhost:50052".to_string());
+        let api_key = match env::var("RELAYER_API_KEY_FILE") {
+            Ok(path) => std::fs::read_to_string(&path)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default(),
+            Err(_) => env::var("RELAYER_API_KEY").unwrap_or_default(),
+        };
+
+        let mut client_opt: Option<relayer_capnp::relayer_service::Client> = None;
+
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                task_opt = rx.recv() => {
+                    let task = match task_opt {
+                        Some(t) => t,
+                        None => return,
+                    };
+                    
+                    let mut retries = 0;
+                    loop {
+                        if client_opt.is_none() {
+                            if let Ok(stream) = tokio::net::TcpStream::connect(&relayer_rpc_addr).await {
+                                let (reader, writer) = stream.into_split();
+                                let network = twoparty::VatNetwork::new(
+                                    reader.compat(),
+                                    writer.compat_write(),
+                                    rpc_twoparty_capnp::Side::Client,
+                                    Default::default(),
+                                );
+                                let mut rpc_system = RpcSystem::new(Box::new(network), None);
+                                let c: relayer_capnp::relayer_service::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+                                tokio::task::spawn_local(rpc_system);
+                                
+                                if !api_key.is_empty() {
+                                    let mut auth_req = c.authenticate_request();
+                                    auth_req.get().set_api_key(api_key.as_bytes());
+                                    if let Ok(auth_resp) = auth_req.send().promise.await {
+                                        if auth_resp.get().map(|r| r.get_ok()).unwrap_or(false) {
+                                            client_opt = Some(c);
+                                        } else {
+                                            error!("relayer authentication failed: invalid API key for match {}", task.match_id);
+                                            break; // Fatal error, drop task
+                                        }
+                                    } else {
+                                        // Network error on auth
+                                    }
+                                } else {
+                                    client_opt = Some(c);
+                                }
+                            } else {
+                                tokio::time::sleep(Duration::from_millis(500 * 2u64.pow(retries.min(3)))).await;
+                                retries += 1;
+                                if retries > 5 {
+                                    error!("Failed to connect to relayer for {}", task.match_id);
+                                    break; // drop task
+                                }
+                                continue;
+                            }
+                        }
+
+                        if let Some(client) = &client_opt {
+                            let mut req = client.submit_outcome_request();
+                            
+                            let match_id_val = if let Ok(val) = U256::from_dec_str(&task.match_id) {
+                                let mut b = [0u8; 32];
+                                val.to_big_endian(&mut b);
+                                b.to_vec()
+                            } else {
+                                task.match_id.as_bytes().to_vec()
+                            };
+
+                            req.get().set_match_id(&match_id_val);
+                            req.get().set_outcome(task.outcome);
+                            req.get().set_transcript_hash(&task.transcript_hash);
+                            req.get().set_signature(&task.signature);
+                            
+                            if req.send().promise.await.is_err() {
+                                client_opt = None; // Reconnect
+                            } else {
+                                info!("Notified relayer for match {}", task.match_id);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+async fn start_telemetry_worker(
+    mut rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    tokio::task::spawn_local(async move {
+        let telemetry_addr =
+            env::var("TELEMETRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4317".to_string());
+        
+        let mut client_opt: Option<amp_telemetry_capnp::telemetry_receiver::Client> = None;
+
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                evt_opt = rx.recv() => {
+                    let event = match evt_opt {
+                        Some(e) => e,
+                        None => return,
+                    };
+                    
+                    if client_opt.is_none() {
+                        if let Ok(stream) = tokio::net::TcpStream::connect(&telemetry_addr).await {
+                            let (reader, writer) = stream.into_split();
+                            let network = twoparty::VatNetwork::new(
+                                reader.compat(),
+                                writer.compat_write(),
+                                rpc_twoparty_capnp::Side::Client,
+                                Default::default(),
+                            );
+                            let mut rpc_system = RpcSystem::new(Box::new(network), None);
+                            let c = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+                            tokio::task::spawn_local(rpc_system);
+                            client_opt = Some(c);
+                        } else {
+                            continue; // Silently drop telemetry if disconnected
+                        }
+                    }
+
+                    if let Some(client) = &client_opt {
+                        let mut req = client.log_event_request();
+                        req.get().init_event().set_event_data(&event);
+                        if req.send().promise.await.is_err() {
+                            client_opt = None;
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
 
 struct MatchSessionImpl {
@@ -510,6 +588,8 @@ struct MatchSessionImpl {
     player_service: Arc<player_service::PlayerServiceImpl>,
     state: AppState,
     signing_config: Arc<SigningConfig>,
+    telemetry_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    relayer_tx: tokio::sync::mpsc::Sender<RelayerTask>,
 }
 
 impl match_session::Server for MatchSessionImpl {
@@ -530,9 +610,10 @@ impl match_session::Server for MatchSessionImpl {
         let p_service = self.player_service.clone();
         let state = self.state.clone();
         let signing_config = self.signing_config.clone();
+        let relayer_tx = self.relayer_tx.clone();
 
         Promise::from_future(async move {
-            match sign_match_outcome(&signing_config, &m_id, outcome_val, &r_hash).await {
+            match sign_match_outcome(signing_config, &m_id, outcome_val, &r_hash).await {
                 Ok(sig) => {
                     results.get().set_signature(&sig);
 
@@ -564,56 +645,35 @@ impl match_session::Server for MatchSessionImpl {
 
                     {
                         let match_id_for_update = m_id.clone();
-                        let mut matches = state.active_matches.write().await;
-                        if let Some(m) = matches.get_mut(&match_id_for_update) {
-                            if m.settled {
-                                drop(matches);
-                                return Err(::capnp::Error::failed("Match already settled".into()));
+                        let mut m_clone_opt = None;
+                        
+                        let updated = state.update_active_match(&match_id_for_update, |m| {
+                            if !m.settled {
+                                m.settled = true;
+                                m.settled_at_ms = Some(now_ms());
+                                m_clone_opt = Some(m.clone());
                             }
-                            m.settled = true;
-                            m.settled_at_ms = Some(now_ms());
-                            let m_clone = ActiveMatch {
-                                match_id: m.match_id.clone(),
-                                game_id: m.game_id.clone(),
-                                players: m.players.clone(),
-                                created_at_ms: m.created_at_ms,
-                                settled: true,
-                                settled_at_ms: m.settled_at_ms,
-                                expires_at_ms: m.expires_at_ms,
-                            };
-                            drop(matches);
+                        });
+
+                        if updated.is_none() || m_clone_opt.is_none() {
+                            return Err(::capnp::Error::failed("Match already settled or not found".into()));
+                        }
+
+                        if let Some(m_clone) = m_clone_opt {
                             state
                                 .archive_settled_match(&match_id_for_update, &m_clone)
                                 .await;
                         }
                     }
 
-                    tokio::task::spawn_local(async move {
-                        let mut attempts = 0u32;
-                        loop {
-                            match notify_relayer_rpc(&m_id, outcome_val, &r_hash, &sig).await {
-                                Ok(()) => break,
-                                Err(e) => {
-                                    attempts += 1;
-                                    if attempts >= 5 {
-                                        error!(
-                                            "Failed to notify relayer for {} after {} attempts: {:?}",
-                                            m_id, attempts, e
-                                        );
-                                        break;
-                                    }
-                                    warn!(
-                                        "Relayer notify attempt {} failed for {}: {:?}",
-                                        attempts, m_id, e
-                                    );
-                                    tokio::time::sleep(Duration::from_millis(
-                                        500 * 2u64.pow(attempts.min(3)),
-                                    ))
-                                    .await;
-                                }
-                            }
-                        }
-                    });
+                    if let Err(e) = relayer_tx.send(RelayerTask {
+                        match_id: m_id.clone(),
+                        outcome: outcome_val,
+                        transcript_hash: r_hash,
+                        signature: sig,
+                    }).await {
+                        warn!("Failed to queue relayer task for {}: {}", m_id, e);
+                    }
                     Ok(())
                 }
                 Err(e) => Err(::capnp::Error::failed(format!("Signer error: {}", e))),
@@ -655,8 +715,11 @@ impl match_session::Server for MatchSessionImpl {
     ) -> Promise<(), ::capnp::Error> {
         let event_data = pry!(pry!(params.get()).get_event());
         let raw = event_data.get_event_data().unwrap_or_default().to_vec();
+        let tx = self.telemetry_tx.clone();
         Promise::from_future(async move {
-            forward_telemetry(&raw).await;
+            if let Err(e) = tx.send(raw).await {
+                warn!("Failed to queue telemetry event: {}", e);
+            }
             Ok(())
         })
     }
@@ -669,6 +732,8 @@ struct UserSessionImpl {
     player_service: Arc<player_service::PlayerServiceImpl>,
     match_queue: MatchQueue,
     signing_config: Arc<SigningConfig>,
+    telemetry_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    relayer_tx: tokio::sync::mpsc::Sender<RelayerTask>,
 }
 
 impl user_session::Server for UserSessionImpl {
@@ -684,6 +749,8 @@ impl user_session::Server for UserSessionImpl {
         let p_service = self.player_service.clone();
         let queue = self.match_queue.clone();
         let signing_config = self.signing_config.clone();
+        let telemetry_tx = self.telemetry_tx.clone();
+        let relayer_tx = self.relayer_tx.clone();
 
         let ruleset_id_bytes = req.get_rule_set_id().unwrap_or(&[]);
         let ruleset_id = String::from_utf8_lossy(ruleset_id_bytes).to_string();
@@ -719,7 +786,7 @@ impl user_session::Server for UserSessionImpl {
             }
 
             let (tx, rx) = oneshot::channel();
-            queue.lock().await.push(QueueEntry {
+            if let Err(_) = queue.try_send(QueueEntry {
                 player_id: p_id.clone(),
                 game_id: game_id.to_string(),
                 ruleset_id: ruleset_id.clone(),
@@ -731,7 +798,9 @@ impl user_session::Server for UserSessionImpl {
                 max_ping_ms: max_ping,
                 enqueued_at_ms: now_ms(),
                 sender: tx,
-            });
+            }) {
+                return Err(::capnp::Error::failed("Server under heavy load, queue full".into()));
+            }
 
             if let Ok(payload) = rx.await {
                 if payload.match_id.is_empty() {
@@ -752,6 +821,8 @@ impl user_session::Server for UserSessionImpl {
                     player_service: p_service,
                     state: app_state,
                     signing_config: signing_config.clone(),
+                    telemetry_tx: telemetry_tx.clone(),
+                    relayer_tx: relayer_tx.clone(),
                 });
                 results.get().set_session(session);
                 Ok(())
@@ -772,9 +843,11 @@ impl user_session::Server for UserSessionImpl {
         let _game_id = self.game_id;
         let player_id = self.player_id.clone();
         let signing_config = self.signing_config.clone();
+        let telemetry_tx = self.telemetry_tx.clone();
+        let relayer_tx = self.relayer_tx.clone();
 
         Promise::from_future(async move {
-            let matches = state.active_matches.read().await;
+            let matches = state.active_matches.load();
             match matches.get(&match_id) {
                 Some(m) if !m.settled => {
                     if !m.players.contains(&player_id) {
@@ -790,6 +863,8 @@ impl user_session::Server for UserSessionImpl {
                         player_service: p_service,
                         state: state.clone(),
                         signing_config: signing_config.clone(),
+                        telemetry_tx: telemetry_tx.clone(),
+                        relayer_tx: relayer_tx.clone(),
                     });
                     drop(matches);
                     results.get().set_session(session);
@@ -815,6 +890,8 @@ struct GameSessionServiceImpl {
     auth_service: Arc<auth::AuthService>,
     match_queue: MatchQueue,
     signing_config: Arc<SigningConfig>,
+    telemetry_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    relayer_tx: tokio::sync::mpsc::Sender<RelayerTask>,
 }
 
 impl game_session_service::Server for GameSessionServiceImpl {
@@ -849,6 +926,8 @@ impl game_session_service::Server for GameSessionServiceImpl {
         let auth = self.auth_service.clone();
         let queue = self.match_queue.clone();
         let signing_config = self.signing_config.clone();
+        let telemetry_tx = self.telemetry_tx.clone();
+        let relayer_tx = self.relayer_tx.clone();
 
         Promise::from_future(async move {
             match auth
@@ -876,6 +955,8 @@ impl game_session_service::Server for GameSessionServiceImpl {
                         player_service: p_service,
                         match_queue: queue,
                         signing_config,
+                        telemetry_tx: telemetry_tx.clone(),
+                        relayer_tx: relayer_tx.clone(),
                     });
                     results.get().set_session(session);
                     Ok(())
@@ -921,8 +1002,11 @@ async fn main() -> Result<()> {
     });
     let auth_service = Arc::new(auth::AuthService::new());
 
-    let match_queue: MatchQueue =
-        Arc::new(tokio::sync::Mutex::new(match_queue::IndexedQueue::new()));
+    let (match_queue_tx, match_queue_rx) = tokio::sync::mpsc::channel(10000);
+    let match_queue: MatchQueue = match_queue_tx;
+
+    let (telemetry_tx, telemetry_rx) = tokio::sync::mpsc::channel(10000);
+    let (relayer_tx, relayer_rx) = tokio::sync::mpsc::channel(10000);
 
     let cancel = tokio_util::sync::CancellationToken::new();
     let cancel_clone = cancel.clone();
@@ -935,7 +1019,7 @@ async fn main() -> Result<()> {
         settlement_addr: env::var("AMP_SETTLEMENT_ADDRESS")?.parse()?,
     });
 
-    start_matchmaker_loop(state.clone(), match_queue.clone(), cancel.clone()).await;
+    start_matchmaker_loop(state.clone(), match_queue_rx, cancel.clone()).await;
     start_cleanup_loop(state.clone(), auth_service.clone(), cancel.clone());
 
     let tls_acceptor = match (
@@ -989,12 +1073,25 @@ async fn main() -> Result<()> {
     local
         .run_until(async move {
             let state_for_shutdown = state.clone();
+            start_telemetry_worker(telemetry_rx, cancel_clone.clone()).await;
+            start_relayer_worker(relayer_rx, cancel_clone.clone()).await;
+
+            let ctx = ServiceContext {
+                state,
+                player_service: p_service,
+                auth_service,
+                match_queue,
+                signing_config,
+                telemetry_tx,
+                relayer_tx,
+            };
+
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!("Received shutdown signal, draining...");
                     cancel_clone.cancel();
 
-                    let matches = state_for_shutdown.active_matches.read().await;
+                    let matches = state_for_shutdown.active_matches.load();
                     let active = matches.iter()
                         .filter(|(_, m)| !m.settled)
                         .count();
@@ -1004,7 +1101,7 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     info!("Shutdown complete.");
                 }
-                _ = accept_loop(listener, state, p_service, auth_service, match_queue, tls_acceptor, rate_limiter, signing_config) => {}
+                _ = accept_loop(listener, ctx, tls_acceptor, rate_limiter) => {}
             }
         })
         .await;
@@ -1012,16 +1109,23 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+
+#[derive(Clone)]
+pub struct ServiceContext {
+    pub state: AppState,
+    pub player_service: Arc<player_service::PlayerServiceImpl>,
+    pub auth_service: Arc<auth::AuthService>,
+    pub match_queue: MatchQueue,
+    pub signing_config: Arc<SigningConfig>,
+    pub telemetry_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    pub relayer_tx: tokio::sync::mpsc::Sender<RelayerTask>,
+}
+
 async fn accept_loop(
     listener: tokio::net::TcpListener,
-    state: AppState,
-    p_service: Arc<player_service::PlayerServiceImpl>,
-    auth_service: Arc<auth::AuthService>,
-    match_queue: MatchQueue,
+    ctx: ServiceContext,
     tls_acceptor: Option<amp_tls::TlsAcceptor>,
     rate_limiter: Arc<rate_limit::ConnectionRateLimiter>,
-    signing_config: Arc<SigningConfig>,
 ) {
     loop {
         let (stream, peer) = match listener.accept().await {
@@ -1040,13 +1144,9 @@ async fn accept_loop(
         }
 
         stream.set_nodelay(true).unwrap_or(());
-        let s_clone = state.clone();
-        let ps_clone = p_service.clone();
-        let auth_clone = auth_service.clone();
-        let q_clone = match_queue.clone();
+        let ctx_clone = ctx.clone();
         let acceptor = tls_acceptor.clone();
         let limiter = rate_limiter.clone();
-        let sc_clone = signing_config.clone();
 
         tokio::task::spawn_local(async move {
             let _guard = match limiter.try_acquire_slot() {
@@ -1061,9 +1161,7 @@ async fn accept_loop(
                 match acc.accept(stream).await {
                     Ok(tls_stream) => {
                         let (reader, writer) = tokio::io::split(tls_stream);
-                        serve_rpc(
-                            reader, writer, s_clone, ps_clone, auth_clone, q_clone, sc_clone,
-                        )
+                        serve_rpc(reader, writer, ctx_clone.clone())
                         .await;
                     }
                     Err(e) => {
@@ -1072,9 +1170,7 @@ async fn accept_loop(
                 }
             } else {
                 let (reader, writer) = stream.into_split();
-                serve_rpc(
-                    reader, writer, s_clone, ps_clone, auth_clone, q_clone, sc_clone,
-                )
+                serve_rpc(reader, writer, ctx_clone)
                 .await;
             }
         });
@@ -1084,11 +1180,7 @@ async fn accept_loop(
 async fn serve_rpc<R, W>(
     reader: R,
     writer: W,
-    state: AppState,
-    p_service: Arc<player_service::PlayerServiceImpl>,
-    auth_service: Arc<auth::AuthService>,
-    match_queue: MatchQueue,
-    signing_config: Arc<SigningConfig>,
+    ctx: ServiceContext,
 ) where
     R: tokio::io::AsyncRead + Unpin + 'static,
     W: tokio::io::AsyncWrite + Unpin + 'static,
@@ -1102,14 +1194,90 @@ async fn serve_rpc<R, W>(
         Default::default(),
     );
     let service: game_session_service::Client = capnp_rpc::new_client(GameSessionServiceImpl {
-        state,
-        player_service: p_service,
-        auth_service,
-        match_queue,
-        signing_config,
+        state: ctx.state,
+        player_service: ctx.player_service,
+        auth_service: ctx.auth_service,
+        match_queue: ctx.match_queue,
+        signing_config: ctx.signing_config,
+        telemetry_tx: ctx.telemetry_tx,
+        relayer_tx: ctx.relayer_tx,
     });
     let rpc_system = RpcSystem::new(Box::new(network), Some(service.client));
     if let Err(e) = rpc_system.await {
         error!("RPC error: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tokio::sync::oneshot;
+    use crate::state::{StoredRuleSet, InnerState};
+
+    #[tokio::test]
+    async fn test_matchmaker_actor_mpsc() {
+        let state = InnerState::new(None);
+        let app_state = Arc::new(state);
+
+        let mut rs = StoredRuleSet::default();
+        rs.rules.push(crate::state::StoredRule::default_skill());
+        
+        let mut map = std::collections::HashMap::new();
+        map.insert("test_game".into(), Arc::new(rs));
+        app_state.rulesets.store(Arc::new(map));
+
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_clone = cancel.clone();
+        
+        let state_clone = app_state.clone();
+        
+        let local = tokio::task::LocalSet::new();
+        local.spawn_local(async move {
+            start_matchmaker_loop(state_clone, rx, cancel_clone).await;
+        });
+        
+        let (p1_tx, p1_rx) = oneshot::channel();
+        let (p2_tx, p2_rx) = oneshot::channel();
+        
+        tx.send(QueueEntry {
+            player_id: "p1".into(),
+            game_id: "test_game".into(),
+            ruleset_id: "test_game".into(),
+            mmr: 1500.0,
+            mmr_uncertainty: 200.0,
+            region: "na".into(),
+            preferred_role: "tank".into(),
+            language: "en".into(),
+            max_ping_ms: 100,
+            enqueued_at_ms: crate::state::now_ms(),
+            sender: p1_tx,
+        }).await.unwrap();
+        
+        tx.send(QueueEntry {
+            player_id: "p2".into(),
+            game_id: "test_game".into(),
+            ruleset_id: "test_game".into(),
+            mmr: 1500.0,
+            mmr_uncertainty: 200.0,
+            region: "na".into(),
+            preferred_role: "dps".into(),
+            language: "en".into(),
+            max_ping_ms: 100,
+            enqueued_at_ms: crate::state::now_ms(),
+            sender: p2_tx,
+        }).await.unwrap();
+        
+        local.run_until(async move {
+            let m1 = p1_rx.await.unwrap();
+            let m2 = p2_rx.await.unwrap();
+            
+            assert_eq!(m1.match_id, m2.match_id); // Both should receive the same match ID
+            
+            let active = app_state.active_matches.load();
+            assert!(active.contains_key(&m1.match_id));
+            cancel.cancel();
+        }).await;
     }
 }

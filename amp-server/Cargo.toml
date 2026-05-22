@@ -24,6 +24,7 @@ thiserror = "2"
 hex = "0.4"
 dotenv = "0.15"
 amp-tls = { path = "../amp-tls" }
+arc-swap = "1.6.0"
 
 [build-dependencies]
 capnpc = "0.19"

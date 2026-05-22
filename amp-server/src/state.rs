@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::oneshot;
+use arc_swap::ArcSwap;
 
 use crate::persistence::Persistence;
 
@@ -261,6 +262,7 @@ pub struct LanguageParams {
     pub weight: f32,
 }
 
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScheduleParams {
     pub time_windows: Vec<(u8, u8, u8)>,
@@ -373,14 +375,14 @@ pub struct QueueEntry {
     pub sender: oneshot::Sender<MatchFoundPayload>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchFoundPayload {
     pub match_id: String,
     pub opponent_ids: Vec<String>,
     pub quality: MatchQualityDetail,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct MatchQualityDetail {
     pub total_score: f32,
     pub skill_balance: f32,
@@ -409,8 +411,8 @@ pub const SETTLED_ARCHIVE_TREE: &str = "settled_matches";
 
 pub struct InnerState {
     pub players: DashMap<AmpId, StoredPlayerProfile>,
-    pub rulesets: RwLock<HashMap<AmpId, Arc<StoredRuleSet>>>,
-    pub active_matches: RwLock<HashMap<String, ActiveMatch>>,
+    pub rulesets: Arc<ArcSwap<HashMap<AmpId, Arc<StoredRuleSet>>>>,
+    pub active_matches: Arc<ArcSwap<HashMap<String, ActiveMatch>>>,
     persistence: Option<Persistence>,
 }
 
@@ -418,8 +420,8 @@ impl InnerState {
     pub fn new(persistence: Option<Persistence>) -> Self {
         let state = Self {
             players: DashMap::new(),
-            rulesets: RwLock::new(HashMap::new()),
-            active_matches: RwLock::new(HashMap::new()),
+            rulesets: Arc::new(ArcSwap::from_pointee(HashMap::new())),
+            active_matches: Arc::new(ArcSwap::from_pointee(HashMap::new())),
             persistence,
         };
         if let Some(ref p) = state.persistence {
@@ -429,19 +431,47 @@ impl InnerState {
                 }
             }
             if let Ok(rulesets) = p.load_all::<StoredRuleSet>("rulesets") {
-                let mut rs = state.rulesets.blocking_write();
+                let mut rs = HashMap::new();
                 for (id, r) in rulesets {
                     rs.insert(id, r.new_sorted());
                 }
+                state.rulesets.store(Arc::new(rs));
             }
             if let Ok(matches) = p.load_all::<ActiveMatch>("matches") {
-                let mut am = state.active_matches.blocking_write();
+                let mut am = HashMap::new();
                 for (id, m) in matches {
                     am.insert(id, m);
                 }
+                state.active_matches.store(Arc::new(am));
             }
         }
         state
+    }
+
+    pub fn insert_active_match(&self, match_id: String, active: ActiveMatch) {
+        self.active_matches.rcu(|am| {
+            let mut matches = (**am).clone();
+            matches.insert(match_id.clone(), active.clone());
+            matches
+        });
+    }
+
+    pub fn update_active_match<F>(&self, match_id: &str, mut f: F) -> Option<()>
+    where
+        F: FnMut(&mut ActiveMatch),
+    {
+        let mut updated = false;
+        self.active_matches.rcu(|am| {
+            let mut matches = (**am).clone();
+            if let Some(m) = matches.get_mut(match_id) {
+                f(m);
+                updated = true;
+            } else {
+                updated = false;
+            }
+            matches
+        });
+        if updated { Some(()) } else { None }
     }
 
     pub async fn persist_player(&self, id: &str, profile: &StoredPlayerProfile) {
@@ -475,7 +505,11 @@ impl InnerState {
         {
             warn!(target: "persist", "Failed to archive settled match {}: {}", id, e);
         }
-        self.active_matches.write().await.remove(id);
+        self.active_matches.rcu(|am| {
+            let mut matches = (**am).clone();
+            matches.remove(id);
+            matches
+        });
         if let Some(ref p) = self.persistence
             && let Err(e) = p.delete("matches", id).await
         {
@@ -486,7 +520,7 @@ impl InnerState {
     pub async fn cleanup_expired_matches(&self) -> usize {
         let now = now_ms();
         let expired: Vec<String> = {
-            let matches = self.active_matches.read().await;
+            let matches = self.active_matches.load();
             matches
                 .iter()
                 .filter(|(_, m)| {
@@ -505,16 +539,35 @@ impl InnerState {
         };
 
         let count = expired.len();
-        for id in expired {
-            let mut matches = self.active_matches.write().await;
-            if let Some(m) = matches.remove(&id) {
-                drop(matches);
+        if count > 0 {
+            // First collect the matches we are going to remove
+            let mut to_persist = Vec::new();
+            {
+                let am = self.active_matches.load();
+                for id in &expired {
+                    if let Some(m) = am.get(id) {
+                        to_persist.push((id.clone(), m.clone()));
+                    }
+                }
+            }
+            
+            // Do persistence (async)
+            for (id, m) in to_persist {
                 if let Some(ref p) = self.persistence {
                     let _ = p.save(SETTLED_ARCHIVE_TREE, &id, &m).await;
                     let _ = p.delete("matches", &id).await;
                 }
                 warn!(target: "cleanup", "Expired match {} (settled={}, created={}ms ago)", id, m.settled, now.saturating_sub(m.created_at_ms));
             }
+
+            // Finally, reliably remove them from the map via rcu
+            self.active_matches.rcu(|am| {
+                let mut matches = (**am).clone();
+                for id in &expired {
+                    matches.remove(id);
+                }
+                matches
+            });
         }
         count
     }
