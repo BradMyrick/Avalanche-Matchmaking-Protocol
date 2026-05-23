@@ -12,16 +12,21 @@ RUN cargo build --release -p AMP-Server
 
 FROM debian:bookworm-slim
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+RUN useradd -m -u 1000 amp
 
 WORKDIR /app
 
 COPY --from=builder /usr/src/amp/target/release/AMP-Server .
 
+RUN chown -R amp:amp /app
+
+USER amp
+
 VOLUME ["/app/data"]
 
 EXPOSE 50051
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD bash -c 'echo > /dev/tcp/localhost/50051' || exit 1
 
 ENTRYPOINT ["./AMP-Server"]

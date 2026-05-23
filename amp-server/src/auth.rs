@@ -52,8 +52,14 @@ impl AuthService {
         sig_bytes: &[u8],
         challenge_payload: &[u8],
     ) -> Result<Address> {
-        let address = recover_address_from_sig(sig_bytes, challenge_payload)
-            .context("failed to recover address from signature")?;
+        let sig_vec = sig_bytes.to_vec();
+        let payload_vec = challenge_payload.to_vec();
+
+        let address =
+            tokio::task::spawn_blocking(move || recover_address_from_sig(&sig_vec, &payload_vec))
+                .await
+                .context("signature recovery panicked")?
+                .context("failed to recover address from signature")?;
 
         let address_hex = hex::encode(address.as_bytes());
         info!(target: "auth", "Recovered address: 0x{}", address_hex);
@@ -85,11 +91,17 @@ impl AuthService {
             );
         }
 
-        let expected_hash: H256 = hash_message(&entry.message);
-        let recovered = Signature::try_from(&sig_bytes[..65])
-            .map_err(|e| anyhow::anyhow!("invalid signature: {:?}", e))?
-            .recover(expected_hash)
-            .map_err(|e| anyhow::anyhow!("recovery failed: {:?}", e))?;
+        let msg = entry.message.clone();
+        let sig_65 = sig_bytes[..65].to_vec();
+        let recovered = tokio::task::spawn_blocking(move || {
+            let expected_hash: H256 = hash_message(&msg);
+            Signature::try_from(&sig_65[..])
+                .map_err(|e| anyhow::anyhow!("invalid signature: {:?}", e))?
+                .recover(expected_hash)
+                .map_err(|e| anyhow::anyhow!("recovery failed: {:?}", e))
+        })
+        .await
+        .context("signature verification panicked")??;
 
         if recovered != address {
             bail!("signature does not match challenge message");

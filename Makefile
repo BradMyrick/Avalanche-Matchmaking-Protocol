@@ -1,143 +1,135 @@
-# Avalanche Matchmaking Protocol Makefile
+# Avalanche Matchmaking Protocol (AMP) Makefile
+# Build system for the AMP Rust workspace + Solidity contracts + multi-language SDKs
 
-.PHONY: help setup build test clean localnet-up localnet-down deploy-local
+.PHONY: help setup build test clean localnet-up localnet-down deploy-local \
+        lint format docs build-rust build-contracts build-sdk-go build-sdk-cpp \
+        build-sdk-csharp build-sdk-python test-rust test-contracts test-sdk-go \
+        lint-rust lint-contracts format-rust check-contracts
 
 help:
 	@echo "Avalanche Matchmaking Protocol (AMP) Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  help        Show this help message"
-	@echo "  setup       Install dependencies and setup development environment"
-	@echo "  build       Build all components"
-	@echo "  test        Run all tests"
-	@echo "  clean       Clean build artifacts"
-	@echo "  localnet-up Start local Avalanche testnet"
-	@echo "  localnet-down Stop local Avalanche testnet"
-	@echo "  deploy-local Deploy AMP to local testnet"
-	@echo "  lint        Run linters on all code"
-	@echo "  format      Format all code"
-	@echo "  docs        Generate documentation"
+	@echo "  help           Show this help message"
+	@echo "  setup          Install dependencies and set up development environment"
+	@echo "  build          Build all Rust components + contracts"
+	@echo "  test           Run all tests (Rust + Forge + Go SDK)"
+	@echo "  clean          Clean all build artifacts"
+	@echo "  localnet-up    Start local Avalanche testnet (Docker)"
+	@echo "  localnet-down  Stop local Avalanche testnet"
+	@echo "  deploy-local   Deploy AMP contracts to local testnet"
+	@echo "  lint           Run linters on all code"
+	@echo "  format         Format all code"
+	@echo "  check-contracts  Check Solidity formatting (forge fmt --check)"
+	@echo "  docs           Generate documentation"
 
-setup: setup-go setup-rust setup-js
+# ─── Setup ───────────────────────────────────────────────────────────────
+
+setup: setup-rust setup-contracts setup-sdk-go setup-sdk-python
 	@echo "Development environment setup complete"
 
-setup-go:
-	@echo "Setting up Go dependencies..."
-	cd amp-sdk/go && go mod download
-	cd amp-core && go mod download
-
 setup-rust:
-	@echo "Setting up Rust dependencies..."
-	cd amp-sdk/rust && cargo fetch
+	@echo "Fetching Rust dependencies..."
+	cargo fetch
 
-setup-js:
-	@echo "Setting up JavaScript dependencies..."
-	cd amp-sdk/js && npm ci
+setup-contracts:
+	@echo "Installing Foundry libraries..."
+	cd contracts && forge install --no-git
 
-build: build-core build-sdk
+setup-sdk-go:
+	@echo "Downloading Go SDK dependencies..."
+	cd amp-sdk/go && go mod download
+
+setup-sdk-python:
+	@echo "Installing Python SDK dependencies..."
+	cd amp-sdk/python && pip install -e . 2>/dev/null || echo "Python SDK deps skipped (pip not configured)"
+
+# ─── Build ───────────────────────────────────────────────────────────────
+
+build: build-contracts build-rust
 	@echo "Build complete"
 
-build-core:
-	@echo "Building AMP core..."
-	cd amp-core && go build -o ../bin/amp-core ./...
+build-contracts:
+	@echo "Building Solidity contracts..."
+	cd contracts && forge build
 
-build-sdk: build-sdk-go build-sdk-rust build-sdk-js
-	@echo "SDKs built"
+build-rust:
+	@echo "Building Rust workspace..."
+	cargo build --release
 
-build-sdk-go:
-	@echo "Building Go SDK..."
-	cd amp-sdk/go && go build ./...
+# ─── Test ────────────────────────────────────────────────────────────────
 
-build-sdk-rust:
-	@echo "Building Rust SDK..."
-	cd amp-sdk/rust && cargo build --release
-
-build-sdk-js:
-	@echo "Building JavaScript SDK..."
-	cd amp-sdk/js && npm run build
-
-test: test-core test-sdk
+test: test-rust test-contracts
 	@echo "All tests passed"
 
-test-core:
-	@echo "Testing AMP core..."
-	cd amp-core && go test ./...
+test-rust:
+	@echo "Running Rust workspace tests..."
+	cargo test --workspace
 
-test-sdk: test-sdk-go test-sdk-rust test-sdk-js
-	@echo "SDK tests complete"
+test-contracts:
+	@echo "Running Forge contract tests..."
+	cd contracts && forge test -vvv
 
 test-sdk-go:
-	@echo "Testing Go SDK..."
+	@echo "Running Go SDK tests..."
 	cd amp-sdk/go && go test ./...
 
-test-sdk-rust:
-	@echo "Testing Rust SDK..."
-	cd amp-sdk/rust && cargo test
+# ─── Lint & Format ───────────────────────────────────────────────────────
 
-test-sdk-js:
-	@echo "Testing JavaScript SDK..."
-	cd amp-sdk/js && npm test
-
-lint: lint-go lint-rust lint-js
+lint: lint-rust lint-contracts
 	@echo "Linting complete"
 
-lint-go:
-	@echo "Linting Go code..."
-	cd amp-core && golangci-lint run
-	cd amp-sdk/go && golangci-lint run
-
 lint-rust:
-	@echo "Linting Rust code..."
-	cd amp-sdk/rust && cargo clippy
+	@echo "Running Clippy on Rust workspace..."
+	cargo clippy --workspace --all-targets -- -D warnings
 
-lint-js:
-	@echo "Linting JavaScript code..."
-	cd amp-sdk/js && npm run lint
+lint-contracts:
+	@echo "Linting Solidity contracts..."
+	cd contracts && forge fmt --check
 
-format: format-go format-rust format-js
+format: format-rust format-contracts
 	@echo "Formatting complete"
-
-format-go:
-	@echo "Formatting Go code..."
-	cd amp-core && gofmt -w .
-	cd amp-sdk/go && gofmt -w .
 
 format-rust:
 	@echo "Formatting Rust code..."
-	cd amp-sdk/rust && cargo fmt
+	cargo fmt --all
 
-format-js:
-	@echo "Formatting JavaScript code..."
-	cd amp-sdk/js && npm run format
+format-contracts:
+	@echo "Formatting Solidity code..."
+	cd contracts && forge fmt
 
-clean:
-	@echo "Cleaning build artifacts..."
-	rm -rf bin/
-	cd amp-sdk/rust && cargo clean
-	cd amp-sdk/js && rm -rf dist/ node_modules/
-	@echo "Clean complete"
+# ─── Docker & Localnet ──────────────────────────────────────────────────
 
 localnet-up:
 	@echo "Starting local Avalanche testnet..."
-	docker-compose -f docker/localnet/docker-compose.yml up -d
+	docker compose -f docker/localnet/docker-compose.yml up -d
 	@echo "Local testnet running. Use 'make localnet-down' to stop."
 
 localnet-down:
 	@echo "Stopping local Avalanche testnet..."
-	docker-compose -f docker/localnet/docker-compose.yml down
+	docker compose -f docker/localnet/docker-compose.yml down
 	@echo "Local testnet stopped."
 
 deploy-local:
-	@echo "Deploying AMP to local testnet..."
-	@echo "TODO: Implement deployment script"
+	@echo "Deploying AMP contracts to local testnet..."
+	cd contracts && ([ -f ../.env ] && . ../.env || true) && forge script script/Deploy.s.sol --rpc-url "$$ANVIL_RPC_URL" --private-key "$$ANVIL_DEPLOYER_PRIVATE_KEY" --broadcast
 	@echo "Deployment complete"
 
-docs:
-	@echo "Generating documentation..."
-	cd docs && npm run docs 2>/dev/null || echo "Running internal docs generator..."
-	@echo "Documentation index available in docs/"
+# ─── Clean ───────────────────────────────────────────────────────────────
 
-# Development convenience targets
+clean:
+	@echo "Cleaning build artifacts..."
+	cargo clean
+	cd contracts && forge clean
+	@echo "Clean complete"
+
+# ─── Docs ───────────────────────────────────────────────────��────────────
+
+docs:
+	@echo "Documentation available in docs/"
+
+# ─── Convenience ─────────────────────────────────────────────────────────
+
 dev: localnet-up build
 	@echo "Development environment ready"
 

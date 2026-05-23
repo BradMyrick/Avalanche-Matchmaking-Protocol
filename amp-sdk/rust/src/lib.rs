@@ -8,6 +8,17 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
     unused_parens,
     unused_braces
 )]
+pub mod game_types_capnp {
+    include!(concat!(env!("OUT_DIR"), "/game_types_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
 pub mod game_core_capnp {
     include!(concat!(env!("OUT_DIR"), "/game_core_capnp.rs"));
 }
@@ -65,6 +76,17 @@ pub mod game_registry_capnp {
 )]
 pub mod amp_telemetry_capnp {
     include!(concat!(env!("OUT_DIR"), "/amp_telemetry_capnp.rs"));
+}
+#[allow(
+    clippy::all,
+    clippy::nursery,
+    non_snake_case,
+    dead_code,
+    unused_parens,
+    unused_braces
+)]
+pub mod relayer_capnp {
+    include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs"));
 }
 #[allow(
     clippy::all,

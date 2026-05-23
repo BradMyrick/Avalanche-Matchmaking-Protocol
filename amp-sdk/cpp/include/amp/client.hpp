@@ -4,6 +4,7 @@
 #include "game_core.capnp.h"
 #include "match.capnp.h"
 #include "service.capnp.h"
+#include "player_profile.capnp.h"
 #include <capnp/ez-rpc.h>
 #include <memory>
 #include <string>

@@ -1,5 +1,6 @@
 use crate::error::RelayerError;
 use ethers::prelude::*;
+use ethers::types::transaction::eip2718::TypedTransaction;
 use serde::{Deserialize, Serialize};
 use sled::Db;
 use std::sync::Arc;
@@ -62,6 +63,13 @@ impl SettlementQueue {
     pub fn enqueue(&self, settlement: PendingSettlement) -> Result<(), RelayerError> {
         let cf = self.db.open_tree(CF_PENDING)?;
         let key = settlement.match_id.clone();
+        if cf.contains_key(&key)? {
+            warn!(
+                "Settlement for match {:?} already enqueued, skipping duplicate",
+                hex::encode(&key)
+            );
+            return Ok(());
+        }
         let value = bincode::serialize(&settlement)?;
         cf.insert(&key, &value as &[u8])?;
         info!("Enqueued settlement for match {:?}", hex::encode(&key));
@@ -129,8 +137,11 @@ impl SettlementQueue {
         let match_id_parsed = if settlement.match_id.len() == 32 {
             U256::from_big_endian(&settlement.match_id)
         } else {
-            let s = std::str::from_utf8(&settlement.match_id).unwrap_or("");
-            U256::from_dec_str(s).unwrap_or(U256::zero())
+            let s = std::str::from_utf8(&settlement.match_id)
+                .map_err(|e| RelayerError::Transaction(format!("invalid match_id UTF-8: {}", e)))?;
+            U256::from_dec_str(s).map_err(|e| {
+                RelayerError::Transaction(format!("invalid match_id '{}': {}", s, e))
+            })?
         };
 
         let result = self
@@ -144,6 +155,22 @@ impl SettlementQueue {
                 Ok(true)
             }
             Err(e) => {
+                let reset_addr = match state.registry.matches(match_id_parsed).call().await {
+                    Ok((game_id, _, _, _, _, _)) => {
+                        let chain_id = state.master_client.signer().chain_id();
+                        custodial::derive_custodial_signer(
+                            state.master_client.signer(),
+                            "settlement",
+                            game_id.as_u64(),
+                            chain_id,
+                        )
+                        .map(|w| w.address())
+                        .unwrap_or_default()
+                    }
+                    Err(_) => Address::zero(),
+                };
+                nonce_manager.reset(&reset_addr);
+
                 let mut retry = settlement.clone();
                 retry.retry_count += 1;
                 retry.last_attempt_at_ms = Some(
@@ -188,7 +215,8 @@ impl SettlementQueue {
             "settlement",
             game_id.as_u64(),
             chain_id,
-        );
+        )
+        .map_err(|e| RelayerError::Transaction(format!("custodial derivation failed: {}", e)))?;
         let custodial_addr = custodial_wallet.address();
 
         custodial::ensure_gas(custodial_addr, state).await?;
@@ -198,10 +226,14 @@ impl SettlementQueue {
 
         let nonce = nonce_manager.next_nonce(&custodial_addr, &provider).await?;
 
-        let mut t_hash = [0u8; 32];
-        if settlement.transcript_hash.len() == 32 {
-            t_hash.copy_from_slice(&settlement.transcript_hash);
+        if settlement.transcript_hash.len() != 32 {
+            return Err(RelayerError::Transaction(format!(
+                "invalid transcript_hash length: expected 32, got {}",
+                settlement.transcript_hash.len()
+            )));
         }
+        let mut t_hash = [0u8; 32];
+        t_hash.copy_from_slice(&settlement.transcript_hash);
 
         let async_result = AsyncResult {
             match_id,
@@ -215,26 +247,49 @@ impl SettlementQueue {
             Arc::new(custodial_client),
         );
 
-        let (max_fee, _priority_fee) = self
+        // Estimate EIP-1559 fees: (max_fee_per_gas, max_priority_fee_per_gas)
+        let (max_fee, priority_fee) = self
             .gas_manager
             .estimate_eip1559_fees(&provider)
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;
 
-        let effective_max_fee = if settlement.retry_count > 0 {
-            let bump_factor =
-                (100 + self.gas_manager.bump_percent * settlement.retry_count as u64) as u128;
-            max_fee * U256::from(bump_factor) / U256::from(100)
+        // Apply gas bumping on retries using proper EIP-1559 fee fields
+        let (effective_max_fee, effective_priority_fee) = if settlement.retry_count > 0 {
+            self.gas_manager
+                .bump_fees(max_fee, priority_fee, settlement.retry_count)
         } else {
-            max_fee
+            (max_fee, priority_fee)
         };
 
-        let tx = settlement_custodial
-            .submit_async_result(match_id, async_result)
-            .nonce(nonce)
-            .gas_price(effective_max_fee);
+        // Build the contract call with proper EIP-1559 fields.
+        //
+        // IMPORTANT: We use `max_fee_per_gas` + `max_priority_fee_per_gas` instead of
+        // the legacy `gas_price`. Avalanche C-Chain supports EIP-1559 since the Avalanche
+        // Upgrade (Apricot). Using EIP-1559:
+        //   - Provides better fee estimation and prevents overpaying
+        //   - Allows priority fee to be set independently of max fee
+        //   - Ensures compatibility with future network upgrades
+        //   - Avoids the legacy gas price path which may be deprecated
+        let mut call = settlement_custodial.submit_async_result(match_id, async_result);
 
-        let pending = tx
+        if let TypedTransaction::Legacy(ref legacy) = call.tx {
+            let eip1559 = ethers::prelude::Eip1559TransactionRequest {
+                from: legacy.from,
+                to: legacy.to.clone(),
+                gas: legacy.gas,
+                max_fee_per_gas: Some(effective_max_fee),
+                max_priority_fee_per_gas: Some(effective_priority_fee),
+                value: legacy.value,
+                data: legacy.data.clone(),
+                nonce: Some(nonce),
+                chain_id: None,
+                access_list: Default::default(),
+            };
+            call.tx = TypedTransaction::Eip1559(eip1559);
+        }
+
+        let pending = call
             .send()
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;

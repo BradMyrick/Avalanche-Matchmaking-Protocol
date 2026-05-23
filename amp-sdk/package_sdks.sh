@@ -16,10 +16,10 @@ mkdir -p $CPP_DIST/include
 mkdir -p $CPP_DIST/src
 mkdir -p $CPP_DIST/schemas
 
-cp amp-sdk/cpp_example/include/*.hpp $CPP_DIST/include/
-cp amp-sdk/cpp_example/src/*.cpp $CPP_DIST/src/
+cp amp-sdk/examples/cpp/include/*.hpp $CPP_DIST/include/
+cp amp-sdk/examples/cpp/src/*.cpp $CPP_DIST/src/
 cp amp-sdk/schemas/*.capnp $CPP_DIST/schemas/
-cp amp-sdk/cpp_example/CMakeLists.txt $CPP_DIST/
+cp amp-sdk/examples/cpp/CMakeLists.txt $CPP_DIST/
 
 cd $DIST_DIR
 tar -czf amp_cpp_sdk.tar.gz cpp_sdk
@@ -32,7 +32,7 @@ CSHARP_DIST="$DIST_DIR/csharp_sdk"
 mkdir -p $CSHARP_DIST/src
 mkdir -p $CSHARP_DIST/schemas
 
-cp -r amp-sdk/csharp_example/* $CSHARP_DIST/
+cp -r amp-sdk/examples/csharp/* $CSHARP_DIST/
 cp amp-sdk/schemas/*.capnp $CSHARP_DIST/schemas/
 
 cd $DIST_DIR

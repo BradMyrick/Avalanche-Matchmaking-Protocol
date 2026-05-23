@@ -4,10 +4,12 @@ version = 4
 
 [[package]]
 name = "AMP-Server"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "amp-telemetry",
+ "amp-tls",
  "anyhow",
+ "arc-swap",
  "bincode",
  "capnp",
  "capnp-rpc",
@@ -18,9 +20,10 @@ dependencies = [
  "ethers-signers",
  "futures-util",
  "hex",
- "lazy_static",
+ "num_cpus",
  "serde",
  "sled",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -73,13 +76,15 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "amp-loadtest"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "capnp",
  "capnp-rpc",
  "capnpc",
  "clap",
+ "ethers-core",
+ "ethers-signers",
  "hdrhistogram",
  "tokio",
  "tokio-util",
@@ -89,8 +94,9 @@ dependencies = [
 
 [[package]]
 name = "amp-relayer"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
+ "amp-tls",
  "anyhow",
  "bincode",
  "capnp",
@@ -102,8 +108,9 @@ dependencies = [
  "futures",
  "hex",
  "serde",
+ "sha2",
  "sled",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
@@ -112,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "amp-sdk"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -123,7 +130,7 @@ dependencies = [
  "hex",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
@@ -132,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "amp-telemetry"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "capnp",
@@ -143,6 +150,15 @@ dependencies = [
  "hex",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "amp-tls"
+version = "0.0.1"
+dependencies = [
+ "rustls",
+ "rustls-pemfile",
+ "tokio-rustls",
 ]
 
 [[package]]
@@ -200,6 +216,15 @@ name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+
+[[package]]
+name = "arc-swap"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a3a1fd6f75306b68087b831f025c712524bcb19aad54e557b1129cfa0a2b207"
+dependencies = [
+ "rustversion",
+]
 
 [[package]]
 name = "arrayvec"
@@ -3957,7 +3982,7 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "trace-viewer"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "capnp",
  "capnpc",

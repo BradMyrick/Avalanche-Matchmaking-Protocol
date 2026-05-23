@@ -1,12 +1,4 @@
 fn main() {
-    // Ensure /home/kodr/local/bin is in PATH for capnp
-    let path = std::env::var("PATH").unwrap_or_default();
-    if !path.contains("/home/kodr/local/bin") {
-        unsafe {
-            std::env::set_var("PATH", format!("{}:/home/kodr/local/bin", path));
-        }
-    }
-
     let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let schema_dir = std::path::PathBuf::from(root).join("../amp-sdk/schemas");
     let schema_dir_str = schema_dir.to_str().unwrap();

@@ -1,46 +1,108 @@
-version: "3.9"
-
 services:
   amp-telemetry:
     build:
       context: .
       dockerfile: docker/amp-telemetry.Dockerfile
-    environment:
-      - TELEMETRY_ADDR=${TELEMETRY_ADDR}
-    ports:
-      - "4317:4317"
+    restart: unless-stopped
+    volumes:
+      - amp-telemetry-data:/app/data
+    networks:
+      - internal
+    stop_grace_period: 30s
 
   amp-relayer:
     build:
       context: .
       dockerfile: docker/amp-relayer.Dockerfile
+    restart: unless-stopped
+    volumes:
+      - amp-relayer-data:/app/relayer-data
     environment:
       - FUJI_RPC_URL=${FUJI_RPC_URL}
-      - RELAYER_PRIVATE_KEY=${RELAYER_PRIVATE_KEY}
+      - RELAYER_PRIVATE_KEY_FILE=/run/secrets/relayer_key
       - CONTRACT_REGISTRY=${CONTRACT_REGISTRY}
       - CONTRACT_SETTLEMENT=${CONTRACT_SETTLEMENT}
       - RPC_PORT=${RPC_PORT:-50052}
+      - RELAYER_DB_PATH=/app/relayer-data
+      - RELAYER_TLS_CERT_FILE=${RELAYER_TLS_CERT_FILE:+/run/secrets/relayer_tls_cert}
+      - RELAYER_TLS_KEY_FILE=${RELAYER_TLS_KEY_FILE:+/run/secrets/relayer_tls_key}
+      - RELAYER_API_KEY_FILE=/run/secrets/relayer_api_key
+    secrets:
+      - relayer_key
+      - relayer_api_key
+      - source: relayer_tls_cert
+        target: /run/secrets/relayer_tls_cert
+      - source: relayer_tls_key
+        target: /run/secrets/relayer_tls_key
     ports:
       - "${RPC_PORT:-50052}:${RPC_PORT:-50052}"
+    networks:
+      - internal
+      - frontend
     depends_on:
-      - amp-telemetry
+      amp-telemetry:
+        condition: service_healthy
+    stop_grace_period: 30s
 
   amp-server:
     build:
       context: .
       dockerfile: docker/amp-server.Dockerfile
+    restart: unless-stopped
     volumes:
       - amp-server-data:/app/data
     environment:
-      - AMP_ADDR=0.0.0.0:50051
-      - VERIFIER_KEY=${VERIFIER_KEY}
+      - AMP_ADDR=0.0.0.0:${AMP_PORT:-50051}
+      - AMP_DB_PATH=/app/data
+      - AMP_CHAIN_ID=${AMP_CHAIN_ID:-43113}
+      - AMP_SETTLEMENT_ADDRESS=${AMP_SETTLEMENT_ADDRESS}
+      - VERIFIER_KEY_FILE=/run/secrets/verifier_key
       - RELAYER_RPC_ADDR=${RELAYER_RPC_ADDR:-amp-relayer:50052}
+      - RELAYER_API_KEY_FILE=/run/secrets/relayer_api_key
       - TELEMETRY_ADDR=${TELEMETRY_ADDR:-amp-telemetry:4317}
+      - AMP_TLS_CERT_FILE=${AMP_TLS_CERT_FILE:+/run/secrets/amp_tls_cert}
+      - AMP_TLS_KEY_FILE=${AMP_TLS_KEY_FILE:+/run/secrets/amp_tls_key}
+    secrets:
+      - verifier_key
+      - relayer_api_key
+      - source: amp_tls_cert
+        target: /run/secrets/amp_tls_cert
+      - source: amp_tls_key
+        target: /run/secrets/amp_tls_key
     ports:
-      - "50051:50051"
+      - "${AMP_PORT:-50051}:${AMP_PORT:-50051}"
+    networks:
+      - internal
+      - frontend
     depends_on:
-      - amp-telemetry
-      - amp-relayer
+      amp-telemetry:
+        condition: service_healthy
+      amp-relayer:
+        condition: service_healthy
+    stop_grace_period: 30s
+
+networks:
+  internal:
+    internal: true
+  frontend:
 
 volumes:
   amp-server-data:
+  amp-relayer-data:
+  amp-telemetry-data:
+
+secrets:
+  relayer_key:
+    file: ${RELAYER_KEY_FILE:-secrets/relayer_key.txt}
+  verifier_key:
+    file: ${VERIFIER_KEY_FILE:-secrets/verifier_key.txt}
+  relayer_api_key:
+    file: ${RELAYER_API_KEY_FILE:-secrets/relayer_api_key.txt}
+  amp_tls_cert:
+    file: ${AMP_TLS_CERT_FILE:-/dev/null}
+  amp_tls_key:
+    file: ${AMP_TLS_KEY_FILE:-/dev/null}
+  relayer_tls_cert:
+    file: ${RELAYER_TLS_CERT_FILE:-/dev/null}
+  relayer_tls_key:
+    file: ${RELAYER_TLS_KEY_FILE:-/dev/null}

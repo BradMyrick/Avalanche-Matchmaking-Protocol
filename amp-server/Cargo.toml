@@ -1,6 +1,6 @@
 [package]
 name = "AMP-Server"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [dependencies]
@@ -9,11 +9,10 @@ capnp = "0.19"
 capnp-rpc = "0.19"
 ethers-core = "2.0"
 tokio-util = { version = "0.7", features = ["compat", "rt"] }
-anyhow = "1.0.100"
+anyhow = "1.0"
 uuid = { version = "1.20.0", features = ["v4"] }
 futures-util = "0.3.32"
-ethers-signers = "2.0.14"
-lazy_static = "1.5.0"
+ethers-signers = "2.0"
 amp-telemetry = { path = "../amp-telemetry" }
 tracing = "0.1.44"
 tracing-subscriber = "0.3"
@@ -24,6 +23,10 @@ dashmap = "6.0"
 thiserror = "2"
 hex = "0.4"
 dotenv = "0.15"
+amp-tls = { path = "../amp-tls" }
+arc-swap = "1.6.0"
+socket2 = { version = "0.5", features = ["all"] }
+num_cpus = "1.16"
 
 [build-dependencies]
 capnpc = "0.19"

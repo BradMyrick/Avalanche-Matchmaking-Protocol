@@ -11,17 +11,18 @@ namespace CapnpGen
     [System.CodeDom.Compiler.GeneratedCode("capnpc-csharp", "1.3.0.0"), TypeId(0x90b291895070d79eUL), Proxy(typeof(GameSessionService_Proxy)), Skeleton(typeof(GameSessionService_Skeleton))]
     public interface IGameSessionService : IDisposable
     {
-        Task<CapnpGen.IUserSession> Login(ulong gameId, IReadOnlyList<byte> signedChallenge, CancellationToken cancellationToken_ = default);
+        Task<CapnpGen.IUserSession> Login(ulong gameId, IReadOnlyList<byte> signature, IReadOnlyList<byte> challengePayload, CancellationToken cancellationToken_ = default);
+        Task<(IReadOnlyList<byte>, ulong)> RequestChallenge(ulong gameId, CancellationToken cancellationToken_ = default);
     }
 
     [System.CodeDom.Compiler.GeneratedCode("capnpc-csharp", "1.3.0.0"), TypeId(0x90b291895070d79eUL)]
     public class GameSessionService_Proxy : Proxy, IGameSessionService
     {
-        public Task<CapnpGen.IUserSession> Login(ulong gameId, IReadOnlyList<byte> signedChallenge, CancellationToken cancellationToken_ = default)
+        public Task<CapnpGen.IUserSession> Login(ulong gameId, IReadOnlyList<byte> signature, IReadOnlyList<byte> challengePayload, CancellationToken cancellationToken_ = default)
         {
             var in_ = SerializerState.CreateForRpc<CapnpGen.GameSessionService.Params_Login.WRITER>();
             var arg_ = new CapnpGen.GameSessionService.Params_Login()
-            {GameId = gameId, SignedChallenge = signedChallenge};
+            {GameId = gameId, Signature = signature, ChallengePayload = challengePayload};
             arg_?.serialize(in_);
             return Impatient.MakePipelineAware(Call(10426556106262239134UL, 0, in_.Rewrap<DynamicSerializerState>(), false, cancellationToken_), d_ =>
             {
@@ -34,6 +35,19 @@ namespace CapnpGen
 
             );
         }
+
+        public async Task<(IReadOnlyList<byte>, ulong)> RequestChallenge(ulong gameId, CancellationToken cancellationToken_ = default)
+        {
+            var in_ = SerializerState.CreateForRpc<CapnpGen.GameSessionService.Params_RequestChallenge.WRITER>();
+            var arg_ = new CapnpGen.GameSessionService.Params_RequestChallenge()
+            {GameId = gameId};
+            arg_?.serialize(in_);
+            using (var d_ = await Call(10426556106262239134UL, 1, in_.Rewrap<DynamicSerializerState>(), false, cancellationToken_).WhenReturned)
+            {
+                var r_ = CapnpSerializable.Create<CapnpGen.GameSessionService.Result_RequestChallenge>(d_);
+                return (r_.Challenge, r_.ExpiresAt);
+            }
+        }
     }
 
     [System.CodeDom.Compiler.GeneratedCode("capnpc-csharp", "1.3.0.0"), TypeId(0x90b291895070d79eUL)]
@@ -41,7 +55,7 @@ namespace CapnpGen
     {
         public GameSessionService_Skeleton()
         {
-            SetMethodTable(Login);
+            SetMethodTable(Login, RequestChallenge);
         }
 
         public override ulong InterfaceId => 10426556106262239134UL;
@@ -50,10 +64,27 @@ namespace CapnpGen
             using (d_)
             {
                 var in_ = CapnpSerializable.Create<CapnpGen.GameSessionService.Params_Login>(d_);
-                return Impatient.MaybeTailCall(Impl.Login(in_.GameId, in_.SignedChallenge, cancellationToken_), session =>
+                return Impatient.MaybeTailCall(Impl.Login(in_.GameId, in_.Signature, in_.ChallengePayload, cancellationToken_), session =>
                 {
                     var s_ = SerializerState.CreateForRpc<CapnpGen.GameSessionService.Result_Login.WRITER>();
                     var r_ = new CapnpGen.GameSessionService.Result_Login{Session = session};
+                    r_.serialize(s_);
+                    return s_;
+                }
+
+                );
+            }
+        }
+
+        Task<AnswerOrCounterquestion> RequestChallenge(DeserializerState d_, CancellationToken cancellationToken_)
+        {
+            using (d_)
+            {
+                var in_ = CapnpSerializable.Create<CapnpGen.GameSessionService.Params_RequestChallenge>(d_);
+                return Impatient.MaybeTailCall(Impl.RequestChallenge(in_.GameId, cancellationToken_), (challenge, expiresAt) =>
+                {
+                    var s_ = SerializerState.CreateForRpc<CapnpGen.GameSessionService.Result_RequestChallenge.WRITER>();
+                    var r_ = new CapnpGen.GameSessionService.Result_RequestChallenge{Challenge = challenge, ExpiresAt = expiresAt};
                     r_.serialize(s_);
                     return s_;
                 }
@@ -73,14 +104,16 @@ namespace CapnpGen
             {
                 var reader = READER.create(arg_);
                 GameId = reader.GameId;
-                SignedChallenge = reader.SignedChallenge;
+                Signature = reader.Signature;
+                ChallengePayload = reader.ChallengePayload;
                 applyDefaults();
             }
 
             public void serialize(WRITER writer)
             {
                 writer.GameId = GameId;
-                writer.SignedChallenge.Init(SignedChallenge);
+                writer.Signature.Init(Signature);
+                writer.ChallengePayload.Init(ChallengePayload);
             }
 
             void ICapnpSerializable.Serialize(SerializerState arg_)
@@ -98,7 +131,13 @@ namespace CapnpGen
                 set;
             }
 
-            public IReadOnlyList<byte> SignedChallenge
+            public IReadOnlyList<byte> Signature
+            {
+                get;
+                set;
+            }
+
+            public IReadOnlyList<byte> ChallengePayload
             {
                 get;
                 set;
@@ -116,14 +155,15 @@ namespace CapnpGen
                 public static implicit operator DeserializerState(READER reader) => reader.ctx;
                 public static implicit operator READER(DeserializerState ctx) => new READER(ctx);
                 public ulong GameId => ctx.ReadDataULong(0UL, 0UL);
-                public IReadOnlyList<byte> SignedChallenge => ctx.ReadList(0).CastByte();
+                public IReadOnlyList<byte> Signature => ctx.ReadList(0).CastByte();
+                public IReadOnlyList<byte> ChallengePayload => ctx.ReadList(1).CastByte();
             }
 
             public class WRITER : SerializerState
             {
                 public WRITER()
                 {
-                    this.SetStruct(1, 1);
+                    this.SetStruct(1, 2);
                 }
 
                 public ulong GameId
@@ -132,10 +172,16 @@ namespace CapnpGen
                     set => this.WriteData(0UL, value, 0UL);
                 }
 
-                public ListOfPrimitivesSerializer<byte> SignedChallenge
+                public ListOfPrimitivesSerializer<byte> Signature
                 {
                     get => BuildPointer<ListOfPrimitivesSerializer<byte>>(0);
                     set => Link(0, value);
+                }
+
+                public ListOfPrimitivesSerializer<byte> ChallengePayload
+                {
+                    get => BuildPointer<ListOfPrimitivesSerializer<byte>>(1);
+                    set => Link(1, value);
                 }
             }
         }
@@ -196,6 +242,141 @@ namespace CapnpGen
                 {
                     get => ReadCap<CapnpGen.IUserSession>(0);
                     set => LinkObject(0, value);
+                }
+            }
+        }
+
+        [System.CodeDom.Compiler.GeneratedCode("capnpc-csharp", "1.3.0.0"), TypeId(0xc40005efa636ad50UL)]
+        public class Params_RequestChallenge : ICapnpSerializable
+        {
+            public const UInt64 typeId = 0xc40005efa636ad50UL;
+            void ICapnpSerializable.Deserialize(DeserializerState arg_)
+            {
+                var reader = READER.create(arg_);
+                GameId = reader.GameId;
+                applyDefaults();
+            }
+
+            public void serialize(WRITER writer)
+            {
+                writer.GameId = GameId;
+            }
+
+            void ICapnpSerializable.Serialize(SerializerState arg_)
+            {
+                serialize(arg_.Rewrap<WRITER>());
+            }
+
+            public void applyDefaults()
+            {
+            }
+
+            public ulong GameId
+            {
+                get;
+                set;
+            }
+
+            public struct READER
+            {
+                readonly DeserializerState ctx;
+                public READER(DeserializerState ctx)
+                {
+                    this.ctx = ctx;
+                }
+
+                public static READER create(DeserializerState ctx) => new READER(ctx);
+                public static implicit operator DeserializerState(READER reader) => reader.ctx;
+                public static implicit operator READER(DeserializerState ctx) => new READER(ctx);
+                public ulong GameId => ctx.ReadDataULong(0UL, 0UL);
+            }
+
+            public class WRITER : SerializerState
+            {
+                public WRITER()
+                {
+                    this.SetStruct(1, 0);
+                }
+
+                public ulong GameId
+                {
+                    get => this.ReadDataULong(0UL, 0UL);
+                    set => this.WriteData(0UL, value, 0UL);
+                }
+            }
+        }
+
+        [System.CodeDom.Compiler.GeneratedCode("capnpc-csharp", "1.3.0.0"), TypeId(0xd8be5c7ee8a3eb27UL)]
+        public class Result_RequestChallenge : ICapnpSerializable
+        {
+            public const UInt64 typeId = 0xd8be5c7ee8a3eb27UL;
+            void ICapnpSerializable.Deserialize(DeserializerState arg_)
+            {
+                var reader = READER.create(arg_);
+                Challenge = reader.Challenge;
+                ExpiresAt = reader.ExpiresAt;
+                applyDefaults();
+            }
+
+            public void serialize(WRITER writer)
+            {
+                writer.Challenge.Init(Challenge);
+                writer.ExpiresAt = ExpiresAt;
+            }
+
+            void ICapnpSerializable.Serialize(SerializerState arg_)
+            {
+                serialize(arg_.Rewrap<WRITER>());
+            }
+
+            public void applyDefaults()
+            {
+            }
+
+            public IReadOnlyList<byte> Challenge
+            {
+                get;
+                set;
+            }
+
+            public ulong ExpiresAt
+            {
+                get;
+                set;
+            }
+
+            public struct READER
+            {
+                readonly DeserializerState ctx;
+                public READER(DeserializerState ctx)
+                {
+                    this.ctx = ctx;
+                }
+
+                public static READER create(DeserializerState ctx) => new READER(ctx);
+                public static implicit operator DeserializerState(READER reader) => reader.ctx;
+                public static implicit operator READER(DeserializerState ctx) => new READER(ctx);
+                public IReadOnlyList<byte> Challenge => ctx.ReadList(0).CastByte();
+                public ulong ExpiresAt => ctx.ReadDataULong(0UL, 0UL);
+            }
+
+            public class WRITER : SerializerState
+            {
+                public WRITER()
+                {
+                    this.SetStruct(1, 1);
+                }
+
+                public ListOfPrimitivesSerializer<byte> Challenge
+                {
+                    get => BuildPointer<ListOfPrimitivesSerializer<byte>>(0);
+                    set => Link(0, value);
+                }
+
+                public ulong ExpiresAt
+                {
+                    get => this.ReadDataULong(0UL, 0UL);
+                    set => this.WriteData(0UL, value, 0UL);
                 }
             }
         }

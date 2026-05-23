@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -5,7 +6,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
 use ethers::prelude::*;
-use futures::FutureExt;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{error, info};
 
@@ -51,9 +51,33 @@ pub struct RelayerState {
 struct RelayerImpl {
     state: RelayerState,
     queue: Arc<settlement::SettlementQueue>,
+    authenticated: Cell<bool>,
+    api_keys: Arc<std::collections::HashSet<String>>,
 }
 
 impl relayer_capnp::relayer_service::Server for RelayerImpl {
+    fn authenticate(
+        &mut self,
+        params: relayer_capnp::relayer_service::AuthenticateParams,
+        mut results: relayer_capnp::relayer_service::AuthenticateResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let params_reader = capnp_rpc::pry!(params.get());
+        let api_key_bytes = capnp_rpc::pry!(params_reader.get_api_key());
+        let api_key = capnp_rpc::pry!(std::str::from_utf8(api_key_bytes));
+
+        let hashed = config::hash_api_key(api_key);
+        let ok = self.api_keys.contains(&hashed);
+        if ok {
+            self.authenticated.set(true);
+            info!("Relayer client authenticated successfully");
+        } else {
+            tracing::warn!("Authentication failed: invalid API key");
+        }
+
+        results.get().set_ok(ok);
+        capnp::capability::Promise::ok(())
+    }
+
     fn get_game_admin(
         &mut self,
         params: relayer_capnp::relayer_service::GetGameAdminParams,
@@ -81,13 +105,22 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
         params: relayer_capnp::relayer_service::GetCustodialAddressParams,
         mut results: relayer_capnp::relayer_service::GetCustodialAddressResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
+        if !self.authenticated.get() && !self.api_keys.is_empty() {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "unauthorized: call authenticate() first".to_string(),
+            ));
+        }
+
         let game_id = capnp_rpc::pry!(params.get()).get_game_id();
         let chain_id = self.state.master_client.signer().chain_id();
-        let wallet = custodial::derive_custodial_signer(
-            self.state.master_client.signer(),
-            "settlement",
-            game_id,
-            chain_id,
+        let wallet = capnp_rpc::pry!(
+            custodial::derive_custodial_signer(
+                self.state.master_client.signer(),
+                "settlement",
+                game_id,
+                chain_id,
+            )
+            .map_err(|e| capnp::Error::failed(format!("custodial derivation failed: {}", e)))
         );
 
         results.get().set_address(wallet.address().as_bytes());
@@ -99,11 +132,40 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
         params: relayer_capnp::relayer_service::SubmitOutcomeParams,
         mut results: relayer_capnp::relayer_service::SubmitOutcomeResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
+        if !self.authenticated.get() && !self.api_keys.is_empty() {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "unauthorized: call authenticate() first".to_string(),
+            ));
+        }
+
         let params_reader = capnp_rpc::pry!(params.get());
         let match_id_bytes = capnp_rpc::pry!(params_reader.get_match_id()).to_vec();
+        if match_id_bytes.is_empty() || match_id_bytes.len() > 64 {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "match_id must be 1-64 bytes".to_string(),
+            ));
+        }
         let outcome = params_reader.get_outcome();
+        if !(1..=3).contains(&outcome) {
+            return capnp::capability::Promise::err(capnp::Error::failed(format!(
+                "outcome must be 1-3, got {}",
+                outcome
+            )));
+        }
         let transcript_hash_bytes = capnp_rpc::pry!(params_reader.get_transcript_hash()).to_vec();
+        if transcript_hash_bytes.len() != 32 {
+            return capnp::capability::Promise::err(capnp::Error::failed(format!(
+                "transcript_hash must be 32 bytes, got {}",
+                transcript_hash_bytes.len()
+            )));
+        }
         let signature_bytes = capnp_rpc::pry!(params_reader.get_signature()).to_vec();
+        if signature_bytes.len() != 65 {
+            return capnp::capability::Promise::err(capnp::Error::failed(format!(
+                "signature must be 65 bytes (secp256k1), got {}",
+                signature_bytes.len()
+            )));
+        }
 
         let queue = self.queue.clone();
 
@@ -157,6 +219,16 @@ async fn run_cli_mode(args: Vec<String>) -> Result<()> {
         local
             .run_until(async move {
                 tokio::task::spawn_local(rpc_system);
+
+                if let Ok(api_key) = env::var("RELAYER_API_KEY") {
+                    let mut auth_req = client.authenticate_request();
+                    auth_req.get().set_api_key(api_key.as_bytes());
+                    let auth_resp = auth_req.send().promise.await?;
+                    if !auth_resp.get()?.get_ok() {
+                        anyhow::bail!("authentication failed: invalid API key");
+                    }
+                }
+
                 if args[1] == "query-custodial" {
                     let mut req = client.get_custodial_address_request();
                     req.get().set_game_id(game_id);
@@ -253,15 +325,35 @@ async fn main() -> Result<()> {
     let queue_processor = queue.clone();
     let cfg_processor = cfg.clone();
 
-    let relayer_impl = RelayerImpl {
-        state,
-        queue: queue.clone(),
-    };
-    let relayer_client: relayer_capnp::relayer_service::Client =
-        capnp_rpc::new_client(relayer_impl);
+    let api_keys = Arc::new(cfg.api_keys.clone());
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("AMP Relayer (Cap'n Proto RPC) listening on {}", addr);
+
+    let tls_acceptor = match (&cfg.tls_cert_file, &cfg.tls_key_file) {
+        (Some(cert_path), Some(key_path)) => {
+            match amp_tls::create_tls_acceptor(cert_path, key_path) {
+                Ok(acceptor) => {
+                    info!("TLS enabled (cert={}, key={})", cert_path, key_path);
+                    Some(acceptor)
+                }
+                Err(e) => {
+                    anyhow::bail!(
+                        "TLS configuration failed (cert={}, key={}): {}. Fix the certificates or remove RELAYER_TLS_CERT_FILE/RELAYER_TLS_KEY_FILE to use plain TCP.",
+                        cert_path,
+                        key_path,
+                        e
+                    );
+                }
+            }
+        }
+        _ => {
+            info!(
+                "TLS not configured (set RELAYER_TLS_CERT_FILE and RELAYER_TLS_KEY_FILE to enable)"
+            );
+            None
+        }
+    };
 
     tokio::spawn(run_settlement_processor(
         state_processor,
@@ -280,7 +372,13 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     info!("Shutdown complete.");
                 }
-                result = accept_loop(listener, relayer_client) => {
+                _ = wait_sigterm() => {
+                    info!("Received SIGTERM");
+                    cancel.cancel();
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    info!("Shutdown complete.");
+                }
+                result = accept_loop(listener, state.clone(), queue.clone(), api_keys.clone(), tls_acceptor) => {
                     result?;
                 }
             }
@@ -291,23 +389,92 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+async fn wait_sigterm() {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut term = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+    term.recv().await;
+}
+
+#[cfg(not(unix))]
+async fn wait_sigterm() {
+    std::future::pending::<()>().await;
+}
+
 async fn accept_loop(
     listener: tokio::net::TcpListener,
-    relayer_client: relayer_capnp::relayer_service::Client,
+    state: RelayerState,
+    queue: Arc<settlement::SettlementQueue>,
+    api_keys: Arc<std::collections::HashSet<String>>,
+    tls_acceptor: Option<amp_tls::TlsAcceptor>,
 ) -> Result<()> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let max_connections: usize = std::env::var("RELAYER_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50);
+    let active = Arc::new(AtomicUsize::new(0));
+    info!("Relayer max concurrent connections: {}", max_connections);
+
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, peer) = listener.accept().await?;
         stream.set_nodelay(true)?;
-        let (reader, writer) = stream.into_split();
 
-        let network = twoparty::VatNetwork::new(
-            reader.compat(),
-            writer.compat_write(),
-            rpc_twoparty_capnp::Side::Server,
-            Default::default(),
-        );
+        let current = active.load(Ordering::Relaxed);
+        if current >= max_connections {
+            tracing::warn!("Relayer at capacity ({}), rejecting {}", current, peer);
+            drop(stream);
+            continue;
+        }
+        active.fetch_add(1, Ordering::Relaxed);
 
-        let rpc_system = RpcSystem::new(Box::new(network), Some(relayer_client.clone().client));
-        tokio::task::spawn_local(rpc_system.map(|_| ()));
+        let state = state.clone();
+        let queue = queue.clone();
+        let api_keys = api_keys.clone();
+        let acceptor = tls_acceptor.clone();
+        let counter = active.clone();
+
+        tokio::task::spawn_local(async move {
+            let relayer_impl = RelayerImpl {
+                state,
+                queue,
+                authenticated: Cell::new(false),
+                api_keys,
+            };
+            let client: relayer_capnp::relayer_service::Client =
+                capnp_rpc::new_client(relayer_impl);
+
+            if let Some(ref acc) = acceptor {
+                match acc.accept(stream).await {
+                    Ok(tls_stream) => {
+                        let (reader, writer) = tokio::io::split(tls_stream);
+                        run_rpc(reader, writer, client).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("TLS handshake failed for {}: {}", peer, e);
+                    }
+                }
+            } else {
+                let (reader, writer) = stream.into_split();
+                run_rpc(reader, writer, client).await;
+            }
+            counter.fetch_sub(1, Ordering::Relaxed);
+        });
     }
+}
+
+async fn run_rpc<R, W>(reader: R, writer: W, relayer_client: relayer_capnp::relayer_service::Client)
+where
+    R: tokio::io::AsyncRead + Unpin + 'static,
+    W: tokio::io::AsyncWrite + Unpin + 'static,
+{
+    let network = twoparty::VatNetwork::new(
+        reader.compat(),
+        writer.compat_write(),
+        rpc_twoparty_capnp::Side::Server,
+        Default::default(),
+    );
+    let rpc_system = RpcSystem::new(Box::new(network), Some(relayer_client.client));
+    let _ = rpc_system.await;
 }

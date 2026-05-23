@@ -27,10 +27,10 @@ public class AmpClient : IDisposable {
     }
 
     /// <summary>
-    /// Connects to the AMP server and authenticates with the given game ID and player signature.
+    /// Connects to the AMP server via Cap'n Proto RPC.
     /// Retries up to 5 times with 2-second backoff.
     /// </summary>
-    public async Task<bool> ConnectAsync(ulong gameId, byte[] playerSignature) {
+    public async Task<bool> ConnectAsync() {
         int maxRetries = 5;
         for (int i = 0; i < maxRetries; i++) {
             try {
@@ -46,16 +46,33 @@ public class AmpClient : IDisposable {
                 _rpcClient = new TcpRpcClient(host, port);
                 _sessionService = _rpcClient.GetMain<IGameSessionService>();
 
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                _userSession = await _sessionService.Login(gameId, playerSignature, cts.Token);
-
-                if (_userSession != null) return true;
+                if (_sessionService != null) return true;
             } catch (System.Exception) {
                 _rpcClient?.Dispose();
                 if (i < maxRetries - 1) await Task.Delay(2000);
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Requests a one-time authentication challenge for the given game ID.
+    /// </summary>
+    public async Task<(byte[] challenge, ulong expiresAt)> RequestChallengeAsync(ulong gameId) {
+        if (_sessionService == null) throw new InvalidOperationException("Not connected.");
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var (challenge, expiresAt) = await _sessionService.RequestChallenge(gameId, cts.Token);
+        return (System.Linq.Enumerable.ToArray(challenge), expiresAt);
+    }
+
+    /// <summary>
+    /// Authenticates with the AMP server using a signed challenge.
+    /// </summary>
+    public async Task<bool> LoginAsync(ulong gameId, byte[] signature, byte[] challengePayload) {
+        if (_sessionService == null) throw new InvalidOperationException("Not connected.");
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        _userSession = await _sessionService.Login(gameId, signature, challengePayload, cts.Token);
+        return _userSession != null;
     }
 
     /// <summary>

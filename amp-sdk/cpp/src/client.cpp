@@ -16,7 +16,8 @@ bool AMPClient::login(uint64_t game_id, const std::vector<uint8_t>& signature) {
         auto req = game_session_service_.loginRequest();
         req.setGameId(game_id);
         kj::ArrayPtr<const kj::byte> sig_bytes(signature.data(), signature.size());
-        req.setSignedChallenge(sig_bytes);
+        req.setSignature(sig_bytes);
+        req.setChallengePayload(kj::ArrayPtr<const kj::byte>());
         auto response = req.send().wait(rpc_client_->getWaitScope());
         user_session_ = response.getSession();
         return true;

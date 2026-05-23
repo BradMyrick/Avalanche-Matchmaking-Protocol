@@ -160,6 +160,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::Parser;
+use ethers_core::types::H256;
+use ethers_signers::LocalWallet;
 use hdrhistogram::Histogram;
 use tokio::net::TcpStream;
 use tokio::task::LocalSet;
@@ -205,6 +207,10 @@ async fn run_client(
 ) {
     let total_start = Instant::now();
 
+    let key_input = format!("amp-loadtest-client-{}", client_id);
+    let key_bytes = ethers_core::utils::keccak256(key_input);
+    let wallet = LocalWallet::from_bytes(&key_bytes).expect("valid loadtest wallet key");
+
     let connect_start = Instant::now();
     let stream = match TcpStream::connect(addr).await {
         Ok(s) => s,
@@ -235,7 +241,7 @@ async fn run_client(
     });
 
     let login_start = Instant::now();
-    let session = match login(&service, client_id).await {
+    let session = match login(&service, client_id, &wallet).await {
         Ok(s) => s,
         Err(e) => {
             error!(client_id, "login failed: {e}");
@@ -280,13 +286,16 @@ async fn run_client(
 async fn login(
     service: &service_capnp::game_session_service::Client,
     client_id: u64,
+    wallet: &LocalWallet,
 ) -> Result<service_capnp::user_session::Client> {
     let mut challenge_req = service.request_challenge_request();
     challenge_req.get().set_game_id(client_id);
     let challenge_resp = challenge_req.send().promise.await?;
     let challenge_bytes = challenge_resp.get()?.get_challenge()?.to_vec();
 
-    let sig_bytes = vec![0u8; 65];
+    let msg_hash: H256 = ethers_core::utils::hash_message(&challenge_bytes);
+    let sig = wallet.sign_hash(msg_hash)?;
+    let sig_bytes = sig.to_vec();
 
     let mut req = service.login_request();
     req.get().set_game_id(client_id);
