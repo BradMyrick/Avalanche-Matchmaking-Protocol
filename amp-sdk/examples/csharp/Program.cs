@@ -21,10 +21,14 @@ namespace AmpSdkExample
                 using var client = new AmpClient(serverUrl);
                 var dummySig = HexToBytes("24e2943427fa35e48c01ba764c271a9e76d295142704648b171e8cb5272a279773a0206586e565b1fed8a916e945a39868463654f752bf6bcd6843ab06bff39e1c");
                 ulong gameId = 0; // Use game 0 as registered in e2e_verify.sh
-                if (await client.ConnectAsync(gameId, dummySig))
+                if (await client.ConnectAsync())
                 {
-                    Console.WriteLine("[Player B] Connected to Matchmaker. Requesting match...");
-                    await client.RequestMatchAsync(gameIdStr);
+                    var (challenge, expiresAt) = await client.RequestChallengeAsync(gameId);
+                    if (await client.LoginAsync(gameId, dummySig, challenge))
+                    {
+                        Console.WriteLine("[Player B] Connected to Matchmaker. Requesting match...");
+                        await client.RequestMatchAsync(gameIdStr);
+                    }
                 }
             }
             catch (Exception)
@@ -45,10 +49,17 @@ namespace AmpSdkExample
                 // 1. Connect and login via signature
                 var pseudoSignature = HexToBytes("24e2943427fa35e48c01ba764c271a9e76d295142704648b171e8cb5272a279773a0206586e565b1fed8a916e945a39868463654f752bf6bcd6843ab06bff39e1c");
                 ulong gameId = 0;
-                bool connected = await client.ConnectAsync(gameId, pseudoSignature);
+                bool connected = await client.ConnectAsync();
                 if (!connected)
                 {
                     Console.WriteLine("Failed to connect.");
+                    Environment.Exit(1);
+                }
+                var (challenge, expiresAt) = await client.RequestChallengeAsync(gameId);
+                bool loggedIn = await client.LoginAsync(gameId, pseudoSignature, challenge);
+                if (!loggedIn)
+                {
+                    Console.WriteLine("Failed to log in.");
                     Environment.Exit(1);
                 }
                 Console.WriteLine("[Player A] Connected & Logged in to AMP matchmaker.");

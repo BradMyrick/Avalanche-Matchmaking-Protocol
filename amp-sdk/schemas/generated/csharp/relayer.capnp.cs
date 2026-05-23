@@ -14,6 +14,7 @@ namespace CapnpGen
         Task<IReadOnlyList<byte>> GetGameAdmin(ulong gameId, CancellationToken cancellationToken_ = default);
         Task<IReadOnlyList<byte>> GetCustodialAddress(ulong gameId, CancellationToken cancellationToken_ = default);
         Task<IReadOnlyList<byte>> SubmitOutcome(IReadOnlyList<byte> matchId, byte outcome, IReadOnlyList<byte> transcriptHash, IReadOnlyList<byte> signature, CancellationToken cancellationToken_ = default);
+        Task<bool> Authenticate(IReadOnlyList<byte> apiKey, CancellationToken cancellationToken_ = default);
     }
 
     [System.CodeDom.Compiler.GeneratedCode("capnpc-csharp", "1.3.0.0"), TypeId(0xbf96a8ce004be5baUL)]
@@ -57,6 +58,19 @@ namespace CapnpGen
                 return (r_.TxHash);
             }
         }
+
+        public async Task<bool> Authenticate(IReadOnlyList<byte> apiKey, CancellationToken cancellationToken_ = default)
+        {
+            var in_ = SerializerState.CreateForRpc<CapnpGen.RelayerService.Params_Authenticate.WRITER>();
+            var arg_ = new CapnpGen.RelayerService.Params_Authenticate()
+            {ApiKey = apiKey};
+            arg_?.serialize(in_);
+            using (var d_ = await Call(13805407310472537530UL, 3, in_.Rewrap<DynamicSerializerState>(), false, cancellationToken_).WhenReturned)
+            {
+                var r_ = CapnpSerializable.Create<CapnpGen.RelayerService.Result_Authenticate>(d_);
+                return (r_.Ok);
+            }
+        }
     }
 
     [System.CodeDom.Compiler.GeneratedCode("capnpc-csharp", "1.3.0.0"), TypeId(0xbf96a8ce004be5baUL)]
@@ -64,7 +78,7 @@ namespace CapnpGen
     {
         public RelayerService_Skeleton()
         {
-            SetMethodTable(GetGameAdmin, GetCustodialAddress, SubmitOutcome);
+            SetMethodTable(GetGameAdmin, GetCustodialAddress, SubmitOutcome, Authenticate);
         }
 
         public override ulong InterfaceId => 13805407310472537530UL;
@@ -111,6 +125,23 @@ namespace CapnpGen
                 {
                     var s_ = SerializerState.CreateForRpc<CapnpGen.RelayerService.Result_SubmitOutcome.WRITER>();
                     var r_ = new CapnpGen.RelayerService.Result_SubmitOutcome{TxHash = txHash};
+                    r_.serialize(s_);
+                    return s_;
+                }
+
+                );
+            }
+        }
+
+        Task<AnswerOrCounterquestion> Authenticate(DeserializerState d_, CancellationToken cancellationToken_)
+        {
+            using (d_)
+            {
+                var in_ = CapnpSerializable.Create<CapnpGen.RelayerService.Params_Authenticate>(d_);
+                return Impatient.MaybeTailCall(Impl.Authenticate(in_.ApiKey, cancellationToken_), ok =>
+                {
+                    var s_ = SerializerState.CreateForRpc<CapnpGen.RelayerService.Result_Authenticate.WRITER>();
+                    var r_ = new CapnpGen.RelayerService.Result_Authenticate{Ok = ok};
                     r_.serialize(s_);
                     return s_;
                 }
@@ -523,6 +554,126 @@ namespace CapnpGen
                 {
                     get => BuildPointer<ListOfPrimitivesSerializer<byte>>(0);
                     set => Link(0, value);
+                }
+            }
+        }
+
+        [System.CodeDom.Compiler.GeneratedCode("capnpc-csharp", "1.3.0.0"), TypeId(0xabe5c49dc1e547fdUL)]
+        public class Params_Authenticate : ICapnpSerializable
+        {
+            public const UInt64 typeId = 0xabe5c49dc1e547fdUL;
+            void ICapnpSerializable.Deserialize(DeserializerState arg_)
+            {
+                var reader = READER.create(arg_);
+                ApiKey = reader.ApiKey;
+                applyDefaults();
+            }
+
+            public void serialize(WRITER writer)
+            {
+                writer.ApiKey.Init(ApiKey);
+            }
+
+            void ICapnpSerializable.Serialize(SerializerState arg_)
+            {
+                serialize(arg_.Rewrap<WRITER>());
+            }
+
+            public void applyDefaults()
+            {
+            }
+
+            public IReadOnlyList<byte> ApiKey
+            {
+                get;
+                set;
+            }
+
+            public struct READER
+            {
+                readonly DeserializerState ctx;
+                public READER(DeserializerState ctx)
+                {
+                    this.ctx = ctx;
+                }
+
+                public static READER create(DeserializerState ctx) => new READER(ctx);
+                public static implicit operator DeserializerState(READER reader) => reader.ctx;
+                public static implicit operator READER(DeserializerState ctx) => new READER(ctx);
+                public IReadOnlyList<byte> ApiKey => ctx.ReadList(0).CastByte();
+            }
+
+            public class WRITER : SerializerState
+            {
+                public WRITER()
+                {
+                    this.SetStruct(0, 1);
+                }
+
+                public ListOfPrimitivesSerializer<byte> ApiKey
+                {
+                    get => BuildPointer<ListOfPrimitivesSerializer<byte>>(0);
+                    set => Link(0, value);
+                }
+            }
+        }
+
+        [System.CodeDom.Compiler.GeneratedCode("capnpc-csharp", "1.3.0.0"), TypeId(0xf03b24998d73879aUL)]
+        public class Result_Authenticate : ICapnpSerializable
+        {
+            public const UInt64 typeId = 0xf03b24998d73879aUL;
+            void ICapnpSerializable.Deserialize(DeserializerState arg_)
+            {
+                var reader = READER.create(arg_);
+                Ok = reader.Ok;
+                applyDefaults();
+            }
+
+            public void serialize(WRITER writer)
+            {
+                writer.Ok = Ok;
+            }
+
+            void ICapnpSerializable.Serialize(SerializerState arg_)
+            {
+                serialize(arg_.Rewrap<WRITER>());
+            }
+
+            public void applyDefaults()
+            {
+            }
+
+            public bool Ok
+            {
+                get;
+                set;
+            }
+
+            public struct READER
+            {
+                readonly DeserializerState ctx;
+                public READER(DeserializerState ctx)
+                {
+                    this.ctx = ctx;
+                }
+
+                public static READER create(DeserializerState ctx) => new READER(ctx);
+                public static implicit operator DeserializerState(READER reader) => reader.ctx;
+                public static implicit operator READER(DeserializerState ctx) => new READER(ctx);
+                public bool Ok => ctx.ReadDataBool(0UL, false);
+            }
+
+            public class WRITER : SerializerState
+            {
+                public WRITER()
+                {
+                    this.SetStruct(1, 0);
+                }
+
+                public bool Ok
+                {
+                    get => this.ReadDataBool(0UL, false);
+                    set => this.WriteData(0UL, value, false);
                 }
             }
         }
