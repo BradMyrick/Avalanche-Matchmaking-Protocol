@@ -8,7 +8,17 @@ AMP is a decentralized, high-performance matchmaking protocol built on Avalanche
 
 ## Award Winning Technology
 
+<p align="center">
+  <img src="docs/images/grant_badge.png" alt="Avalanche Build Games 2026 Merit Grant" width="300" />
+</p>
+
 AMP was awarded a **$15,000.00 Merit Grant** for placing in the **top 20 projects** of the **Avalanche Build Games 2026**.
+
+---
+
+## Documentation
+
+Full documentation including architecture deep-dives, integration guides, SDK references, and contract API docs is available in the [`docs/`](docs/) directory.
 
 ---
 
@@ -76,8 +86,10 @@ AMP/
 │   ├── cpp/           # C++ SDK (Unreal)
 │   ├── csharp/        # C# SDK (Unity/Godot)
 │   └── python/        # Python SDK
+├── amp-examples/      # Example projects (TypeScript, C++, C#)
 ├── amp-loadtest/      # Load testing tool
 ├── contracts/         # Solidity (Forge, ^0.8.33, OpenZeppelin v5.6.1)
+├── docs/              # Documentation (architecture, SDK guides, contracts reference)
 ├── docker/            # Multi-stage Dockerfiles
 ├── trace-viewer/      # Telemetry binary log viewer
 └── scripts/           # Deployment utilities
@@ -184,7 +196,7 @@ See [.env.example](.env.example) for the complete list. Key variables:
 | Suite | Count | Command |
 |:---|:---|:---|
 | Rust tests | 30 | `cargo test --workspace` |
-| Forge tests | 31 | `cd contracts && forge test -vvv` |
+| Forge tests | 32 | `cd contracts && forge test -vvv` |
 | Clippy | clean | `cargo clippy --workspace --all-targets -- -D warnings` |
 | Formatting | clean | `cargo fmt --all -- --check` |
 

@@ -17,8 +17,8 @@ Our mission is to become the default settlement layer for all competitive games 
 - [x] Native SDKs: C++, C#, Go, Python, Rust.
 - [x] `amp-relayer` with sled-backed queue, EIP-1559 gas, nonce tracking, retry + dead-letter.
 - [x] Docker + docker-compose for all services.
-- [x] 31 Forge tests (17 Registry + 14 Settlement).
-- [x] 22 Rust tests passing.
+- [x] 32 Forge tests (17 Registry + 15 Settlement).
+- [x] 30 Rust tests passing.
 - [x] CI with cargo fmt, clippy, test, and Forge test.
 - [x] Load testing tool (`amp-loadtest`).
 
@@ -43,8 +43,6 @@ Our mission is to become the default settlement layer for all competitive games 
 - [ ] Transition to a dedicated **Avalanche Subnet** for high-frequency settlement.
 - [ ] 10,000+ matches per day target.
 - [ ] Fraud Proof / Challenge mechanism for `ASYNC_VERIFIER`.
-- [ ] Relayer TLS and authentication.
-- [ ] Docker security hardening (non-root, healthchecks).
 
 ---
 
@@ -53,7 +51,6 @@ Our mission is to become the default settlement layer for all competitive games 
 - No player deduplication in match queue.
 - Glicko-2 NaN validation not yet implemented.
 - No persistence schema versioning for sled.
-- Relayer nonce does not auto-reset on failure.
 
 ## Long-term Vision (2027+)
 Beyond 1v1 and small arena games, AMP aims to support massive-scale competitive play, including Battle Royales and persistent world territorial control, all settled trustlessly on Avalanche.
