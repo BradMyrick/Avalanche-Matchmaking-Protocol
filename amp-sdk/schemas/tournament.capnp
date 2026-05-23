@@ -1,8 +1,8 @@
 @0xceffa2ecb2bb4cbd;
 
-using Go = import "go.capnp";
+using Go = import "go_v3.capnp";
 $Go.package("generated");
-$Go.import("amp-sdk/go/generated");
+$Go.import("github.com/avalanche-matchmaking-protocol/amp-sdk/go/generated");
 
 using Rust = import "rust.capnp";
 $Rust.parentModule("tournament_capnp");

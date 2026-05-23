@@ -55,7 +55,8 @@ class AMPClient:
 
         req = self._bootstrap.login_request()
         req.gameId = game_id
-        req.signedChallenge = player_id.encode('utf-8')
+        req.signature = player_id.encode('utf-8')
+        req.challengePayload = b''
 
         try:
             result = await req.send()

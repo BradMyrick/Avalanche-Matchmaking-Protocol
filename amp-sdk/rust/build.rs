@@ -2,12 +2,14 @@ fn main() {
     let schema_dir = std::path::PathBuf::from("../schemas");
 
     let schemas = [
+        "game_types.capnp",
         "game_core.capnp",
         "match.capnp",
         "player_profile.capnp",
         "matchmaking_rules.capnp",
         "game_registry.capnp",
         "amp_telemetry.capnp",
+        "relayer.capnp",
         "inventory.capnp",
         "tournament.capnp",
         "security.capnp",

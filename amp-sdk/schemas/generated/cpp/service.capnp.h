@@ -11,7 +11,7 @@
 
 #ifndef CAPNP_VERSION
 #error "CAPNP_VERSION is not defined, is capnp/generated-header-support.h missing?"
-#elif CAPNP_VERSION != 1002000
+#elif CAPNP_VERSION != 1003000
 #error "Version mismatch between generated code and library headers.  You must use the same version of the Cap'n Proto compiler and library."
 #endif
 
@@ -32,6 +32,8 @@ namespace schemas {
 CAPNP_DECLARE_SCHEMA(90b291895070d79e);
 CAPNP_DECLARE_SCHEMA(ea8442a159ee3b31);
 CAPNP_DECLARE_SCHEMA(d7124a5eab13ea76);
+CAPNP_DECLARE_SCHEMA(c40005efa636ad50);
+CAPNP_DECLARE_SCHEMA(d8be5c7ee8a3eb27);
 CAPNP_DECLARE_SCHEMA(897b3f34b12e7f49);
 CAPNP_DECLARE_SCHEMA(cf96bba70f1b170f);
 CAPNP_DECLARE_SCHEMA(e4dd6aece9b3cb4c);
@@ -93,6 +95,8 @@ struct GameSessionService {
 
   struct LoginParams;
   struct LoginResults;
+  struct RequestChallengeParams;
+  struct RequestChallengeResults;
 
   #if !CAPNP_LITE
   struct _capnpPrivate {
@@ -110,7 +114,7 @@ struct GameSessionService::LoginParams {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(ea8442a159ee3b31, 1, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(ea8442a159ee3b31, 1, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -126,6 +130,36 @@ struct GameSessionService::LoginResults {
 
   struct _capnpPrivate {
     CAPNP_DECLARE_STRUCT_HEADER(d7124a5eab13ea76, 0, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct GameSessionService::RequestChallengeParams {
+  RequestChallengeParams() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(c40005efa636ad50, 1, 0)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct GameSessionService::RequestChallengeResults {
+  RequestChallengeResults() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(d8be5c7ee8a3eb27, 1, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -722,6 +756,8 @@ public:
 
   ::capnp::Request< ::GameSessionService::LoginParams,  ::GameSessionService::LoginResults> loginRequest(
       ::kj::Maybe< ::capnp::MessageSize> sizeHint = nullptr);
+  ::capnp::Request< ::GameSessionService::RequestChallengeParams,  ::GameSessionService::RequestChallengeResults> requestChallengeRequest(
+      ::kj::Maybe< ::capnp::MessageSize> sizeHint = nullptr);
 
 protected:
   Client() = default;
@@ -742,6 +778,10 @@ protected:
   typedef  ::GameSessionService::LoginResults LoginResults;
   typedef ::capnp::CallContext<LoginParams, LoginResults> LoginContext;
   virtual ::kj::Promise<void> login(LoginContext context);
+  typedef  ::GameSessionService::RequestChallengeParams RequestChallengeParams;
+  typedef  ::GameSessionService::RequestChallengeResults RequestChallengeResults;
+  typedef ::capnp::CallContext<RequestChallengeParams, RequestChallengeResults> RequestChallengeContext;
+  virtual ::kj::Promise<void> requestChallenge(RequestChallengeContext context);
 
   inline  ::GameSessionService::Client thisCap() {
     return ::capnp::Capability::Server::thisCap()
@@ -773,8 +813,11 @@ public:
 
   inline  ::uint64_t getGameId() const;
 
-  inline bool hasSignedChallenge() const;
-  inline  ::capnp::Data::Reader getSignedChallenge() const;
+  inline bool hasSignature() const;
+  inline  ::capnp::Data::Reader getSignature() const;
+
+  inline bool hasChallengePayload() const;
+  inline  ::capnp::Data::Reader getChallengePayload() const;
 
 private:
   ::capnp::_::StructReader _reader;
@@ -807,12 +850,19 @@ public:
   inline  ::uint64_t getGameId();
   inline void setGameId( ::uint64_t value);
 
-  inline bool hasSignedChallenge();
-  inline  ::capnp::Data::Builder getSignedChallenge();
-  inline void setSignedChallenge( ::capnp::Data::Reader value);
-  inline  ::capnp::Data::Builder initSignedChallenge(unsigned int size);
-  inline void adoptSignedChallenge(::capnp::Orphan< ::capnp::Data>&& value);
-  inline ::capnp::Orphan< ::capnp::Data> disownSignedChallenge();
+  inline bool hasSignature();
+  inline  ::capnp::Data::Builder getSignature();
+  inline void setSignature( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initSignature(unsigned int size);
+  inline void adoptSignature(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownSignature();
+
+  inline bool hasChallengePayload();
+  inline  ::capnp::Data::Builder getChallengePayload();
+  inline void setChallengePayload( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initChallengePayload(unsigned int size);
+  inline void adoptChallengePayload(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownChallengePayload();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -918,6 +968,168 @@ public:
       : _typeless(kj::mv(typeless)) {}
 
   inline  ::UserSession::Client getSession();
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class GameSessionService::RequestChallengeParams::Reader {
+public:
+  typedef RequestChallengeParams Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint64_t getGameId() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class GameSessionService::RequestChallengeParams::Builder {
+public:
+  typedef RequestChallengeParams Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint64_t getGameId();
+  inline void setGameId( ::uint64_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class GameSessionService::RequestChallengeParams::Pipeline {
+public:
+  typedef RequestChallengeParams Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class GameSessionService::RequestChallengeResults::Reader {
+public:
+  typedef RequestChallengeResults Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasChallenge() const;
+  inline  ::capnp::Data::Reader getChallenge() const;
+
+  inline  ::uint64_t getExpiresAt() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class GameSessionService::RequestChallengeResults::Builder {
+public:
+  typedef RequestChallengeResults Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasChallenge();
+  inline  ::capnp::Data::Builder getChallenge();
+  inline void setChallenge( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initChallenge(unsigned int size);
+  inline void adoptChallenge(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownChallenge();
+
+  inline  ::uint64_t getExpiresAt();
+  inline void setExpiresAt( ::uint64_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class GameSessionService::RequestChallengeResults::Pipeline {
+public:
+  typedef RequestChallengeResults Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -3695,38 +3907,72 @@ inline void GameSessionService::LoginParams::Builder::setGameId( ::uint64_t valu
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
 }
 
-inline bool GameSessionService::LoginParams::Reader::hasSignedChallenge() const {
+inline bool GameSessionService::LoginParams::Reader::hasSignature() const {
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline bool GameSessionService::LoginParams::Builder::hasSignedChallenge() {
+inline bool GameSessionService::LoginParams::Builder::hasSignature() {
   return !_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline  ::capnp::Data::Reader GameSessionService::LoginParams::Reader::getSignedChallenge() const {
+inline  ::capnp::Data::Reader GameSessionService::LoginParams::Reader::getSignature() const {
   return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline  ::capnp::Data::Builder GameSessionService::LoginParams::Builder::getSignedChallenge() {
+inline  ::capnp::Data::Builder GameSessionService::LoginParams::Builder::getSignature() {
   return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void GameSessionService::LoginParams::Builder::setSignedChallenge( ::capnp::Data::Reader value) {
+inline void GameSessionService::LoginParams::Builder::setSignature( ::capnp::Data::Reader value) {
   ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), value);
 }
-inline  ::capnp::Data::Builder GameSessionService::LoginParams::Builder::initSignedChallenge(unsigned int size) {
+inline  ::capnp::Data::Builder GameSessionService::LoginParams::Builder::initSignature(unsigned int size) {
   return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), size);
 }
-inline void GameSessionService::LoginParams::Builder::adoptSignedChallenge(
+inline void GameSessionService::LoginParams::Builder::adoptSignature(
     ::capnp::Orphan< ::capnp::Data>&& value) {
   ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::capnp::Data> GameSessionService::LoginParams::Builder::disownSignedChallenge() {
+inline ::capnp::Orphan< ::capnp::Data> GameSessionService::LoginParams::Builder::disownSignature() {
   return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool GameSessionService::LoginParams::Reader::hasChallengePayload() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool GameSessionService::LoginParams::Builder::hasChallengePayload() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader GameSessionService::LoginParams::Reader::getChallengePayload() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder GameSessionService::LoginParams::Builder::getChallengePayload() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void GameSessionService::LoginParams::Builder::setChallengePayload( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder GameSessionService::LoginParams::Builder::initChallengePayload(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void GameSessionService::LoginParams::Builder::adoptChallengePayload(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> GameSessionService::LoginParams::Builder::disownChallengePayload() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
 
 inline bool GameSessionService::LoginResults::Reader::hasSession() const {
@@ -3767,6 +4013,68 @@ inline ::capnp::Orphan< ::UserSession> GameSessionService::LoginResults::Builder
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 #endif  // !CAPNP_LITE
+
+inline  ::uint64_t GameSessionService::RequestChallengeParams::Reader::getGameId() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t GameSessionService::RequestChallengeParams::Builder::getGameId() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void GameSessionService::RequestChallengeParams::Builder::setGameId( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool GameSessionService::RequestChallengeResults::Reader::hasChallenge() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool GameSessionService::RequestChallengeResults::Builder::hasChallenge() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader GameSessionService::RequestChallengeResults::Reader::getChallenge() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder GameSessionService::RequestChallengeResults::Builder::getChallenge() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void GameSessionService::RequestChallengeResults::Builder::setChallenge( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder GameSessionService::RequestChallengeResults::Builder::initChallenge(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void GameSessionService::RequestChallengeResults::Builder::adoptChallenge(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> GameSessionService::RequestChallengeResults::Builder::disownChallenge() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t GameSessionService::RequestChallengeResults::Reader::getExpiresAt() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t GameSessionService::RequestChallengeResults::Builder::getExpiresAt() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void GameSessionService::RequestChallengeResults::Builder::setExpiresAt( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
 
 #if !CAPNP_LITE
 inline UserSession::Client::Client(decltype(nullptr))
