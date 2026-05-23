@@ -4,6 +4,7 @@ use capnp_rpc::{RpcSystem, pry, rpc_twoparty_capnp, twoparty};
 use ethers_core::types::{Address, H256, U256};
 use ethers_signers::LocalWallet;
 use std::env;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -599,6 +600,12 @@ impl match_session::Server for MatchSessionImpl {
         let submission = pry!(pry!(params.get()).get_submission());
         let outcome = pry!(submission.get_outcome());
         let outcome_val = outcome.get_victor();
+        if !(1..=3).contains(&outcome_val) {
+            return Promise::err(::capnp::Error::failed(format!(
+                "invalid outcome value: must be 1-3, got {}",
+                outcome_val
+            )));
+        }
         let replay_hash = pry!(submission.get_replay_hash());
         let r_hash = replay_hash.to_vec();
 
@@ -615,7 +622,37 @@ impl match_session::Server for MatchSessionImpl {
                 Ok(sig) => {
                     results.get().set_signature(&sig);
 
-                    if p_ids.len() >= 2 {
+                    // 1. Atomically mark match as settled FIRST (before MMR)
+                    let m_clone = {
+                        let match_id_for_update = m_id.clone();
+                        let mut m_clone_opt = None;
+
+                        let updated = state.update_active_match(&match_id_for_update, |m| {
+                            if !m.settled {
+                                m.settled = true;
+                                m.settled_at_ms = Some(now_ms());
+                                m_clone_opt = Some(m.clone());
+                            }
+                        });
+
+                        if updated.is_none() || m_clone_opt.is_none() {
+                            return Err(::capnp::Error::failed(
+                                "Match already settled or not found".into(),
+                            ));
+                        }
+
+                        if let Some(m_clone) = m_clone_opt {
+                            state
+                                .archive_settled_match(&match_id_for_update, &m_clone)
+                                .await;
+                            Some(m_clone)
+                        } else {
+                            None
+                        }
+                    };
+
+                    // 2. Now update MMR (after settlement is persisted)
+                    if m_clone.is_some() && p_ids.len() >= 2 {
                         let p1 = &p_ids[0];
                         let p2 = &p_ids[1];
                         let score1 = if outcome_val == 1 {
@@ -638,31 +675,6 @@ impl match_session::Server for MatchSessionImpl {
                             .await
                         {
                             warn!("Failed to update MMR for {}: {}", p2, e);
-                        }
-                    }
-
-                    {
-                        let match_id_for_update = m_id.clone();
-                        let mut m_clone_opt = None;
-
-                        let updated = state.update_active_match(&match_id_for_update, |m| {
-                            if !m.settled {
-                                m.settled = true;
-                                m.settled_at_ms = Some(now_ms());
-                                m_clone_opt = Some(m.clone());
-                            }
-                        });
-
-                        if updated.is_none() || m_clone_opt.is_none() {
-                            return Err(::capnp::Error::failed(
-                                "Match already settled or not found".into(),
-                            ));
-                        }
-
-                        if let Some(m_clone) = m_clone_opt {
-                            state
-                                .archive_settled_match(&match_id_for_update, &m_clone)
-                                .await;
                         }
                     }
 
@@ -981,15 +993,16 @@ impl game_session_service::Server for GameSessionServiceImpl {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     dotenv::dotenv().ok();
 
-    let addr = env::var("AMP_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
+    let addr: SocketAddr = env::var("AMP_ADDR")
+        .unwrap_or_else(|_| "0.0.0.0:50051".to_string())
+        .parse()?;
     let db_path = env::var("AMP_DB_PATH").unwrap_or_else(|_| "./amp-data".to_string());
 
-    info!("AMP Matchmaker (FlexMatch Edition) starting on {}", addr);
+    info!("AMP Matchmaker starting on {}", addr);
     info!("Persistence layer at: {}", db_path);
 
     let persistence_result = persistence::Persistence::open(&db_path);
@@ -1017,7 +1030,6 @@ async fn main() -> Result<()> {
     let (relayer_tx, relayer_rx) = tokio::sync::mpsc::channel(10000);
 
     let cancel = tokio_util::sync::CancellationToken::new();
-    let cancel_clone = cancel.clone();
 
     let signing_config = Arc::new(SigningConfig {
         wallet: load_secret("VERIFIER_KEY", "VERIFIER_KEY_FILE")?.parse()?,
@@ -1026,9 +1038,6 @@ async fn main() -> Result<()> {
             .parse()?,
         settlement_addr: env::var("AMP_SETTLEMENT_ADDRESS")?.parse()?,
     });
-
-    start_matchmaker_loop(state.clone(), match_queue_rx, cancel.clone()).await;
-    start_cleanup_loop(state.clone(), auth_service.clone(), cancel.clone());
 
     let tls_acceptor = match (
         env::var("AMP_TLS_CERT_FILE").ok(),
@@ -1068,51 +1077,177 @@ async fn main() -> Result<()> {
         max_concurrent,
         max_per_ip,
     ));
-
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    info!("Listening on {}", addr);
     info!(
         "Rate limiting: max {} concurrent, max {} per IP/min",
         max_concurrent, max_per_ip
     );
 
-    let local = tokio::task::LocalSet::new();
+    let ctx = ServiceContext {
+        state,
+        player_service: p_service,
+        auth_service,
+        match_queue,
+        signing_config,
+        telemetry_tx,
+        relayer_tx,
+    };
 
+    // Spawn matchmaker on the multi-threaded runtime (Send task)
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    rt.block_on(async {
+        start_matchmaker_loop(ctx.state.clone(), match_queue_rx, cancel.clone()).await;
+        start_cleanup_loop(ctx.state.clone(), ctx.auth_service.clone(), cancel.clone());
+    });
+
+    // Spawn telemetry worker on its own dedicated thread with its own LocalSet
+    let telemetry_cancel = cancel.clone();
+    std::thread::Builder::new()
+        .name("amp-telemetry-client".to_string())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let local = tokio::task::LocalSet::new();
+            rt.block_on(local.run_until(async {
+                start_telemetry_worker(telemetry_rx, telemetry_cancel).await;
+            }));
+        })?;
+
+    // Spawn relayer worker on its own dedicated thread with its own LocalSet
+    let relayer_cancel = cancel.clone();
+    std::thread::Builder::new()
+        .name("amp-relayer-client".to_string())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let local = tokio::task::LocalSet::new();
+            rt.block_on(local.run_until(async {
+                start_relayer_worker(relayer_rx, relayer_cancel).await;
+            }));
+        })?;
+
+    // Spawn N worker threads, each with its own LocalSet and SO_REUSEPORT listener
+    let num_workers = env::var("AMP_WORKERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(num_cpus::get);
+
+    info!("Spawning {} worker threads (SO_REUSEPORT)", num_workers);
+
+    let mut worker_handles = Vec::new();
+    for i in 0..num_workers {
+        let worker_ctx = ctx.clone();
+        let worker_tls = tls_acceptor.clone();
+        let worker_limiter = rate_limiter.clone();
+        let worker_cancel = cancel.clone();
+
+        let handle = std::thread::Builder::new()
+            .name(format!("amp-worker-{}", i))
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                rt.block_on(async {
+                    if let Err(e) = run_worker(
+                        i,
+                        addr,
+                        worker_ctx,
+                        worker_tls,
+                        worker_limiter,
+                        worker_cancel,
+                    )
+                    .await
+                    {
+                        error!("Worker {} crashed: {}", i, e);
+                    }
+                });
+            })?;
+        worker_handles.push(handle);
+    }
+
+    // Wait for SIGINT or SIGTERM
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = wait_sigterm() => {}
+        }
+        info!("Received shutdown signal, draining...");
+        cancel.cancel();
+
+        let matches = ctx.state.active_matches.load();
+        let active = matches.iter().filter(|(_, m)| !m.settled).count();
+        info!("Active unsettled matches: {}", active);
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        info!("Shutdown complete.");
+    });
+
+    drop(rt);
+
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn wait_sigterm() {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut term = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+    term.recv().await;
+}
+
+#[cfg(not(unix))]
+async fn wait_sigterm() {
+    std::future::pending::<()>().await;
+}
+
+async fn run_worker(
+    worker_id: usize,
+    addr: SocketAddr,
+    ctx: ServiceContext,
+    tls_acceptor: Option<amp_tls::TlsAcceptor>,
+    rate_limiter: Arc<rate_limit::ConnectionRateLimiter>,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<()> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(addr),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    socket.set_reuse_address(true)?;
+    #[cfg(unix)]
+    {
+        socket.set_reuse_port(true)?;
+    }
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    socket.set_nonblocking(true)?;
+
+    let std_listener: std::net::TcpListener = socket.into();
+    let listener = tokio::net::TcpListener::from_std(std_listener)?;
+
+    info!("Worker {} listening on {}", worker_id, addr);
+
+    let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let state_for_shutdown = state.clone();
-            start_telemetry_worker(telemetry_rx, cancel_clone.clone()).await;
-            start_relayer_worker(relayer_rx, cancel_clone.clone()).await;
-
-            let ctx = ServiceContext {
-                state,
-                player_service: p_service,
-                auth_service,
-                match_queue,
-                signing_config,
-                telemetry_tx,
-                relayer_tx,
-            };
-
             tokio::select! {
-                _ = tokio::signal::ctrl_c() => {
-                    info!("Received shutdown signal, draining...");
-                    cancel_clone.cancel();
-
-                    let matches = state_for_shutdown.active_matches.load();
-                    let active = matches.iter()
-                        .filter(|(_, m)| !m.settled)
-                        .count();
-                    info!("Active unsettled matches: {}", active);
-                    drop(matches);
-
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    info!("Shutdown complete.");
+                _ = cancel.cancelled() => {
+                    info!("Worker {} shutting down", worker_id);
                 }
                 _ = accept_loop(listener, ctx, tls_acceptor, rate_limiter) => {}
             }
+            Ok::<(), anyhow::Error>(())
         })
-        .await;
+        .await?;
 
     Ok(())
 }

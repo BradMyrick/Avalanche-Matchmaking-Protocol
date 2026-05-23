@@ -1,6 +1,6 @@
 [package]
 name = "AMP-Server"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [dependencies]
@@ -25,6 +25,8 @@ hex = "0.4"
 dotenv = "0.15"
 amp-tls = { path = "../amp-tls" }
 arc-swap = "1.6.0"
+socket2 = { version = "0.5", features = ["all"] }
+num_cpus = "1.16"
 
 [build-dependencies]
 capnpc = "0.19"

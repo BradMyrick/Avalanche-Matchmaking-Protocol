@@ -155,16 +155,21 @@ impl SettlementQueue {
                 Ok(true)
             }
             Err(e) => {
-                nonce_manager.reset(
-                    &custodial::derive_custodial_signer(
-                        state.master_client.signer(),
-                        "settlement",
-                        settlement.outcome as u64,
-                        state.master_client.signer().chain_id(),
-                    )
-                    .map(|w| w.address())
-                    .unwrap_or_default(),
-                );
+                let reset_addr = match state.registry.matches(match_id_parsed).call().await {
+                    Ok((game_id, _, _, _, _, _)) => {
+                        let chain_id = state.master_client.signer().chain_id();
+                        custodial::derive_custodial_signer(
+                            state.master_client.signer(),
+                            "settlement",
+                            game_id.as_u64(),
+                            chain_id,
+                        )
+                        .map(|w| w.address())
+                        .unwrap_or_default()
+                    }
+                    Err(_) => Address::zero(),
+                };
+                nonce_manager.reset(&reset_addr);
 
                 let mut retry = settlement.clone();
                 retry.retry_count += 1;

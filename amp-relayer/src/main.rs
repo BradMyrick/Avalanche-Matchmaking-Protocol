@@ -140,9 +140,32 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
 
         let params_reader = capnp_rpc::pry!(params.get());
         let match_id_bytes = capnp_rpc::pry!(params_reader.get_match_id()).to_vec();
+        if match_id_bytes.is_empty() || match_id_bytes.len() > 64 {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "match_id must be 1-64 bytes".to_string(),
+            ));
+        }
         let outcome = params_reader.get_outcome();
+        if !(1..=3).contains(&outcome) {
+            return capnp::capability::Promise::err(capnp::Error::failed(format!(
+                "outcome must be 1-3, got {}",
+                outcome
+            )));
+        }
         let transcript_hash_bytes = capnp_rpc::pry!(params_reader.get_transcript_hash()).to_vec();
+        if transcript_hash_bytes.len() != 32 {
+            return capnp::capability::Promise::err(capnp::Error::failed(format!(
+                "transcript_hash must be 32 bytes, got {}",
+                transcript_hash_bytes.len()
+            )));
+        }
         let signature_bytes = capnp_rpc::pry!(params_reader.get_signature()).to_vec();
+        if signature_bytes.len() != 65 {
+            return capnp::capability::Promise::err(capnp::Error::failed(format!(
+                "signature must be 65 bytes (secp256k1), got {}",
+                signature_bytes.len()
+            )));
+        }
 
         let queue = self.queue.clone();
 
@@ -349,6 +372,12 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     info!("Shutdown complete.");
                 }
+                _ = wait_sigterm() => {
+                    info!("Received SIGTERM");
+                    cancel.cancel();
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    info!("Shutdown complete.");
+                }
                 result = accept_loop(listener, state.clone(), queue.clone(), api_keys.clone(), tls_acceptor) => {
                     result?;
                 }
@@ -360,6 +389,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+async fn wait_sigterm() {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut term = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+    term.recv().await;
+}
+
+#[cfg(not(unix))]
+async fn wait_sigterm() {
+    std::future::pending::<()>().await;
+}
+
 async fn accept_loop(
     listener: tokio::net::TcpListener,
     state: RelayerState,
@@ -367,14 +408,32 @@ async fn accept_loop(
     api_keys: Arc<std::collections::HashSet<String>>,
     tls_acceptor: Option<amp_tls::TlsAcceptor>,
 ) -> Result<()> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let max_connections: usize = std::env::var("RELAYER_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50);
+    let active = Arc::new(AtomicUsize::new(0));
+    info!("Relayer max concurrent connections: {}", max_connections);
+
     loop {
         let (stream, peer) = listener.accept().await?;
         stream.set_nodelay(true)?;
+
+        let current = active.load(Ordering::Relaxed);
+        if current >= max_connections {
+            tracing::warn!("Relayer at capacity ({}), rejecting {}", current, peer);
+            drop(stream);
+            continue;
+        }
+        active.fetch_add(1, Ordering::Relaxed);
 
         let state = state.clone();
         let queue = queue.clone();
         let api_keys = api_keys.clone();
         let acceptor = tls_acceptor.clone();
+        let counter = active.clone();
 
         tokio::task::spawn_local(async move {
             let relayer_impl = RelayerImpl {
@@ -400,6 +459,7 @@ async fn accept_loop(
                 let (reader, writer) = stream.into_split();
                 run_rpc(reader, writer, client).await;
             }
+            counter.fetch_sub(1, Ordering::Relaxed);
         });
     }
 }
