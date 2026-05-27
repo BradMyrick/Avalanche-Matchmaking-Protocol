@@ -222,7 +222,9 @@ impl AmpClient {
         let client: service_capnp::game_session_service::Client =
             rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
         tokio::task::spawn_local(async move {
-            let _ = rpc_system.await;
+            if let Err(e) = rpc_system.await {
+                tracing::warn!("RPC system error: {}", e);
+            }
         });
         Ok(Self { client })
     }

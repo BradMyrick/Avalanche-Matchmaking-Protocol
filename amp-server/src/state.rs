@@ -13,15 +13,22 @@ pub type AmpId = String;
 pub fn now_ns() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("system clock is before UNIX_EPOCH")
         .as_nanos() as u64
 }
 
 pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("system clock is before UNIX_EPOCH")
         .as_millis() as u64
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchSettledEvent {
+    pub outcome_type: u16,
+    pub victor: u8,
+    pub scores: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -412,6 +419,7 @@ pub struct InnerState {
     pub players: DashMap<AmpId, StoredPlayerProfile>,
     pub rulesets: Arc<ArcSwap<HashMap<AmpId, Arc<StoredRuleSet>>>>,
     pub active_matches: Arc<ArcSwap<HashMap<String, ActiveMatch>>>,
+    pub match_event_senders: DashMap<String, Vec<tokio::sync::mpsc::UnboundedSender<MatchSettledEvent>>>,
     persistence: Option<Persistence>,
 }
 
@@ -421,6 +429,7 @@ impl InnerState {
             players: DashMap::new(),
             rulesets: Arc::new(ArcSwap::from_pointee(HashMap::new())),
             active_matches: Arc::new(ArcSwap::from_pointee(HashMap::new())),
+            match_event_senders: DashMap::new(),
             persistence,
         };
         if let Some(ref p) = state.persistence {
@@ -498,6 +507,27 @@ impl InnerState {
         }
     }
 
+    pub fn add_event_sender(&self, match_id: &str, tx: tokio::sync::mpsc::UnboundedSender<MatchSettledEvent>) {
+        self.match_event_senders
+            .entry(match_id.to_string())
+            .or_insert_with(Vec::new)
+            .push(tx);
+    }
+
+    pub fn notify_subscribers(&self, match_id: &str, event: MatchSettledEvent) {
+        if let Some((_, senders)) = self.match_event_senders.remove(match_id) {
+            for tx in senders {
+                if let Err(e) = tx.send(event.clone()) {
+                    warn!(target: "events", "Failed to send settled event to subscriber for match {}: {}", match_id, e);
+                }
+            }
+        }
+    }
+
+    pub fn remove_event_senders(&self, match_id: &str) {
+        self.match_event_senders.remove(match_id);
+    }
+
     pub async fn archive_settled_match(&self, id: &str, m: &ActiveMatch) {
         if let Some(ref p) = self.persistence
             && let Err(e) = p.save(SETTLED_ARCHIVE_TREE, id, m).await
@@ -553,9 +583,14 @@ impl InnerState {
             // Do persistence (async)
             for (id, m) in to_persist {
                 if let Some(ref p) = self.persistence {
-                    let _ = p.save(SETTLED_ARCHIVE_TREE, &id, &m).await;
-                    let _ = p.delete("matches", &id).await;
+                    if let Err(e) = p.save(SETTLED_ARCHIVE_TREE, &id, &m).await {
+                        error!(target: "cleanup", "Failed to archive expired match {}: {}", id, e);
+                    }
+                    if let Err(e) = p.delete("matches", &id).await {
+                        error!(target: "cleanup", "Failed to delete expired match {}: {}", id, e);
+                    }
                 }
+                self.remove_event_senders(&id);
                 warn!(target: "cleanup", "Expired match {} (settled={}, created={}ms ago)", id, m.settled, now.saturating_sub(m.created_at_ms));
             }
 
@@ -581,7 +616,7 @@ impl InnerState {
     }
 }
 
-use tracing::warn;
+use tracing::{error, warn};
 
 pub type AppState = Arc<InnerState>;
 

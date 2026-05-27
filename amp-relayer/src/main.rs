@@ -476,5 +476,7 @@ where
         Default::default(),
     );
     let rpc_system = RpcSystem::new(Box::new(network), Some(relayer_client.client));
-    let _ = rpc_system.await;
+    if let Err(e) = rpc_system.await {
+        error!("Relayer RPC system terminated with error: {}", e);
+    }
 }

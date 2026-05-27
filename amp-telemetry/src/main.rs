@@ -217,7 +217,9 @@ async fn main() -> Result<()> {
                     _ = wait_sigterm() => {}
                 }
                 if let Ok(mut w) = log_writer_clone.lock() {
-                    let _ = w.flush();
+                    if let Err(e) = w.flush() {
+                        eprintln!("Failed to flush telemetry log: {}", e);
+                    }
                 }
                 cancel_clone.cancel();
             });
@@ -244,7 +246,9 @@ async fn main() -> Result<()> {
                     let rpc_system =
                         RpcSystem::new(Box::new(network), Some(receiver.clone().client));
                     tokio::task::spawn_local(async move {
-                        let _ = rpc_system.await;
+                        if let Err(e) = rpc_system.await {
+                            eprintln!("Telemetry RPC connection closed: {}", e);
+                        }
                         counter.fetch_sub(1, Ordering::Relaxed);
                     });
                 }

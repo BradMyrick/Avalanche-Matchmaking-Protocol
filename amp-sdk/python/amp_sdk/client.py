@@ -39,24 +39,48 @@ class AMPClient:
     async def connect(self, player_id: str, game_id: int) -> bool:
         try:
             host, port = self.rpc_url.split(':')
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, int(port)),
+            stream = await asyncio.wait_for(
+                capnp.AsyncIoStream.create_connection(host=host, port=int(port)),
                 timeout=10.0,
             )
         except asyncio.TimeoutError:
             raise TimeoutError(f"Connection to {self.rpc_url} timed out")
-        except OSError as e:
+        except Exception as e:
             raise ConnectionError(f"Failed to connect to {self.rpc_url}: {e}")
 
-        self._conn = capnp.TwoPartyClient(reader, writer)
+        self._conn = capnp.TwoPartyClient(stream)
         self._bootstrap = self._conn.bootstrap().cast_as(
             service_schema.GameSessionService
         )
 
+        try:
+            req_challenge = self._bootstrap.requestChallenge_request()
+            req_challenge.gameId = game_id
+            challenge_res = await req_challenge.send()
+            challenge_bytes = bytes(challenge_res.challenge)
+        except Exception as e:
+            raise AuthError(f"Failed to request challenge: {e}")
+
+        if player_id.startswith('0x') and len(player_id) == 66:
+            from eth_account import Account
+            from eth_account.messages import encode_defunct
+            msg = encode_defunct(primitive=challenge_bytes)
+            signed_msg = Account.sign_message(msg, private_key=player_id)
+            sig_bytes = bytes(signed_msg.signature)
+        else:
+            try:
+                sig_bytes = bytes.fromhex(player_id.replace('0x', ''))
+            except ValueError:
+                raise AuthError(f"Invalid player_id: not valid hex")
+            if len(sig_bytes) != 65:
+                raise AuthError(
+                    f"Invalid signature length: expected 65 bytes, got {len(sig_bytes)}"
+                )
+
         req = self._bootstrap.login_request()
         req.gameId = game_id
-        req.signature = player_id.encode('utf-8')
-        req.challengePayload = b''
+        req.signature = sig_bytes
+        req.challengePayload = challenge_bytes
 
         try:
             result = await req.send()

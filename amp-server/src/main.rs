@@ -317,8 +317,12 @@ async fn start_matchmaker_loop(
                         quality: m.quality,
                     };
 
-                    let _ = m.entry_a.sender.send(p1);
-                    let _ = m.entry_b.sender.send(p2);
+                    if let Err(e) = m.entry_a.sender.send(p1) {
+                        error!("Failed to notify player {} of match {}: {:?}", m.entry_a.player_id, match_id, e);
+                    }
+                    if let Err(e) = m.entry_b.sender.send(p2) {
+                        error!("Failed to notify player {} of match {}: {:?}", m.entry_b.player_id, match_id, e);
+                    }
 
                     let now = now_ms();
                     let active = ActiveMatch {
@@ -443,9 +447,20 @@ async fn start_relayer_worker(
         let api_key = match env::var("RELAYER_API_KEY_FILE") {
             Ok(path) => std::fs::read_to_string(&path)
                 .map(|s| s.trim().to_string())
-                .unwrap_or_default(),
-            Err(_) => env::var("RELAYER_API_KEY").unwrap_or_default(),
+                .unwrap_or_else(|e| {
+                    warn!("Failed to read RELAYER_API_KEY_FILE '{}': {}", path, e);
+                    String::new()
+                }),
+            Err(_) => env::var("RELAYER_API_KEY").unwrap_or_else(|e| {
+                warn!("RELAYER_API_KEY not set: {}. Relayer authentication disabled.", e);
+                String::new()
+            }),
         };
+        if api_key.is_empty() {
+            warn!("No relayer API key configured. Relayer requests will be unauthenticated.");
+        } else {
+            info!("Relayer API key loaded ({} chars)", api_key.len());
+        }
 
         let mut client_opt: Option<relayer_capnp::relayer_service::Client> = None;
 
@@ -600,6 +615,8 @@ impl match_session::Server for MatchSessionImpl {
         let submission = pry!(pry!(params.get()).get_submission());
         let outcome = pry!(submission.get_outcome());
         let outcome_val = outcome.get_victor();
+        let outcome_type_raw = outcome.get_type().unwrap_or(match_capnp::OutcomeType::Unknown);
+        let scores_raw: Vec<u64> = outcome.get_scores().map(|s| s.iter().collect()).unwrap_or_default();
         if !(1..=3).contains(&outcome_val) {
             return Promise::err(::capnp::Error::failed(format!(
                 "invalid outcome value: must be 1-3, got {}",
@@ -689,6 +706,13 @@ impl match_session::Server for MatchSessionImpl {
                     {
                         warn!("Failed to queue relayer task for {}: {}", m_id, e);
                     }
+
+                    state.notify_subscribers(&m_id, state::MatchSettledEvent {
+                        outcome_type: u16::from(outcome_type_raw),
+                        victor: outcome_val,
+                        scores: scores_raw,
+                    });
+
                     Ok(())
                 }
                 Err(e) => Err(::capnp::Error::failed(format!("Signer error: {}", e))),
@@ -703,8 +727,37 @@ impl match_session::Server for MatchSessionImpl {
     ) -> Promise<(), ::capnp::Error> {
         let subscriber = pry!(pry!(params.get()).get_subscriber());
         let match_id = self.match_id.clone();
+        let state = self.state.clone();
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<state::MatchSettledEvent>();
+        state.add_event_sender(&match_id, tx);
+
         info!("Client subscribed to events for match {}", match_id);
-        let _ = subscriber;
+
+        tokio::task::spawn_local(async move {
+            while let Some(event) = rx.recv().await {
+                let mut req = subscriber.on_match_settled_request();
+                {
+                    let mut outcome = req.get().init_outcome();
+                    outcome.set_victor(event.victor);
+                    match match_capnp::OutcomeType::try_from(event.outcome_type) {
+                        Ok(t) => outcome.set_type(t),
+                        Err(_) => outcome.set_type(match_capnp::OutcomeType::Unknown),
+                    }
+                    {
+                        let mut scores = outcome.init_scores(event.scores.len() as u32);
+                        for (i, s) in event.scores.iter().enumerate() {
+                            scores.set(i as u32, *s);
+                        }
+                    }
+                }
+                if let Err(e) = req.send().promise.await {
+                    warn!("Failed to deliver onMatchSettled to subscriber for match {}: {}", match_id, e);
+                    break;
+                }
+            }
+        });
+
         Promise::ok(())
     }
 

@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "amp-sdk"
 version = "0.1.0"
 requires-python = ">=3.8"
-dependencies = ["pycapnp>=1.0"]
+dependencies = ["pycapnp>=1.0", "eth-account>=0.8"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["amp_sdk"]

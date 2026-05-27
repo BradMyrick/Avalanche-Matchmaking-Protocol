@@ -2,7 +2,7 @@
 
 ### Any Engine. Any Language. Trustless Settlement.
 
-AMP is a decentralized, high-performance matchmaking protocol built on Avalanche. It provides game developers with enterprise-grade matchmaking capabilities — similar to AWS FlexMatch — but with the added security and transparency of on-chain verifiers and cryptographically settled outcomes.
+AMP is a decentralized, high-performance matchmaking protocol built on Avalanche. It provides game developers with enterprise-grade matchmaking capabilities, with the added security and transparency of on-chain verifiers and cryptographically settled outcomes.
 
 ---
 
@@ -97,7 +97,7 @@ AMP/
 
 ---
 
-## Smart Contracts (Fuji Testnet)
+## Smart Contracts (Fuji Testnet) (old style, will be updated with new deployment)
 
 | Contract | Address |
 | :--- | :--- |
@@ -172,22 +172,6 @@ See [.env.example](.env.example) for the complete list. Key variables:
 | `RELAYER_API_KEY_FILE` | both | Path to API key for relayer authentication |
 | `RELAYER_MAX_CONNECTIONS` | relayer | Max concurrent RPC connections (default: 50) |
 | `TELEMETRY_MAX_CONNECTIONS` | telemetry | Max concurrent telemetry connections (default: 100) |
-
----
-
-## AMP vs AWS FlexMatch
-
-| Feature | AMP | AWS FlexMatch |
-|:---|:---|:---|
-| **Deployment** | Self-hosted, any cloud or bare metal | AWS only |
-| **Latency** | Sub-ms (Cap'n Proto, zero-copy) | 10-50ms (REST/gRPC) |
-| **Settlement** | On-chain, trustless, verifiable | N/A (off-chain only) |
-| **Auth** | Wallet-based challenge-response | AWS IAM / Cognito |
-| **Skill System** | Glicko-2 with configurable rules | Custom expressions |
-| **Cost** | Infrastructure only | $0.50/GB data + compute |
-| **Sovereignty** | Full control, no vendor lock-in | AWS dependency |
-| **Protocol** | Cap'n Proto (Rust, Go, C++, C#, Python) | Proprietary SDK |
-| **Scalability** | Thread-per-core, horizontal | AWS-managed |
 
 ---
 
