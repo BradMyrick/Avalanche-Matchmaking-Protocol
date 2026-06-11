@@ -184,6 +184,7 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
 
         if (state != AMPTypes.MatchState.DISPUTED) revert NotDisputed();
         if (_msgSender() != arbiter) revert NotArbiter();
+        if (playerB == address(0)) revert NoOpponent();
 
         settlements[matchId] = AMPTypes.Settlement({
             matchId: matchId, outcome: enforcedOutcome, transcriptHash: bytes32(0), settledAt: block.timestamp

@@ -33,11 +33,15 @@ impl GasManager {
     ///
     /// For example, with `bump_percent = 10` and `retry_count = 2`:
     ///   new_max_fee = max_fee * (100 + 10*2) / 100 = max_fee * 1.20
-    pub fn bump_fees(&self, max_fee: U256, priority_fee: U256, retry_count: u32) -> (U256, U256) {
-        let bump_factor = (100 + self.bump_percent * retry_count as u64) as u128;
-        let new_max = max_fee * U256::from(bump_factor) / U256::from(100);
-        let new_priority = priority_fee * U256::from(bump_factor) / U256::from(100);
-        (new_max, new_priority)
+    pub fn bump_fees(&self, network_max: U256, network_prio: U256, prev_max: U256, prev_prio: U256) -> (U256, U256) {
+        let bump_factor = (100 + self.bump_percent) as u128;
+        let bumped_prev_max = prev_max * U256::from(bump_factor) / U256::from(100);
+        let bumped_prev_prio = prev_prio * U256::from(bump_factor) / U256::from(100);
+        
+        let new_max = if bumped_prev_max > network_max { bumped_prev_max } else { network_max };
+        let new_prio = if bumped_prev_prio > network_prio { bumped_prev_prio } else { network_prio };
+        
+        (new_max, new_prio)
     }
 }
 
@@ -51,18 +55,7 @@ mod tests {
         let max = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
         let prio = U256::from(1_000_000_000u128); // 1 gwei
 
-        let (bumped_max, bumped_prio) = gm.bump_fees(max, prio, 0);
-        assert_eq!(bumped_max, max, "retry_count=0 should not bump");
-        assert_eq!(bumped_prio, prio, "retry_count=0 should not bump");
-    }
-
-    #[test]
-    fn test_bump_fees_first_retry() {
-        let gm = GasManager::new(10, 30);
-        let max = U256::from(1_000_000_000_000_000_000u128);
-        let prio = U256::from(1_000_000_000u128);
-
-        let (bumped_max, bumped_prio) = gm.bump_fees(max, prio, 1);
+        let (bumped_max, bumped_prio) = gm.bump_fees(max, prio, max, prio);
         let expected_max = U256::from(1_100_000_000_000_000_000u128); // +10%
         let expected_prio = U256::from(1_100_000_000u128); // +10%
         assert_eq!(bumped_max, expected_max);
@@ -75,10 +68,14 @@ mod tests {
         let max = U256::from(1_000_000_000_000_000_000u128);
         let prio = U256::from(1_000_000_000u128);
 
-        let (bumped_max, bumped_prio) = gm.bump_fees(max, prio, 3);
-        let expected_max = U256::from(1_300_000_000_000_000_000u128); // +30%
-        let expected_prio = U256::from(1_300_000_000u128); // +30%
-        assert_eq!(bumped_max, expected_max);
-        assert_eq!(bumped_prio, expected_prio);
+        // First bump
+        let (bump1_max, bump1_prio) = gm.bump_fees(max, prio, max, prio);
+        // Second bump
+        let (bump2_max, bump2_prio) = gm.bump_fees(max, prio, bump1_max, bump1_prio);
+        
+        let expected_max = U256::from(1_210_000_000_000_000_000u128); // 1.1 * 1.1 = 1.21
+        let expected_prio = U256::from(1_210_000_000u128); 
+        assert_eq!(bump2_max, expected_max);
+        assert_eq!(bump2_prio, expected_prio);
     }
 }

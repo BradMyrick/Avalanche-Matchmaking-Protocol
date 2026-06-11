@@ -32,6 +32,10 @@ pub struct PendingSettlement {
     pub last_attempt_at_ms: Option<u64>,
     #[serde(default = "default_status")]
     pub status: SettlementStatus,
+    #[serde(default)]
+    pub last_max_fee: Option<String>,
+    #[serde(default)]
+    pub last_priority_fee: Option<String>,
 }
 
 fn default_status() -> SettlementStatus {
@@ -150,27 +154,10 @@ impl SettlementQueue {
 
         match result {
             Ok(_) => {
-                self.finalize_settlement(&settlement.match_id)?;
-                info!("Settlement for match {} succeeded", match_id_parsed);
+                // Finalization happens asynchronously in the spawned task
                 Ok(true)
             }
             Err(e) => {
-                let reset_addr = match state.registry.matches(match_id_parsed).call().await {
-                    Ok((game_id, _, _, _, _, _)) => {
-                        let chain_id = state.master_client.signer().chain_id();
-                        custodial::derive_custodial_signer(
-                            state.master_client.signer(),
-                            "settlement",
-                            game_id.as_u64(),
-                            chain_id,
-                        )
-                        .map(|w| w.address())
-                        .unwrap_or_default()
-                    }
-                    Err(_) => Address::zero(),
-                };
-                nonce_manager.reset(&reset_addr);
-
                 let mut retry = settlement.clone();
                 retry.retry_count += 1;
                 retry.last_attempt_at_ms = Some(
@@ -184,11 +171,14 @@ impl SettlementQueue {
                     self.dead_letter(retry)?;
                 } else {
                     warn!(
-                        "Settlement for match {} failed (attempt {}): {}. Re-queueing.",
+                        "Settlement for match {} failed to submit (attempt {}): {}. Re-queueing.",
                         match_id_parsed, retry.retry_count, e
                     );
                     retry.status = SettlementStatus::Queued;
-                    self.enqueue(retry)?;
+                    
+                    let cf = self.db.open_tree(CF_PENDING)?;
+                    let updated = bincode::serialize(&retry)?;
+                    cf.insert(&retry.match_id, &updated as &[u8])?;
                 }
                 Ok(true)
             }
@@ -247,30 +237,21 @@ impl SettlementQueue {
             Arc::new(custodial_client),
         );
 
-        // Estimate EIP-1559 fees: (max_fee_per_gas, max_priority_fee_per_gas)
-        let (max_fee, priority_fee) = self
+        let (network_max_fee, network_priority_fee) = self
             .gas_manager
             .estimate_eip1559_fees(&provider)
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;
 
-        // Apply gas bumping on retries using proper EIP-1559 fee fields
-        let (effective_max_fee, effective_priority_fee) = if settlement.retry_count > 0 {
-            self.gas_manager
-                .bump_fees(max_fee, priority_fee, settlement.retry_count)
+        let prev_max = settlement.last_max_fee.as_ref().and_then(|s| U256::from_dec_str(s).ok());
+        let prev_prio = settlement.last_priority_fee.as_ref().and_then(|s| U256::from_dec_str(s).ok());
+
+        let (effective_max_fee, effective_priority_fee) = if settlement.retry_count > 0 && prev_max.is_some() && prev_prio.is_some() {
+            self.gas_manager.bump_fees(network_max_fee, network_priority_fee, prev_max.unwrap(), prev_prio.unwrap())
         } else {
-            (max_fee, priority_fee)
+            (network_max_fee, network_priority_fee)
         };
 
-        // Build the contract call with proper EIP-1559 fields.
-        //
-        // IMPORTANT: We use `max_fee_per_gas` + `max_priority_fee_per_gas` instead of
-        // the legacy `gas_price`. Avalanche C-Chain supports EIP-1559 since the Avalanche
-        // Upgrade (Apricot). Using EIP-1559:
-        //   - Provides better fee estimation and prevents overpaying
-        //   - Allows priority fee to be set independently of max fee
-        //   - Ensures compatibility with future network upgrades
-        //   - Avoids the legacy gas price path which may be deprecated
         let mut call = settlement_custodial.submit_async_result(match_id, async_result);
 
         if let TypedTransaction::Legacy(ref legacy) = call.tx {
@@ -288,6 +269,14 @@ impl SettlementQueue {
             };
             call.tx = TypedTransaction::Eip1559(eip1559);
         }
+        
+        let cf = self.db.open_tree(CF_PENDING).map_err(|e| RelayerError::Transaction(e.to_string()))?;
+        let mut s = settlement.clone();
+        s.last_max_fee = Some(effective_max_fee.to_string());
+        s.last_priority_fee = Some(effective_priority_fee.to_string());
+        if let Ok(updated) = bincode::serialize(&s) {
+            let _ = cf.insert(&s.match_id, &updated as &[u8]);
+        }
 
         let pending = call
             .send()
@@ -295,10 +284,65 @@ impl SettlementQueue {
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;
         info!("Submitted tx {} for match {}", pending.tx_hash(), match_id);
 
-        pending
-            .await
-            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
-        nonce_manager.reset(&custodial_addr);
+        let db_clone = self.db.clone();
+        let match_id_clone = s.match_id.clone();
+        let match_id_parsed_clone = match_id;
+
+        let tx_hash = pending.tx_hash();
+
+        tokio::spawn(async move {
+            let mut attempts = 0;
+            loop {
+                match provider.get_transaction_receipt(tx_hash).await {
+                    Ok(Some(receipt)) => {
+                        if receipt.status == Some(1.into()) {
+                            info!("Settlement for match {} successfully mined", match_id_parsed_clone);
+                            if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
+                                let _ = cf.remove(&match_id_clone);
+                            }
+                        } else {
+                            warn!("Settlement tx {} for match {} reverted on-chain", tx_hash, match_id_parsed_clone);
+                            if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
+                                if let Ok(Some(bytes)) = cf.get(&match_id_clone) {
+                                    if let Ok(mut pending_s) = bincode::deserialize::<PendingSettlement>(&bytes) {
+                                        pending_s.status = SettlementStatus::Queued;
+                                        pending_s.retry_count += 1;
+                                        if let Ok(updated) = bincode::serialize(&pending_s) {
+                                            let _ = cf.insert(&match_id_clone, &updated as &[u8]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    Ok(None) => {
+                        attempts += 1;
+                        if attempts > 60 { // ~2 mins timeout
+                            warn!("Settlement tx {} for match {} timed out waiting for receipt", tx_hash, match_id_parsed_clone);
+                            if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
+                                if let Ok(Some(bytes)) = cf.get(&match_id_clone) {
+                                    if let Ok(mut pending_s) = bincode::deserialize::<PendingSettlement>(&bytes) {
+                                        pending_s.status = SettlementStatus::Queued;
+                                        pending_s.retry_count += 1;
+                                        if let Ok(updated) = bincode::serialize(&pending_s) {
+                                            let _ = cf.insert(&match_id_clone, &updated as &[u8]);
+                                        }
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
+                    Err(e) => {
+                        warn!("RPC error polling receipt for {}: {:?}", tx_hash, e);
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
+                }
+            }
+        });
+
         Ok(())
     }
 

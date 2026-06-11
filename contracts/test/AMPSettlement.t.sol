@@ -32,8 +32,9 @@ contract AMPSettlementTest is Test {
         vm.prank(admin);
         uint256 gameId =
             registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 1 ether, address(0), address(0));
+        matchId = 123;
         vm.prank(playerA);
-        matchId = registry.createMatch{value: 1 ether}(gameId, 1 ether);
+        registry.createMatch{value: 1 ether}(gameId, matchId, 1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 1 ether}(matchId);
     }
@@ -55,8 +56,9 @@ contract AMPSettlementTest is Test {
         vm.prank(admin);
         uint256 gameId =
             registry.registerGame(AMPTypes.SettlementMode.RT_HASH_AGREE, verifiers, 1 ether, address(0), admin);
+        matchId = 456;
         vm.prank(playerA);
-        matchId = registry.createMatch{value: 1 ether}(gameId, 1 ether);
+        registry.createMatch{value: 1 ether}(gameId, matchId, 1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 1 ether}(matchId);
     }

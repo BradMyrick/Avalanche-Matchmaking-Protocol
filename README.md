@@ -175,14 +175,30 @@ See [.env.example](.env.example) for the complete list. Key variables:
 
 ---
 
-## Test Status
+## Testing & Verification
 
-| Suite | Count | Command |
+AMP is equipped with modular unit test suites and a comprehensive end-to-end integration test suite.
+
+### Prerequisites
+- **capnp** C++ library (`apt install capnproto` or `brew install capnp`)
+- **Foundry** (specifically `forge` and `anvil`) for EVM simulation: `curl -L https://foundry.paradigm.xyz | bash && foundryup`
+- **Go** (for SDK testing)
+
+### Testing Commands
+
+| Target | Description | Command |
 |:---|:---|:---|
-| Rust tests | 30 | `cargo test --workspace` |
-| Forge tests | 32 | `cd contracts && forge test -vvv` |
-| Clippy | clean | `cargo clippy --workspace --all-targets -- -D warnings` |
-| Formatting | clean | `cargo fmt --all -- --check` |
+| **Rust Unit Tests** | Verifies matchmaking logic, Glicko-2 MMR updates, and server components. | `cargo test --workspace` |
+| **Solidity Contract Tests** | Verifies match registry rules, state machine transitions, and dispute resolution. | `cd contracts && forge test -vvv` |
+| **Go SDK Tests** | Verifies Go client integrations, challenges, and schema deserialization. | `make test-sdk-go` |
+| **E2E Integration Tests** | Orchestrates a live local Anvil network, deploys contracts, runs telemetry/relayer/servers, and simulates E2E gameplay settlement. | `make test-integration` |
+| **All Tests** | Runs all workspace unit and SDK tests sequentially. | `make test` |
+| **Linters & Formatting** | Runs workspace lint check and code formatter checks. | `make lint` and `make format` |
+
+To run the full E2E validation suite and verify system readiness to host players, execute:
+```bash
+make test-integration
+```
 
 ---
 

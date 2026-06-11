@@ -410,10 +410,12 @@ async fn sign_match_outcome(
         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
             .as_bytes(),
     );
+    let name_hash = ethers_core::utils::keccak256("AMPSettlement".as_bytes());
+    let version_hash = ethers_core::utils::keccak256("1".as_bytes());
     let domain_separator = ethers_core::utils::keccak256(ethers_core::abi::encode(&[
         ethers_core::abi::Token::FixedBytes(eip712_domain_typehash.to_vec()),
-        ethers_core::abi::Token::String("AMPSettlement".to_string()),
-        ethers_core::abi::Token::String("1".to_string()),
+        ethers_core::abi::Token::FixedBytes(name_hash.to_vec()),
+        ethers_core::abi::Token::FixedBytes(version_hash.to_vec()),
         ethers_core::abi::Token::Uint(U256::from(chain_id)),
         ethers_core::abi::Token::Address(settlement_addr),
     ]));
@@ -441,131 +443,41 @@ async fn start_relayer_worker(
     mut rx: tokio::sync::mpsc::Receiver<RelayerTask>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
-    tokio::task::spawn_local(async move {
-        let relayer_rpc_addr =
-            env::var("RELAYER_RPC_ADDR").unwrap_or_else(|_| "localhost:50052".to_string());
-        let api_key = match env::var("RELAYER_API_KEY_FILE") {
-            Ok(path) => std::fs::read_to_string(&path)
-                .map(|s| s.trim().to_string())
-                .unwrap_or_else(|e| {
-                    warn!("Failed to read RELAYER_API_KEY_FILE '{}': {}", path, e);
-                    String::new()
-                }),
-            Err(_) => env::var("RELAYER_API_KEY").unwrap_or_else(|e| {
-                warn!("RELAYER_API_KEY not set: {}. Relayer authentication disabled.", e);
+    let relayer_rpc_addr =
+        env::var("RELAYER_RPC_ADDR").unwrap_or_else(|_| "localhost:50052".to_string());
+    let api_key = match env::var("RELAYER_API_KEY_FILE") {
+        Ok(path) => std::fs::read_to_string(&path)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|e| {
+                warn!("Failed to read RELAYER_API_KEY_FILE '{}': {}", path, e);
                 String::new()
             }),
-        };
-        if api_key.is_empty() {
-            warn!("No relayer API key configured. Relayer requests will be unauthenticated.");
-        } else {
-            info!("Relayer API key loaded ({} chars)", api_key.len());
-        }
+        Err(_) => env::var("RELAYER_API_KEY").unwrap_or_else(|e| {
+            warn!("RELAYER_API_KEY not set: {}. Relayer authentication disabled.", e);
+            String::new()
+        }),
+    };
+    if api_key.is_empty() {
+        warn!("No relayer API key configured. Relayer requests will be unauthenticated.");
+    } else {
+        info!("Relayer API key loaded ({} chars)", api_key.len());
+    }
 
-        let mut client_opt: Option<relayer_capnp::relayer_service::Client> = None;
+    let mut client_opt: Option<relayer_capnp::relayer_service::Client> = None;
 
-        loop {
-            tokio::select! {
-                _ = cancel.cancelled() => return,
-                task_opt = rx.recv() => {
-                    let task = match task_opt {
-                        Some(t) => t,
-                        None => return,
-                    };
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            task_opt = rx.recv() => {
+                let task = match task_opt {
+                    Some(t) => t,
+                    None => return,
+                };
 
-                    let mut retries = 0;
-                    loop {
-                        if client_opt.is_none() {
-                            if let Ok(stream) = tokio::net::TcpStream::connect(&relayer_rpc_addr).await {
-                                let (reader, writer) = stream.into_split();
-                                let network = twoparty::VatNetwork::new(
-                                    reader.compat(),
-                                    writer.compat_write(),
-                                    rpc_twoparty_capnp::Side::Client,
-                                    Default::default(),
-                                );
-                                let mut rpc_system = RpcSystem::new(Box::new(network), None);
-                                let c: relayer_capnp::relayer_service::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-                                tokio::task::spawn_local(rpc_system);
-
-                                if !api_key.is_empty() {
-                                    let mut auth_req = c.authenticate_request();
-                                    auth_req.get().set_api_key(api_key.as_bytes());
-                                    if let Ok(auth_resp) = auth_req.send().promise.await {
-                                        if auth_resp.get().map(|r| r.get_ok()).unwrap_or(false) {
-                                            client_opt = Some(c);
-                                        } else {
-                                            error!("relayer authentication failed: invalid API key for match {}", task.match_id);
-                                            break; // Fatal error, drop task
-                                        }
-                                    } else {
-                                        // Network error on auth
-                                    }
-                                } else {
-                                    client_opt = Some(c);
-                                }
-                            } else {
-                                tokio::time::sleep(Duration::from_millis(500 * 2u64.pow(retries.min(3)))).await;
-                                retries += 1;
-                                if retries > 5 {
-                                    error!("Failed to connect to relayer for {}", task.match_id);
-                                    break; // drop task
-                                }
-                                continue;
-                            }
-                        }
-
-                        if let Some(client) = &client_opt {
-                            let mut req = client.submit_outcome_request();
-
-                            let match_id_val = if let Ok(val) = U256::from_dec_str(&task.match_id) {
-                                let mut b = [0u8; 32];
-                                val.to_big_endian(&mut b);
-                                b.to_vec()
-                            } else {
-                                task.match_id.as_bytes().to_vec()
-                            };
-
-                            req.get().set_match_id(&match_id_val);
-                            req.get().set_outcome(task.outcome);
-                            req.get().set_transcript_hash(&task.transcript_hash);
-                            req.get().set_signature(&task.signature);
-
-                            if req.send().promise.await.is_err() {
-                                client_opt = None; // Reconnect
-                            } else {
-                                info!("Notified relayer for match {}", task.match_id);
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-}
-
-async fn start_telemetry_worker(
-    mut rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
-    cancel: tokio_util::sync::CancellationToken,
-) {
-    tokio::task::spawn_local(async move {
-        let telemetry_addr =
-            env::var("TELEMETRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4317".to_string());
-
-        let mut client_opt: Option<amp_telemetry_capnp::telemetry_receiver::Client> = None;
-
-        loop {
-            tokio::select! {
-                _ = cancel.cancelled() => return,
-                evt_opt = rx.recv() => {
-                    let event = match evt_opt {
-                        Some(e) => e,
-                        None => return,
-                    };
-
+                let mut retries = 0;
+                loop {
                     if client_opt.is_none() {
-                        if let Ok(stream) = tokio::net::TcpStream::connect(&telemetry_addr).await {
+                        if let Ok(stream) = tokio::net::TcpStream::connect(&relayer_rpc_addr).await {
                             let (reader, writer) = stream.into_split();
                             let network = twoparty::VatNetwork::new(
                                 reader.compat(),
@@ -574,25 +486,112 @@ async fn start_telemetry_worker(
                                 Default::default(),
                             );
                             let mut rpc_system = RpcSystem::new(Box::new(network), None);
-                            let c = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+                            let c: relayer_capnp::relayer_service::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
                             tokio::task::spawn_local(rpc_system);
-                            client_opt = Some(c);
+
+                            if !api_key.is_empty() {
+                                let mut auth_req = c.authenticate_request();
+                                auth_req.get().set_api_key(api_key.as_bytes());
+                                if let Ok(auth_resp) = auth_req.send().promise.await {
+                                    if auth_resp.get().map(|r| r.get_ok()).unwrap_or(false) {
+                                        client_opt = Some(c);
+                                    } else {
+                                        error!("relayer authentication failed: invalid API key for match {}", task.match_id);
+                                        break; // Fatal error, drop task
+                                    }
+                                } else {
+                                    // Network error on auth
+                                }
+                            } else {
+                                client_opt = Some(c);
+                            }
                         } else {
-                            continue; // Silently drop telemetry if disconnected
+                            tokio::time::sleep(Duration::from_millis(500 * 2u64.pow(retries.min(3)))).await;
+                            retries += 1;
+                            if retries > 5 {
+                                error!("Failed to connect to relayer for {}", task.match_id);
+                                break; // drop task
+                            }
+                            continue;
                         }
                     }
 
                     if let Some(client) = &client_opt {
-                        let mut req = client.log_event_request();
-                        req.get().init_event().set_event_data(&event);
+                        let mut req = client.submit_outcome_request();
+
+                        let match_id_val = if let Ok(val) = U256::from_dec_str(&task.match_id) {
+                            let mut b = [0u8; 32];
+                            val.to_big_endian(&mut b);
+                            b.to_vec()
+                        } else {
+                            let hash = ethers_core::utils::keccak256(task.match_id.as_bytes());
+                            hash.to_vec()
+                        };
+
+                        req.get().set_match_id(&match_id_val);
+                        req.get().set_outcome(task.outcome);
+                        req.get().set_transcript_hash(&task.transcript_hash);
+                        req.get().set_signature(&task.signature);
+
                         if req.send().promise.await.is_err() {
-                            client_opt = None;
+                            client_opt = None; // Reconnect
+                        } else {
+                            info!("Notified relayer for match {}", task.match_id);
+                            break;
                         }
                     }
                 }
             }
         }
-    });
+    }
+}
+
+async fn start_telemetry_worker(
+    mut rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    let telemetry_addr =
+        env::var("TELEMETRY_ADDR").unwrap_or_else(|_| "127.0.0.1:4317".to_string());
+
+    let mut client_opt: Option<amp_telemetry_capnp::telemetry_receiver::Client> = None;
+
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            evt_opt = rx.recv() => {
+                let event = match evt_opt {
+                    Some(e) => e,
+                    None => return,
+                };
+
+                if client_opt.is_none() {
+                    if let Ok(stream) = tokio::net::TcpStream::connect(&telemetry_addr).await {
+                        let (reader, writer) = stream.into_split();
+                        let network = twoparty::VatNetwork::new(
+                            reader.compat(),
+                            writer.compat_write(),
+                            rpc_twoparty_capnp::Side::Client,
+                            Default::default(),
+                        );
+                        let mut rpc_system = RpcSystem::new(Box::new(network), None);
+                        let c = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+                        tokio::task::spawn_local(rpc_system);
+                        client_opt = Some(c);
+                    } else {
+                        continue; // Silently drop telemetry if disconnected
+                    }
+                }
+
+                if let Some(client) = &client_opt {
+                    let mut req = client.log_event_request();
+                    req.get().init_event().set_event_data(&event);
+                    if req.send().promise.await.is_err() {
+                        client_opt = None;
+                    }
+                }
+            }
+        }
+    }
 }
 
 struct MatchSessionImpl {

@@ -1,0 +1,93 @@
+---
+title: Testing & Verification
+---
+
+# Testing & Verification Guide
+
+This guide details the steps and prerequisites required to run the Avalanche Matchmaking Protocol (AMP) test suites. By running these tests, developers can verify that their local configuration is correct and that the core matchmaking, telemetry, relay, and smart contract systems are fully ready to support active players.
+
+---
+
+## Prerequisites
+
+Before running the tests, ensure you have the following system dependencies installed:
+
+1. **Rust Toolchain**: Rust 1.87+ (edition 2024). Install via [rustup.rs](https://rustup.rs).
+2. **Cap'n Proto Compiler**: Used for generating RPC serialization code.
+   - **Debian/Ubuntu**: `sudo apt install capnproto`
+   - **macOS**: `brew install capnp`
+3. **Foundry**: Anvil and Forge are required for running smart contract unit tests and executing the E2E integration test local blockchain environment. Install via:
+   ```bash
+   curl -L https://foundry.paradigm.xyz | bash
+   foundryup
+   ```
+4. **Go**: Required for testing the Go SDK. Install version 1.22+.
+
+---
+
+## Testing Commands
+
+AMP provides unit, SDK, and end-to-end integration tests to isolate and verify components.
+
+### 1. Smart Contract Tests (Solidity)
+These tests verify contract rules (reentrancy, game registrations, match creation, stakes, disputes, and withdrawals).
+
+* **Command**:
+  ```bash
+  cd contracts
+  forge test -vvv
+  ```
+* **Coverage**: Runs 32 automated tests verifying the `AMPRegistry` and `AMPSettlement` contracts on a simulated EVM runtime.
+
+### 2. Rust Workspace Unit Tests
+These tests cover matchmaking rule evaluation, Glicko-2 MMR calculations, and persistent state storage operations.
+
+* **Command**:
+  ```bash
+  cargo test --workspace
+  ```
+* **Coverage**: Verifies the core matchmaking logic, rating updates under Glicko-2 parameters, and connection rate limiters.
+
+### 3. Go SDK Tests
+These tests verify that game server integrations using the Go SDK compile and execute correctly.
+
+* **Command**:
+  ```bash
+  make test-sdk-go
+  ```
+  *(Or run `cd amp-sdk/go && go test ./...`)*
+* **Coverage**: Verifies the Go player session client, signature verification helpers, and Cap'n Proto RPC structures.
+
+### 4. End-to-End Integration Tests
+This is the ultimate verification suite that replicates a live production environment on a local Avalanche Fuji testnet fork.
+
+* **Command**:
+  ```bash
+  make test-integration
+  ```
+* **Orchestration**: The integration runner automatically performs the following steps:
+  1. Starts a local `anvil` instance on a random free port configured with Chain ID `43113` (Fuji).
+  2. Deploys the `AMPRegistry` and `AMPSettlement` contracts using Forge scripts.
+  3. Starts the `amp-telemetry` receiver, the `amp-relayer` bridge, and the `AMP-Server` verifier.
+  4. Registers a game on-chain and configures verifier addresses.
+  5. Simulates player clients authenticating via ECDSA challenges, joining queues, and matching.
+  6. Submits game results, triggers relayer txs, checks payouts and fees on-chain, and verifies Glicko-2 ratings are successfully written to the Sled DB.
+
+---
+
+## Verifying System Readiness
+
+To run all tests (Rust tests, Forge contract tests, and SDK tests) sequentially, run the following root command:
+
+```bash
+# Setup environment and dependencies
+make setup
+
+# Run all test suites
+make test
+
+# Run the E2E integration test
+make test-integration
+```
+
+If the console outputs `ALL INTEGRATION TESTS PASSED SUCCESSFULLY!`, the matchmaking stack is fully operational, secure, and ready to host live multiplayer matches.

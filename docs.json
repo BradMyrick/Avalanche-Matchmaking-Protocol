@@ -18,7 +18,8 @@
       "pages": [
         { "title": "Integration Guide", "href": "/integration-guide" },
         { "title": "Match Transcripts", "href": "/match-transcripts" },
-        { "title": "Running a Verifier", "href": "/running-a-verifier" }
+        { "title": "Running a Verifier", "href": "/running-a-verifier" },
+        { "title": "Testing & Verification", "href": "/testing" }
       ]
     },
     {

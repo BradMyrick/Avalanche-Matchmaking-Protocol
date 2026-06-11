@@ -25,10 +25,10 @@ impl IndexedQueue {
         let key = (entry.game_id.clone(), entry.ruleset_id.clone());
         let bucket = self.buckets.entry(key).or_default();
         let mmr = entry.mmr;
-        let pos = bucket
-            .iter()
-            .position(|e| e.mmr > mmr)
-            .unwrap_or(bucket.len());
+        let pos = match bucket.binary_search_by(|e| e.mmr.partial_cmp(&mmr).unwrap_or(std::cmp::Ordering::Equal)) {
+            Ok(p) => p,
+            Err(p) => p,
+        };
         bucket.insert(pos, entry);
         self.total_count += 1;
     }
@@ -64,15 +64,9 @@ impl IndexedQueue {
         while i < bucket.len() {
             let entry_a = &bucket[i];
 
-            let lo = mmr_search_bound(entry_a.mmr, max_diff, false);
             let hi = mmr_search_bound(entry_a.mmr, max_diff, true);
 
-            let search_start = match bucket[i + 1..]
-                .binary_search_by(|e| e.mmr.partial_cmp(&lo).unwrap_or(std::cmp::Ordering::Equal))
-            {
-                Ok(idx) => (i + 1) + idx,
-                Err(idx) => (i + 1) + idx,
-            };
+            let search_start = i + 1;
 
             let mut best_j: Option<usize> = None;
             let mut best_score = 0.0f32;

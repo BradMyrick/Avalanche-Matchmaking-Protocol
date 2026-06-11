@@ -146,9 +146,9 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
             ));
         }
         let outcome = params_reader.get_outcome();
-        if !(1..=3).contains(&outcome) {
+        if !(1..=4).contains(&outcome) {
             return capnp::capability::Promise::err(capnp::Error::failed(format!(
-                "outcome must be 1-3, got {}",
+                "outcome must be 1-4, got {}",
                 outcome
             )));
         }
@@ -184,6 +184,8 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
                 enqueued_at_ms: now,
                 last_attempt_at_ms: None,
                 status: settlement::SettlementStatus::Queued,
+                last_max_fee: None,
+                last_priority_fee: None,
             };
 
             queue

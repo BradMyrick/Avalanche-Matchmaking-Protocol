@@ -74,7 +74,7 @@ build/
 # --- C# ---
 amp-sdk/examples/csharp/bin/
 amp-sdk/examples/csharp/obj/
- 
+
 build/
 
 .cache/
@@ -86,3 +86,6 @@ build/
 __pycache__/
 *.pyc
 git-pip.py
+
+# data files
+*-data/

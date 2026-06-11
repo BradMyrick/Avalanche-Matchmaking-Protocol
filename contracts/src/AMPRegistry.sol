@@ -31,10 +31,10 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     error TransferFailed();
     error MatchNotSettlable();
     error NoPendingWithdrawal();
+    error MatchAlreadyExists();
 
     address public settlement;
     uint256 public nextGameId;
-    uint256 public nextMatchId;
 
     mapping(address => uint256) public feeBalances;
     mapping(address => mapping(address => uint256)) public pendingWithdrawals;
@@ -115,13 +115,13 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         return games[gameId].verifiers;
     }
 
-    function createMatch(uint256 gameId, uint256 stakeAmount)
+    function createMatch(uint256 gameId, uint256 matchId, uint256 stakeAmount)
         external
         payable
         whenNotPaused
         nonReentrant
-        returns (uint256 matchId)
     {
+        if (matches[matchId].playerA != address(0)) revert MatchAlreadyExists();
         AMPTypes.Game storage game = games[gameId];
 
         uint256 actualStake;
@@ -136,7 +136,6 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
             actualStake = IERC20(game.stakeToken).balanceOf(address(this)) - balBefore;
         }
 
-        matchId = nextMatchId++;
         matches[matchId] = AMPTypes.Match({
             gameId: gameId,
             playerA: _msgSender(),
@@ -148,6 +147,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
 
         emit MatchCreated(matchId, gameId, _msgSender(), actualStake);
     }
+
 
     function joinMatch(uint256 matchId) external payable whenNotPaused nonReentrant {
         AMPTypes.Match storage m = matches[matchId];

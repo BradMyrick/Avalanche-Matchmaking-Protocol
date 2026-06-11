@@ -8,4 +8,6 @@ members = [
     "trace-viewer",
     "amp-sdk/rust",
     "amp-loadtest",
+    "amp-integration-tests",
 ]
+

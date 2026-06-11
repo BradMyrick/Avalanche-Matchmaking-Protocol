@@ -33,8 +33,8 @@ contract AMPRegistryTest is Test {
         uint256 gameId =
             registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
-        assertEq(matchId, 0);
+        uint256 matchId = 0;
+        registry.createMatch{value: 0.1 ether}(gameId, matchId, 0.1 ether);
         (, address pA, AMPTypes.MatchState state, address pB,, uint256 stake) = registry.matches(matchId);
         assertEq(pA, playerA);
         assertEq(pB, address(0));
@@ -47,7 +47,8 @@ contract AMPRegistryTest is Test {
         uint256 gameId =
             registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
+        uint256 matchId = 0;
+        registry.createMatch{value: 0.1 ether}(gameId, matchId, 0.1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);
         (, address pA, AMPTypes.MatchState state, address pB,,) = registry.matches(matchId);
@@ -112,7 +113,8 @@ contract AMPRegistryTest is Test {
         uint256 gameId =
             registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
+        uint256 matchId = 0;
+        registry.createMatch{value: 0.1 ether}(gameId, matchId, 0.1 ether);
         vm.prank(playerA);
         registry.cancelMatch(matchId);
         assertEq(registry.pendingWithdrawals(address(0), playerA), 0.1 ether);
@@ -129,7 +131,8 @@ contract AMPRegistryTest is Test {
         uint256 gameId =
             registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
+        uint256 matchId = 0;
+        registry.createMatch{value: 0.1 ether}(gameId, matchId, 0.1 ether);
         vm.prank(playerB);
         vm.expectRevert(AMPRegistry.NotPlayerA.selector);
         registry.cancelMatch(matchId);
@@ -140,7 +143,8 @@ contract AMPRegistryTest is Test {
         uint256 gameId =
             registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
+        uint256 matchId = 0;
+        registry.createMatch{value: 0.1 ether}(gameId, matchId, 0.1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);
         vm.warp(block.timestamp + 1 hours + 1);
@@ -164,7 +168,8 @@ contract AMPRegistryTest is Test {
         uint256 gameId =
             registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0.1 ether, address(0), address(0));
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
+        uint256 matchId = 0;
+        registry.createMatch{value: 0.1 ether}(gameId, matchId, 0.1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);
         vm.expectRevert(AMPRegistry.NotExpiredYet.selector);
@@ -177,7 +182,7 @@ contract AMPRegistryTest is Test {
         registry.pause();
         vm.prank(playerA);
         vm.expectRevert(abi.encodeWithSelector(Pausable.EnforcedPause.selector));
-        registry.createMatch{value: 0.1 ether}(0, 0.1 ether);
+        registry.createMatch{value: 0.1 ether}(0, 0, 0.1 ether);
     }
 
     function testUnpauseResumes() public {
@@ -187,8 +192,8 @@ contract AMPRegistryTest is Test {
         registry.pause();
         registry.unpause();
         vm.prank(playerA);
-        uint256 matchId = registry.createMatch{value: 0.1 ether}(gameId, 0.1 ether);
-        assertEq(matchId, 0);
+        uint256 matchId = 0;
+        registry.createMatch{value: 0.1 ether}(gameId, matchId, 0.1 ether);
     }
 
     function testIsVerifierTrue() public {

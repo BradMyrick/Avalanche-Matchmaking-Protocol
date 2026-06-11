@@ -3,7 +3,7 @@
 
 .PHONY: help setup build test clean localnet-up localnet-down deploy-local \
         lint format docs build-rust build-contracts build-sdk-go build-sdk-cpp \
-        build-sdk-csharp build-sdk-python test-rust test-contracts test-sdk-go \
+        build-sdk-csharp build-sdk-python test-rust test-contracts test-integration test-sdk-go \
         lint-rust lint-contracts format-rust check-contracts
 
 help:
@@ -69,6 +69,10 @@ test-rust:
 test-contracts:
 	@echo "Running Forge contract tests..."
 	cd contracts && forge test -vvv
+
+test-integration: build
+	@echo "Running end-to-end integration tests..."
+	cargo run --bin amp-integration-tests
 
 test-sdk-go:
 	@echo "Running Go SDK tests..."
