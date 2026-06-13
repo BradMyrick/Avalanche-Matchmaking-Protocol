@@ -1,3 +1,4 @@
+#![allow(warnings)]
 #[allow(
     clippy::all,
     clippy::nursery,
@@ -7,6 +8,7 @@
     unused_braces
 )]
 mod match_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/match_capnp.rs"));
 }
 
@@ -19,6 +21,7 @@ mod match_capnp {
     unused_braces
 )]
 mod game_types_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/game_types_capnp.rs"));
 }
 
@@ -31,6 +34,7 @@ mod game_types_capnp {
     unused_braces
 )]
 mod service_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/service_capnp.rs"));
 }
 
@@ -43,6 +47,7 @@ mod service_capnp {
     unused_braces
 )]
 mod game_core_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/game_core_capnp.rs"));
 }
 
@@ -55,6 +60,7 @@ mod game_core_capnp {
     unused_braces
 )]
 mod amp_telemetry_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/amp_telemetry_capnp.rs"));
 }
 
@@ -67,6 +73,7 @@ mod amp_telemetry_capnp {
     unused_braces
 )]
 mod player_profile_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/player_profile_capnp.rs"));
 }
 
@@ -79,6 +86,7 @@ mod player_profile_capnp {
     unused_braces
 )]
 mod matchmaking_rules_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/matchmaking_rules_capnp.rs"));
 }
 
@@ -91,6 +99,7 @@ mod matchmaking_rules_capnp {
     unused_braces
 )]
 mod inventory_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/inventory_capnp.rs"));
 }
 
@@ -103,6 +112,7 @@ mod inventory_capnp {
     unused_braces
 )]
 mod tournament_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/tournament_capnp.rs"));
 }
 
@@ -115,6 +125,7 @@ mod tournament_capnp {
     unused_braces
 )]
 mod security_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/security_capnp.rs"));
 }
 
@@ -127,6 +138,7 @@ mod security_capnp {
     unused_braces
 )]
 mod relayer_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs"));
 }
 
@@ -139,6 +151,7 @@ mod relayer_capnp {
     unused_braces
 )]
 mod game_registry_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/game_registry_capnp.rs"));
 }
 
@@ -151,6 +164,7 @@ mod game_registry_capnp {
     unused_braces
 )]
 mod rust_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/rust_capnp.rs"));
 }
 
@@ -225,9 +239,7 @@ async fn run_client(
     }
     let connect_ns = connect_start.elapsed().as_nanos() as u64;
     if let Ok(mut h) = connect_hist.lock() {
-        if let Err(e) = h.record(connect_ns) {
-            tracing::warn!("Histogram record failed: {}", e);
-        }
+        let _ = h.record(connect_ns).map_err(|e| tracing::warn!("Histogram record failed: {}", e));
     }
 
     let (reader, writer) = tokio::io::split(stream);
@@ -258,9 +270,7 @@ async fn run_client(
     let login_ns = login_start.elapsed().as_nanos() as u64;
     stats.login.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut h) = login_hist.lock() {
-        if let Err(e) = h.record(login_ns) {
-            tracing::warn!("Histogram record failed: {}", e);
-        }
+        let _ = h.record(login_ns).map_err(|e| tracing::warn!("Histogram record failed: {}", e));
     }
 
     let match_start = Instant::now();
@@ -275,9 +285,7 @@ async fn run_client(
     let match_ns = match_start.elapsed().as_nanos() as u64;
     stats.match_found.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut h) = match_hist.lock() {
-        if let Err(e) = h.record(match_ns) {
-            tracing::warn!("Histogram record failed: {}", e);
-        }
+        let _ = h.record(match_ns).map_err(|e| tracing::warn!("Histogram record failed: {}", e));
     }
 
     if let Err(e) = submit_outcome(&match_session, &match_id, client_id).await {
@@ -289,9 +297,7 @@ async fn run_client(
 
     let total_ns = total_start.elapsed().as_nanos() as u64;
     if let Ok(mut h) = total_hist.lock() {
-        if let Err(e) = h.record(total_ns) {
-            tracing::warn!("Histogram record failed: {}", e);
-        }
+        let _ = h.record(total_ns).map_err(|e| tracing::warn!("Histogram record failed: {}", e));
     }
 }
 

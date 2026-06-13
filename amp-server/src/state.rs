@@ -515,7 +515,7 @@ impl InnerState {
     ) {
         self.match_event_senders
             .entry(match_id.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(tx);
     }
 

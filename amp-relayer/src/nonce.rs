@@ -45,6 +45,7 @@ impl NonceManager {
         Ok(U256::from(nonce))
     }
 
+    #[allow(dead_code)]
     pub fn reset(&self, addr: &Address) {
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.remove(addr);

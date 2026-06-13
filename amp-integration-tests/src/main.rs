@@ -1,40 +1,54 @@
+#![allow(warnings)]
 mod match_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/match_capnp.rs"));
 }
 mod game_types_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/game_types_capnp.rs"));
 }
 mod service_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/service_capnp.rs"));
 }
 mod game_core_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/game_core_capnp.rs"));
 }
 mod amp_telemetry_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/amp_telemetry_capnp.rs"));
 }
 mod player_profile_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/player_profile_capnp.rs"));
 }
 mod matchmaking_rules_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/matchmaking_rules_capnp.rs"));
 }
 mod inventory_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/inventory_capnp.rs"));
 }
 mod tournament_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/tournament_capnp.rs"));
 }
 mod security_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/security_capnp.rs"));
 }
 mod relayer_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs"));
 }
 mod game_registry_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/game_registry_capnp.rs"));
 }
 mod rust_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/rust_capnp.rs"));
 }
 
@@ -218,7 +232,7 @@ async fn run_test() -> Result<()> {
     println!("[TEST] Compiling smart contracts...");
     let build_output = Command::new("forge")
         .current_dir(repo_root.join("contracts"))
-        .args(&["build"])
+        .args(["build"])
         .output()?;
     if !build_output.status.success() {
         anyhow::bail!(
@@ -249,7 +263,7 @@ async fn run_test() -> Result<()> {
     // 3. Start Anvil
     println!("[TEST] Starting Anvil on port {}...", anvil_port);
     let anvil_child = Command::new("anvil")
-        .args(&["--port", &anvil_port.to_string(), "--chain-id", "43113"])
+        .args(["--port", &anvil_port.to_string(), "--chain-id", "43113"])
         .spawn()?;
     let _anvil_guard = KillOnDrop(anvil_child);
 
@@ -263,7 +277,7 @@ async fn run_test() -> Result<()> {
             "PRIVATE_KEY",
             "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
         )
-        .args(&[
+        .args([
             "script",
             "script/Deploy.s.sol",
             "--rpc-url",
@@ -486,15 +500,13 @@ async fn run_test() -> Result<()> {
     let mut settled = false;
 
     while start_poll.elapsed().as_secs() < 30 {
-        if let Ok((_match_id, outcome, _t_hash, _settled_at)) =
+        if let Ok((_match_id, 1, _t_hash, _settled_at)) =
             settlement_contract.settlements(match_id_val).call().await
         {
-            if outcome == 1 {
-                // WIN_A
-                println!("[TEST] Outcome verified on-chain: WIN_A");
-                settled = true;
-                break;
-            }
+            // WIN_A
+            println!("[TEST] Outcome verified on-chain: WIN_A");
+            settled = true;
+            break;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }

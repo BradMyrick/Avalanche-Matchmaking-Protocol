@@ -31,6 +31,7 @@ use state::{ActiveMatch, AppState, MatchFoundPayload, QueueEntry, StoredRuleSet,
     unused_braces
 )]
 pub mod game_types_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/game_types_capnp.rs"));
 }
 #[allow(
@@ -42,6 +43,7 @@ pub mod game_types_capnp {
     unused_braces
 )]
 pub mod match_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/match_capnp.rs"));
 }
 #[allow(
@@ -53,6 +55,7 @@ pub mod match_capnp {
     unused_braces
 )]
 pub mod service_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/service_capnp.rs"));
 }
 #[allow(
@@ -64,6 +67,7 @@ pub mod service_capnp {
     unused_braces
 )]
 pub mod game_core_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/game_core_capnp.rs"));
 }
 #[allow(
@@ -75,6 +79,7 @@ pub mod game_core_capnp {
     unused_braces
 )]
 pub mod amp_telemetry_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/amp_telemetry_capnp.rs"));
 }
 #[allow(
@@ -86,6 +91,7 @@ pub mod amp_telemetry_capnp {
     unused_braces
 )]
 pub mod relayer_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs"));
 }
 #[allow(
@@ -97,6 +103,7 @@ pub mod relayer_capnp {
     unused_braces
 )]
 pub mod player_profile_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/player_profile_capnp.rs"));
 }
 #[allow(
@@ -108,6 +115,7 @@ pub mod player_profile_capnp {
     unused_braces
 )]
 pub mod matchmaking_rules_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/matchmaking_rules_capnp.rs"));
 }
 #[allow(
@@ -119,6 +127,7 @@ pub mod matchmaking_rules_capnp {
     unused_braces
 )]
 pub mod game_registry_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/game_registry_capnp.rs"));
 }
 #[allow(
@@ -130,6 +139,7 @@ pub mod game_registry_capnp {
     unused_braces
 )]
 pub mod inventory_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/inventory_capnp.rs"));
 }
 #[allow(
@@ -141,6 +151,7 @@ pub mod inventory_capnp {
     unused_braces
 )]
 pub mod tournament_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/tournament_capnp.rs"));
 }
 #[allow(
@@ -152,6 +163,7 @@ pub mod tournament_capnp {
     unused_braces
 )]
 pub mod security_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/security_capnp.rs"));
 }
 

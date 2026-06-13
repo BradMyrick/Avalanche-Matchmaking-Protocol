@@ -25,6 +25,7 @@ mod settlement;
     unused_braces
 )]
 pub mod relayer_capnp {
+    #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs"));
 }
 

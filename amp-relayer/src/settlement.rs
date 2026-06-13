@@ -253,12 +253,12 @@ impl SettlementQueue {
             .and_then(|s| U256::from_dec_str(s).ok());
 
         let (effective_max_fee, effective_priority_fee) =
-            if settlement.retry_count > 0 && prev_max.is_some() && prev_prio.is_some() {
+            if let (true, Some(pm), Some(pp)) = (settlement.retry_count > 0, prev_max, prev_prio) {
                 self.gas_manager.bump_fees(
                     network_max_fee,
                     network_priority_fee,
-                    prev_max.unwrap(),
-                    prev_prio.unwrap(),
+                    pm,
+                    pp,
                 )
             } else {
                 (network_max_fee, network_priority_fee)
@@ -315,6 +315,7 @@ impl SettlementQueue {
                                 "Settlement for match {} successfully mined",
                                 match_id_parsed_clone
                             );
+                            #[allow(clippy::collapsible_if)]
                             if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
                                 let _ = cf.remove(&match_id_clone);
                             }
@@ -323,6 +324,7 @@ impl SettlementQueue {
                                 "Settlement tx {} for match {} reverted on-chain",
                                 tx_hash, match_id_parsed_clone
                             );
+                            #[allow(clippy::collapsible_if)]
                             if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
                                 if let Ok(Some(bytes)) = cf.get(&match_id_clone) {
                                     if let Ok(mut pending_s) =
@@ -347,6 +349,7 @@ impl SettlementQueue {
                                 "Settlement tx {} for match {} timed out waiting for receipt",
                                 tx_hash, match_id_parsed_clone
                             );
+                            #[allow(clippy::collapsible_if)]
                             if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
                                 if let Ok(Some(bytes)) = cf.get(&match_id_clone) {
                                     if let Ok(mut pending_s) =
