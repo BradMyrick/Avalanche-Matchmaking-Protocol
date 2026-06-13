@@ -86,7 +86,7 @@ AMP/
 │   ├── cpp/           # C++ SDK (Unreal)
 │   ├── csharp/        # C# SDK (Unity/Godot)
 │   └── python/        # Python SDK
-├── amp-examples/      # Example projects (TypeScript, C++, C#)
+├── amp-sdk/           # Multi-language high-level SDKs and Examples
 ├── amp-loadtest/      # Load testing tool
 ├── contracts/         # Solidity (Forge, ^0.8.33, OpenZeppelin v5.6.1)
 ├── docs/              # Documentation (architecture, SDK guides, contracts reference)

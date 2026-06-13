@@ -65,22 +65,22 @@ amp-sdk/rust/src/generated_*
 
 # --- Build Artifacts ---
 amp-sdk/examples/cpp/build/
-amp-sdk/examples/csharp/bin/
-amp-sdk/examples/csharp/obj/
 dist/
 build/
 .cache/
 
 # --- C# ---
-amp-sdk/examples/csharp/bin/
-amp-sdk/examples/csharp/obj/
+**/bin/
+**/obj/
 
-build/
-
-.cache/
-
-*.bin
-*.exe
+# --- Python ---
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
 # Slither and Python
 .slither_venv/
 __pycache__/
