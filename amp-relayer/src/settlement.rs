@@ -254,12 +254,8 @@ impl SettlementQueue {
 
         let (effective_max_fee, effective_priority_fee) =
             if let (true, Some(pm), Some(pp)) = (settlement.retry_count > 0, prev_max, prev_prio) {
-                self.gas_manager.bump_fees(
-                    network_max_fee,
-                    network_priority_fee,
-                    pm,
-                    pp,
-                )
+                self.gas_manager
+                    .bump_fees(network_max_fee, network_priority_fee, pm, pp)
             } else {
                 (network_max_fee, network_priority_fee)
             };

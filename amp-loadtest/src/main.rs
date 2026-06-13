@@ -239,7 +239,9 @@ async fn run_client(
     }
     let connect_ns = connect_start.elapsed().as_nanos() as u64;
     if let Ok(mut h) = connect_hist.lock() {
-        let _ = h.record(connect_ns).map_err(|e| tracing::warn!("Histogram record failed: {}", e));
+        let _ = h
+            .record(connect_ns)
+            .map_err(|e| tracing::warn!("Histogram record failed: {}", e));
     }
 
     let (reader, writer) = tokio::io::split(stream);
@@ -270,7 +272,9 @@ async fn run_client(
     let login_ns = login_start.elapsed().as_nanos() as u64;
     stats.login.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut h) = login_hist.lock() {
-        let _ = h.record(login_ns).map_err(|e| tracing::warn!("Histogram record failed: {}", e));
+        let _ = h
+            .record(login_ns)
+            .map_err(|e| tracing::warn!("Histogram record failed: {}", e));
     }
 
     let match_start = Instant::now();
@@ -285,7 +289,9 @@ async fn run_client(
     let match_ns = match_start.elapsed().as_nanos() as u64;
     stats.match_found.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut h) = match_hist.lock() {
-        let _ = h.record(match_ns).map_err(|e| tracing::warn!("Histogram record failed: {}", e));
+        let _ = h
+            .record(match_ns)
+            .map_err(|e| tracing::warn!("Histogram record failed: {}", e));
     }
 
     if let Err(e) = submit_outcome(&match_session, &match_id, client_id).await {
@@ -297,7 +303,9 @@ async fn run_client(
 
     let total_ns = total_start.elapsed().as_nanos() as u64;
     if let Ok(mut h) = total_hist.lock() {
-        let _ = h.record(total_ns).map_err(|e| tracing::warn!("Histogram record failed: {}", e));
+        let _ = h
+            .record(total_ns)
+            .map_err(|e| tracing::warn!("Histogram record failed: {}", e));
     }
 }
 

@@ -217,7 +217,9 @@ async fn main() -> Result<()> {
                     _ = wait_sigterm() => {}
                 }
                 if let Ok(mut w) = log_writer_clone.lock() {
-                    let _ = w.flush().map_err(|e| eprintln!("Failed to flush telemetry log: {}", e));
+                    let _ = w
+                        .flush()
+                        .map_err(|e| eprintln!("Failed to flush telemetry log: {}", e));
                 }
                 cancel_clone.cancel();
             });
