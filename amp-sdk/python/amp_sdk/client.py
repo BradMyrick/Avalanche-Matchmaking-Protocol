@@ -36,7 +36,7 @@ class AMPClient:
         self._user_session = None
         self._match_session = None
 
-    async def connect(self, player_id: str, game_id: int) -> bool:
+    async def connect(self) -> bool:
         try:
             host, port = self.rpc_url.split(':')
             stream = await asyncio.wait_for(
@@ -52,6 +52,11 @@ class AMPClient:
         self._bootstrap = self._conn.bootstrap().cast_as(
             service_schema.GameSessionService
         )
+        return True
+
+    async def authenticate(self, game_id: int, private_key_hex: str = None, sign_callback = None) -> bool:
+        if not self._bootstrap:
+            raise AuthError("Not connected, call connect() first")
 
         try:
             req_challenge = self._bootstrap.requestChallenge_request()
@@ -61,21 +66,32 @@ class AMPClient:
         except Exception as e:
             raise AuthError(f"Failed to request challenge: {e}")
 
-        if player_id.startswith('0x') and len(player_id) == 66:
-            from eth_account import Account
-            from eth_account.messages import encode_defunct
-            msg = encode_defunct(primitive=challenge_bytes)
-            signed_msg = Account.sign_message(msg, private_key=player_id)
-            sig_bytes = bytes(signed_msg.signature)
+        if sign_callback:
+            if asyncio.iscoroutinefunction(sign_callback):
+                sig_bytes = await sign_callback(challenge_bytes)
+            else:
+                sig_bytes = sign_callback(challenge_bytes)
         else:
-            try:
-                sig_bytes = bytes.fromhex(player_id.replace('0x', ''))
-            except ValueError:
-                raise AuthError(f"Invalid player_id: not valid hex")
-            if len(sig_bytes) != 65:
-                raise AuthError(
-                    f"Invalid signature length: expected 65 bytes, got {len(sig_bytes)}"
-                )
+            if not private_key_hex:
+                from eth_account import Account
+                acct = Account.create()
+                private_key_hex = acct.key.hex()
+                
+            if private_key_hex.startswith('0x') and len(private_key_hex) == 66:
+                from eth_account import Account
+                from eth_account.messages import encode_defunct
+                msg = encode_defunct(primitive=challenge_bytes)
+                signed_msg = Account.sign_message(msg, private_key=private_key_hex)
+                sig_bytes = bytes(signed_msg.signature)
+            else:
+                try:
+                    sig_bytes = bytes.fromhex(private_key_hex.replace('0x', ''))
+                except ValueError:
+                    raise AuthError(f"Invalid private_key_hex: not valid hex")
+                if len(sig_bytes) != 65:
+                    raise AuthError(
+                        f"Invalid signature length: expected 65 bytes, got {len(sig_bytes)}"
+                    )
 
         req = self._bootstrap.login_request()
         req.gameId = game_id

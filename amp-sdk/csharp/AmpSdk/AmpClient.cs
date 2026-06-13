@@ -3,7 +3,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using CapnpGen;
 using Capnp.Rpc;
-
+using Nethereum.Signer;
+using Nethereum.Hex.HexConvertors.Extensions;
 namespace AmpSdk {
 
 /// <summary>
@@ -73,6 +74,36 @@ public class AmpClient : IDisposable {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         _userSession = await _sessionService.Login(gameId, signature, challengePayload, cts.Token);
         return _userSession != null;
+    }
+
+    /// <summary>
+    /// Authenticates with the AMP matchmaker.
+    /// If signCallback is provided, it is used to sign the challenge manually.
+    /// Otherwise, if privateKeyHex is provided, it is used for custodial signing.
+    /// If neither is provided, a new temporary custodial wallet is generated.
+    /// </summary>
+    public async Task<bool> AuthenticateAsync(ulong gameId, string privateKeyHex = null, Func<byte[], Task<byte[]>> signCallback = null) {
+        var (challenge, expiresAt) = await RequestChallengeAsync(gameId);
+        byte[] signatureBytes;
+        
+        if (signCallback != null) {
+            signatureBytes = await signCallback(challenge);
+        } else {
+            if (string.IsNullOrEmpty(privateKeyHex)) {
+                var ecKey = EthECKey.GenerateKey();
+                privateKeyHex = ecKey.GetPrivateKey();
+            }
+            
+            var signer = new EthereumMessageSigner();
+            var key = new EthECKey(privateKeyHex);
+            
+            // Standard Web3 Ethereum message signing
+            var sig = signer.Sign(challenge, key);
+            if (sig.StartsWith("0x")) sig = sig.Substring(2);
+            signatureBytes = sig.HexToByteArray();
+        }
+        
+        return await LoginAsync(gameId, signatureBytes, challenge);
     }
 
     /// <summary>

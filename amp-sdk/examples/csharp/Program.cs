@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using AmpSdk;
 
 namespace AmpSdkExample
 {
@@ -19,15 +20,13 @@ namespace AmpSdkExample
             try
             {
                 using var client = new AmpClient(serverUrl);
-                var dummySig = HexToBytes("24e2943427fa35e48c01ba764c271a9e76d295142704648b171e8cb5272a279773a0206586e565b1fed8a916e945a39868463654f752bf6bcd6843ab06bff39e1c");
                 ulong gameId = 0; // Use game 0 as registered in e2e_verify.sh
                 if (await client.ConnectAsync())
                 {
-                    var (challenge, expiresAt) = await client.RequestChallengeAsync(gameId);
-                    if (await client.LoginAsync(gameId, dummySig, challenge))
+                    if (await client.AuthenticateAsync(gameId))
                     {
                         Console.WriteLine("[Player B] Connected to Matchmaker. Requesting match...");
-                        await client.RequestMatchAsync(gameIdStr);
+                        await client.RequestMatchAsync(new MatchRequest { GameId = gameIdStr, RulesetId = "standard", PlayerId = "p2" });
                     }
                 }
             }
@@ -46,8 +45,7 @@ namespace AmpSdkExample
             {
                 using var client = new AmpClient(serverUrl);
 
-                // 1. Connect and login via signature
-                var pseudoSignature = HexToBytes("24e2943427fa35e48c01ba764c271a9e76d295142704648b171e8cb5272a279773a0206586e565b1fed8a916e945a39868463654f752bf6bcd6843ab06bff39e1c");
+                // 1. Connect and login automatically (Custodial Wallet generated automatically)
                 ulong gameId = 0;
                 bool connected = await client.ConnectAsync();
                 if (!connected)
@@ -55,8 +53,9 @@ namespace AmpSdkExample
                     Console.WriteLine("Failed to connect.");
                     Environment.Exit(1);
                 }
-                var (challenge, expiresAt) = await client.RequestChallengeAsync(gameId);
-                bool loggedIn = await client.LoginAsync(gameId, pseudoSignature, challenge);
+                
+                // Use the new high-level auth which automatically signs challenges
+                bool loggedIn = await client.AuthenticateAsync(gameId);
                 if (!loggedIn)
                 {
                     Console.WriteLine("Failed to log in.");
@@ -70,7 +69,8 @@ namespace AmpSdkExample
                 _ = Task.Run(() => RunOpponent(serverUrl, gameIdStr));
 
                 // 2. Request a match
-                string matchId = await client.RequestMatchAsync(gameIdStr);
+                var matchResult = await client.RequestMatchAsync(new MatchRequest { GameId = gameIdStr, RulesetId = "standard", PlayerId = "p1" });
+                string matchId = matchResult.MatchId;
                 Console.WriteLine($"Got MatchAssignment! Match ID: {matchId}");
 
                 // 3. Simulate gameplay
@@ -86,7 +86,8 @@ namespace AmpSdkExample
                 // 4. Submit outcome
                 Console.WriteLine("Submitting outcome to verifier...");
                 byte winnerOutcome = 0; // Player0 wins
-                var signature = await client.SubmitOutcomeAsync(matchId, winnerOutcome);
+                var signatureResult = await client.SubmitOutcomeAsync(matchId, winnerOutcome, Array.Empty<byte>());
+                var signature = signatureResult.Signature;
 
                 Console.WriteLine($"Verifier provided signature: 0x{BitConverter.ToString(signature).Replace("-", "").ToLower()}");
                 Console.WriteLine("C# .NET SDK test successful. Exiting cleanly.");

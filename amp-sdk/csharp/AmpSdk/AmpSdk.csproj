@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>10.0</LangVersion>
+    <PackageId>AmpSdk</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>AMP Protocol</Authors>
+    <Description>Avalanche Matchmaking Protocol SDK for C# / Unity</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Capnp.Net.Runtime" Version="1.3.118" />
+    <PackageReference Include="Nethereum.Signer" Version="4.20.0" />
+    <PackageReference Include="Nethereum.Hex" Version="4.20.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Include generated code from the parent directory -->
+    <Compile Include="../generated/**/*.cs" />
+  </ItemGroup>
+
+</Project>

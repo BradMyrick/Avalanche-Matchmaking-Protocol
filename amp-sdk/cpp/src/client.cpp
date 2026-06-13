@@ -27,6 +27,27 @@ bool AMPClient::login(uint64_t game_id, const std::vector<uint8_t>& signature) {
     }
 }
 
+bool AMPClient::authenticate(uint64_t game_id, std::function<std::vector<uint8_t>(const std::vector<uint8_t>&)> sign_callback) {
+    try {
+        if (!sign_callback) {
+            std::cerr << "AMP Authenticate Error: No sign callback provided." << std::endl;
+            return false;
+        }
+
+        auto chal_req = game_session_service_.requestChallengeRequest();
+        chal_req.setGameId(game_id);
+        auto chal_res = chal_req.send().wait(rpc_client_->getWaitScope());
+        auto challenge = chal_res.getChallenge();
+        std::vector<uint8_t> challenge_bytes(challenge.begin(), challenge.end());
+
+        std::vector<uint8_t> signature = sign_callback(challenge_bytes);
+        return login(game_id, signature);
+    } catch (const kj::Exception& e) {
+        std::cerr << "AMP Authenticate Error: " << e.getDescription().cStr() << std::endl;
+        return false;
+    }
+}
+
 std::string AMPClient::create_profile(const PlayerProfileData& profile) {
     return profile.player_id;
 }

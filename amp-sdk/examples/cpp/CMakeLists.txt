@@ -36,11 +36,11 @@ capnp_generate_cpp(SCHEMA_SRCS SCHEMA_HDRS ${SCHEMA_FILES})
 
 add_library(amp_sdk STATIC
     ${SCHEMA_SRCS}
-    src/AmpClient.cpp
+    ${SDK_ROOT}/cpp/src/client.cpp
 )
 
 target_link_libraries(amp_sdk PUBLIC CapnProto::capnp-rpc CapnProto::capnp CapnProto::kj-async CapnProto::kj)
-target_include_directories(amp_sdk PUBLIC include)
+target_include_directories(amp_sdk PUBLIC ${SDK_ROOT}/cpp/include)
 
 add_executable(amp_test src/main.cpp)
 target_link_libraries(amp_test PRIVATE amp_sdk)

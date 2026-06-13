@@ -1,4 +1,4 @@
-#include "AmpClient.hpp"
+#include "amp/client.hpp"
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -32,12 +32,17 @@ static std::string g_addr = "127.0.0.1:50051";
 
 void runOpponent() {
   usleep(500000); // Wait half a second for player A to connect
-  amp::AmpClient client2(g_addr);
-  std::vector<uint8_t> dummySig2 = getFujiSignature(); 
-  if (client2.connect(dummySig2)) {
+  amp::AMPClient client2;
+  client2.connect(g_addr);
+  if (client2.authenticate(0, [](const std::vector<uint8_t>& challenge) {
+      return getFujiSignature(); 
+  })) {
     std::cout << "[Player B] Connected to Matchmaker. Requesting match..."
               << std::endl;
-    client2.requestMatch(GAME_ID);
+    amp::MatchRequest req;
+    req.game_id = GAME_ID;
+    req.player_id = "p2";
+    client2.request_match(req);
   }
 }
 
@@ -45,10 +50,12 @@ int main(int argc, char** argv) {
   if (argc > 1) g_addr = argv[1];
   std::cout << "Starting AMP C++ Native Engine SDK Test on " << g_addr << "..." << std::endl;
 
-  amp::AmpClient client(g_addr);
+  amp::AMPClient client;
   std::cout << "[Player A] Connecting to Matchmaker..." << std::endl;
-  std::vector<uint8_t> dummySig = getFujiSignature();
-  if (!client.connect(dummySig)) {
+  client.connect(g_addr);
+  if (!client.authenticate(0, [](const std::vector<uint8_t>& challenge) {
+      return getFujiSignature();
+  })) {
     std::cerr << "Failed to connect to matchmaker." << std::endl;
     return 1;
   }
@@ -60,21 +67,24 @@ int main(int argc, char** argv) {
   playerBThread.detach();
 
   std::cout << "Requesting match in game " << GAME_ID << std::endl;
-  auto assignment = client.requestMatch(GAME_ID);
-  if (assignment.matchId.empty()) {
+  amp::MatchRequest req;
+  req.game_id = GAME_ID;
+  req.player_id = "p1";
+  auto assignment = client.request_match(req);
+  if (assignment.match_id.empty()) {
     std::cerr << "Failed to get match assignment." << std::endl;
     return 1;
   }
-  std::cout << "Got MatchAssignment! Match ID: " << assignment.matchId
+  std::cout << "Got MatchAssignment! Match ID: " << assignment.match_id
             << std::endl;
 
   std::cout << "Simulating game..." << std::endl;
   // Emit match Joined telemetry (enum matchJoined = 1)
-  client.emitTelemetry(1, 1000200);
+  client.emit_telemetry(1, 1000200);
 
   // flip a coin
   int coinFlip = rand() % 2;
-  client.emitGameEvent(coinFlip == 0 ? "PlayerA_Scored" : "PlayerB_Scored");
+  client.emit_game_event(coinFlip == 0 ? "PlayerA_Scored" : "PlayerB_Scored");
 
   // submit outcome
 
@@ -90,7 +100,7 @@ int main(int argc, char** argv) {
 
   std::vector<uint8_t> noTranscript;
   auto verifierRes =
-      client.submitOutcome(assignment.matchId, coinFlip, noTranscript);
+      client.submit_outcome(assignment.match_id, coinFlip, noTranscript);
 
   if (verifierRes.signature.empty()) {
     std::cerr << "Failed to get verifier signature." << std::endl;

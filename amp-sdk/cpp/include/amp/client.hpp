@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace amp {
 
@@ -23,6 +24,9 @@ public:
 
     /// Authenticates with the AMP server using a game ID and signed challenge.
     bool login(uint64_t game_id, const std::vector<uint8_t>& signature);
+
+    /// Authenticates using a high-level callback for signing challenges.
+    bool authenticate(uint64_t game_id, std::function<std::vector<uint8_t>(const std::vector<uint8_t>&)> sign_callback);
 
     /// Creates or retrieves a player profile on the AMP server.
     std::string create_profile(const PlayerProfileData& profile);

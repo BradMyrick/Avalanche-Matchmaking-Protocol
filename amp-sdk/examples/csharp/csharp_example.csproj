@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="../../schemas/generated/csharp/**/*.cs" />
+    <ProjectReference Include="../../csharp/AmpSdk/AmpSdk.csproj" />
   </ItemGroup>
 
 </Project>
