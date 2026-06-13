@@ -1,8 +1,0 @@
-is_global = true
-build_property.RootNamespace = AmpSdk
-build_property.ProjectDir = /home/kodr/Repos/Avalanche-Matchmaking-Protocol/amp-sdk/csharp/AmpSdk/
-build_property.EnableComHosting = 
-build_property.EnableGeneratedComInterfaceComImportInterop = 
-build_property.CsWinRTUseWindowsUIXamlProjections = false
-build_property.EffectiveAnalysisLevelStyle = 
-build_property.EnableCodeStyleSeverity = 

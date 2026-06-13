@@ -70,8 +70,10 @@ build/
 .cache/
 
 # --- C# ---
-**/bin/
-**/obj/
+amp-sdk/csharp/**/bin/
+amp-sdk/csharp/**/obj/
+amp-sdk/examples/csharp/**/bin/
+amp-sdk/examples/csharp/**/obj/
 
 # --- Python ---
 __pycache__/
