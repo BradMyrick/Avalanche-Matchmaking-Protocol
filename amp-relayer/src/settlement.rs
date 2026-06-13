@@ -175,7 +175,7 @@ impl SettlementQueue {
                         match_id_parsed, retry.retry_count, e
                     );
                     retry.status = SettlementStatus::Queued;
-                    
+
                     let cf = self.db.open_tree(CF_PENDING)?;
                     let updated = bincode::serialize(&retry)?;
                     cf.insert(&retry.match_id, &updated as &[u8])?;
@@ -243,14 +243,26 @@ impl SettlementQueue {
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;
 
-        let prev_max = settlement.last_max_fee.as_ref().and_then(|s| U256::from_dec_str(s).ok());
-        let prev_prio = settlement.last_priority_fee.as_ref().and_then(|s| U256::from_dec_str(s).ok());
+        let prev_max = settlement
+            .last_max_fee
+            .as_ref()
+            .and_then(|s| U256::from_dec_str(s).ok());
+        let prev_prio = settlement
+            .last_priority_fee
+            .as_ref()
+            .and_then(|s| U256::from_dec_str(s).ok());
 
-        let (effective_max_fee, effective_priority_fee) = if settlement.retry_count > 0 && prev_max.is_some() && prev_prio.is_some() {
-            self.gas_manager.bump_fees(network_max_fee, network_priority_fee, prev_max.unwrap(), prev_prio.unwrap())
-        } else {
-            (network_max_fee, network_priority_fee)
-        };
+        let (effective_max_fee, effective_priority_fee) =
+            if settlement.retry_count > 0 && prev_max.is_some() && prev_prio.is_some() {
+                self.gas_manager.bump_fees(
+                    network_max_fee,
+                    network_priority_fee,
+                    prev_max.unwrap(),
+                    prev_prio.unwrap(),
+                )
+            } else {
+                (network_max_fee, network_priority_fee)
+            };
 
         let mut call = settlement_custodial.submit_async_result(match_id, async_result);
 
@@ -269,8 +281,11 @@ impl SettlementQueue {
             };
             call.tx = TypedTransaction::Eip1559(eip1559);
         }
-        
-        let cf = self.db.open_tree(CF_PENDING).map_err(|e| RelayerError::Transaction(e.to_string()))?;
+
+        let cf = self
+            .db
+            .open_tree(CF_PENDING)
+            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
         let mut s = settlement.clone();
         s.last_max_fee = Some(effective_max_fee.to_string());
         s.last_priority_fee = Some(effective_priority_fee.to_string());
@@ -296,15 +311,23 @@ impl SettlementQueue {
                 match provider.get_transaction_receipt(tx_hash).await {
                     Ok(Some(receipt)) => {
                         if receipt.status == Some(1.into()) {
-                            info!("Settlement for match {} successfully mined", match_id_parsed_clone);
+                            info!(
+                                "Settlement for match {} successfully mined",
+                                match_id_parsed_clone
+                            );
                             if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
                                 let _ = cf.remove(&match_id_clone);
                             }
                         } else {
-                            warn!("Settlement tx {} for match {} reverted on-chain", tx_hash, match_id_parsed_clone);
+                            warn!(
+                                "Settlement tx {} for match {} reverted on-chain",
+                                tx_hash, match_id_parsed_clone
+                            );
                             if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
                                 if let Ok(Some(bytes)) = cf.get(&match_id_clone) {
-                                    if let Ok(mut pending_s) = bincode::deserialize::<PendingSettlement>(&bytes) {
+                                    if let Ok(mut pending_s) =
+                                        bincode::deserialize::<PendingSettlement>(&bytes)
+                                    {
                                         pending_s.status = SettlementStatus::Queued;
                                         pending_s.retry_count += 1;
                                         if let Ok(updated) = bincode::serialize(&pending_s) {
@@ -318,11 +341,17 @@ impl SettlementQueue {
                     }
                     Ok(None) => {
                         attempts += 1;
-                        if attempts > 60 { // ~2 mins timeout
-                            warn!("Settlement tx {} for match {} timed out waiting for receipt", tx_hash, match_id_parsed_clone);
+                        if attempts > 60 {
+                            // ~2 mins timeout
+                            warn!(
+                                "Settlement tx {} for match {} timed out waiting for receipt",
+                                tx_hash, match_id_parsed_clone
+                            );
                             if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
                                 if let Ok(Some(bytes)) = cf.get(&match_id_clone) {
-                                    if let Ok(mut pending_s) = bincode::deserialize::<PendingSettlement>(&bytes) {
+                                    if let Ok(mut pending_s) =
+                                        bincode::deserialize::<PendingSettlement>(&bytes)
+                                    {
                                         pending_s.status = SettlementStatus::Queued;
                                         pending_s.retry_count += 1;
                                         if let Ok(updated) = bincode::serialize(&pending_s) {

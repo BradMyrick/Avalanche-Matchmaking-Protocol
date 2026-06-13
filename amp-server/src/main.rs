@@ -318,10 +318,16 @@ async fn start_matchmaker_loop(
                     };
 
                     if let Err(e) = m.entry_a.sender.send(p1) {
-                        error!("Failed to notify player {} of match {}: {:?}", m.entry_a.player_id, match_id, e);
+                        error!(
+                            "Failed to notify player {} of match {}: {:?}",
+                            m.entry_a.player_id, match_id, e
+                        );
                     }
                     if let Err(e) = m.entry_b.sender.send(p2) {
-                        error!("Failed to notify player {} of match {}: {:?}", m.entry_b.player_id, match_id, e);
+                        error!(
+                            "Failed to notify player {} of match {}: {:?}",
+                            m.entry_b.player_id, match_id, e
+                        );
                     }
 
                     let now = now_ms();
@@ -453,7 +459,10 @@ async fn start_relayer_worker(
                 String::new()
             }),
         Err(_) => env::var("RELAYER_API_KEY").unwrap_or_else(|e| {
-            warn!("RELAYER_API_KEY not set: {}. Relayer authentication disabled.", e);
+            warn!(
+                "RELAYER_API_KEY not set: {}. Relayer authentication disabled.",
+                e
+            );
             String::new()
         }),
     };
@@ -614,8 +623,13 @@ impl match_session::Server for MatchSessionImpl {
         let submission = pry!(pry!(params.get()).get_submission());
         let outcome = pry!(submission.get_outcome());
         let outcome_val = outcome.get_victor();
-        let outcome_type_raw = outcome.get_type().unwrap_or(match_capnp::OutcomeType::Unknown);
-        let scores_raw: Vec<u64> = outcome.get_scores().map(|s| s.iter().collect()).unwrap_or_default();
+        let outcome_type_raw = outcome
+            .get_type()
+            .unwrap_or(match_capnp::OutcomeType::Unknown);
+        let scores_raw: Vec<u64> = outcome
+            .get_scores()
+            .map(|s| s.iter().collect())
+            .unwrap_or_default();
         if !(1..=3).contains(&outcome_val) {
             return Promise::err(::capnp::Error::failed(format!(
                 "invalid outcome value: must be 1-3, got {}",
@@ -706,11 +720,14 @@ impl match_session::Server for MatchSessionImpl {
                         warn!("Failed to queue relayer task for {}: {}", m_id, e);
                     }
 
-                    state.notify_subscribers(&m_id, state::MatchSettledEvent {
-                        outcome_type: u16::from(outcome_type_raw),
-                        victor: outcome_val,
-                        scores: scores_raw,
-                    });
+                    state.notify_subscribers(
+                        &m_id,
+                        state::MatchSettledEvent {
+                            outcome_type: u16::from(outcome_type_raw),
+                            victor: outcome_val,
+                            scores: scores_raw,
+                        },
+                    );
 
                     Ok(())
                 }
@@ -751,7 +768,10 @@ impl match_session::Server for MatchSessionImpl {
                     }
                 }
                 if let Err(e) = req.send().promise.await {
-                    warn!("Failed to deliver onMatchSettled to subscriber for match {}: {}", match_id, e);
+                    warn!(
+                        "Failed to deliver onMatchSettled to subscriber for match {}: {}",
+                        match_id, e
+                    );
                     break;
                 }
             }

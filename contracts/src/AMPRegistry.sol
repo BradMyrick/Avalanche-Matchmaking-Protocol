@@ -148,7 +148,6 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         emit MatchCreated(matchId, gameId, _msgSender(), actualStake);
     }
 
-
     function joinMatch(uint256 matchId) external payable whenNotPaused nonReentrant {
         AMPTypes.Match storage m = matches[matchId];
         if (m.state != AMPTypes.MatchState.OPEN) revert MatchNotOpen();

@@ -25,7 +25,9 @@ impl IndexedQueue {
         let key = (entry.game_id.clone(), entry.ruleset_id.clone());
         let bucket = self.buckets.entry(key).or_default();
         let mmr = entry.mmr;
-        let pos = match bucket.binary_search_by(|e| e.mmr.partial_cmp(&mmr).unwrap_or(std::cmp::Ordering::Equal)) {
+        let pos = match bucket
+            .binary_search_by(|e| e.mmr.partial_cmp(&mmr).unwrap_or(std::cmp::Ordering::Equal))
+        {
             Ok(p) => p,
             Err(p) => p,
         };

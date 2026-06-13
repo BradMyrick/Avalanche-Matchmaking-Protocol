@@ -419,7 +419,8 @@ pub struct InnerState {
     pub players: DashMap<AmpId, StoredPlayerProfile>,
     pub rulesets: Arc<ArcSwap<HashMap<AmpId, Arc<StoredRuleSet>>>>,
     pub active_matches: Arc<ArcSwap<HashMap<String, ActiveMatch>>>,
-    pub match_event_senders: DashMap<String, Vec<tokio::sync::mpsc::UnboundedSender<MatchSettledEvent>>>,
+    pub match_event_senders:
+        DashMap<String, Vec<tokio::sync::mpsc::UnboundedSender<MatchSettledEvent>>>,
     persistence: Option<Persistence>,
 }
 
@@ -507,7 +508,11 @@ impl InnerState {
         }
     }
 
-    pub fn add_event_sender(&self, match_id: &str, tx: tokio::sync::mpsc::UnboundedSender<MatchSettledEvent>) {
+    pub fn add_event_sender(
+        &self,
+        match_id: &str,
+        tx: tokio::sync::mpsc::UnboundedSender<MatchSettledEvent>,
+    ) {
         self.match_event_senders
             .entry(match_id.to_string())
             .or_insert_with(Vec::new)

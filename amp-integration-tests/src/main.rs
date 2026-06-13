@@ -206,7 +206,10 @@ async fn run_test() -> Result<()> {
     println!("====================================================");
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let repo_root = std::path::PathBuf::from(manifest_dir).parent().unwrap().to_path_buf();
+    let repo_root = std::path::PathBuf::from(manifest_dir)
+        .parent()
+        .unwrap()
+        .to_path_buf();
     let server_bin = repo_root.join("target/release/AMP-Server");
     let relayer_bin = repo_root.join("target/release/amp-relayer");
     let telemetry_bin = repo_root.join("target/release/amp-telemetry");
@@ -218,7 +221,10 @@ async fn run_test() -> Result<()> {
         .args(&["build"])
         .output()?;
     if !build_output.status.success() {
-        anyhow::bail!("Failed to compile contracts with forge: {}", String::from_utf8_lossy(&build_output.stderr));
+        anyhow::bail!(
+            "Failed to compile contracts with forge: {}",
+            String::from_utf8_lossy(&build_output.stderr)
+        );
     }
     println!("[TEST] Smart contracts compiled successfully.");
 
@@ -253,7 +259,10 @@ async fn run_test() -> Result<()> {
     println!("[TEST] Deploying contracts via Forge script...");
     let deploy_output = Command::new("forge")
         .current_dir(repo_root.join("contracts"))
-        .env("PRIVATE_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+        .env(
+            "PRIVATE_KEY",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        )
         .args(&[
             "script",
             "script/Deploy.s.sol",
@@ -266,7 +275,10 @@ async fn run_test() -> Result<()> {
         .output()?;
 
     if !deploy_output.status.success() {
-        anyhow::bail!("Failed to deploy contracts: {}", String::from_utf8_lossy(&deploy_output.stderr));
+        anyhow::bail!(
+            "Failed to deploy contracts: {}",
+            String::from_utf8_lossy(&deploy_output.stderr)
+        );
     }
 
     let stdout_str = String::from_utf8_lossy(&deploy_output.stdout);
@@ -275,10 +287,20 @@ async fn run_test() -> Result<()> {
 
     for line in stdout_str.lines() {
         if line.contains("AMPRegistry Deployed at:") {
-            registry_addr = line.split("AMPRegistry Deployed at:").last().unwrap().trim().to_string();
+            registry_addr = line
+                .split("AMPRegistry Deployed at:")
+                .last()
+                .unwrap()
+                .trim()
+                .to_string();
         }
         if line.contains("AMPSettlement Deployed at:") {
-            settlement_addr = line.split("AMPSettlement Deployed at:").last().unwrap().trim().to_string();
+            settlement_addr = line
+                .split("AMPSettlement Deployed at:")
+                .last()
+                .unwrap()
+                .trim()
+                .to_string();
         }
     }
 
@@ -286,8 +308,14 @@ async fn run_test() -> Result<()> {
     println!("  AMPRegistry:   {}", registry_addr);
     println!("  AMPSettlement: {}", settlement_addr);
 
-    assert!(!registry_addr.is_empty(), "Failed to parse registry address");
-    assert!(!settlement_addr.is_empty(), "Failed to parse settlement address");
+    assert!(
+        !registry_addr.is_empty(),
+        "Failed to parse registry address"
+    );
+    assert!(
+        !settlement_addr.is_empty(),
+        "Failed to parse settlement address"
+    );
 
     // 5. Start Telemetry
     println!("[TEST] Starting Telemetry Receiver...");
@@ -306,7 +334,10 @@ async fn run_test() -> Result<()> {
         .env("FUJI_RPC_URL", format!("http://127.0.0.1:{}", anvil_port))
         .env("CONTRACT_REGISTRY", &registry_addr)
         .env("CONTRACT_SETTLEMENT", &settlement_addr)
-        .env("RELAYER_PRIVATE_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+        .env(
+            "RELAYER_PRIVATE_KEY",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        )
         .env("RELAYER_DB_PATH", &relayer_db)
         .env("RELAYER_API_KEY", "test-api-key")
         .env("RELAYER_MAX_RETRIES", "3")
@@ -321,7 +352,10 @@ async fn run_test() -> Result<()> {
     let server_child = Command::new(&server_bin)
         .env("AMP_ADDR", format!("127.0.0.1:{}", server_port))
         .env("AMP_DB_PATH", &server_db)
-        .env("VERIFIER_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+        .env(
+            "VERIFIER_KEY",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        )
         .env("AMP_CHAIN_ID", "43113")
         .env("AMP_SETTLEMENT_ADDRESS", &settlement_addr)
         .env("RELAYER_RPC_ADDR", format!("127.0.0.1:{}", relayer_port))
@@ -351,13 +385,14 @@ async fn run_test() -> Result<()> {
 
     // 8. Register game on-chain
     println!("[TEST] Registering game on-chain...");
-    let verifier_address = Address::from_slice(&hex::decode("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266")?);
+    let verifier_address =
+        Address::from_slice(&hex::decode("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266")?);
     let tx = registry_contract_a.register_game(
         0, // ASYNC_VERIFIER
         vec![verifier_address],
         U256::from(1_000_000_000_000_000_000u64), // 1 ether
-        Address::zero(), // Native stake token
-        Address::zero(), // Arbiter
+        Address::zero(),                          // Native stake token
+        Address::zero(),                          // Arbiter
     );
     let pending_tx = tx.send().await?;
     pending_tx.await?;
@@ -386,7 +421,10 @@ async fn run_test() -> Result<()> {
     let (match_session_a, match_id_uuid) = match_res_a;
     let (_match_session_b, match_id_uuid_b) = match_res_b;
 
-    assert_eq!(match_id_uuid, match_id_uuid_b, "Matched players must receive the same match ID");
+    assert_eq!(
+        match_id_uuid, match_id_uuid_b,
+        "Matched players must receive the same match ID"
+    );
     println!("[TEST] Match found! UUID: {}", match_id_uuid);
 
     // Calculate on-chain match ID
@@ -395,17 +433,20 @@ async fn run_test() -> Result<()> {
 
     // 11. Create and Join Match on-chain
     println!("[TEST] Player A creating match on-chain with 1 ether stake...");
-    let tx = registry_contract_a.create_match(
-        U256::from(0), // gameId = 0
-        match_id_val,
-        U256::from(1_000_000_000_000_000_000u64),
-    ).value(U256::from(1_000_000_000_000_000_000u64));
+    let tx = registry_contract_a
+        .create_match(
+            U256::from(0), // gameId = 0
+            match_id_val,
+            U256::from(1_000_000_000_000_000_000u64),
+        )
+        .value(U256::from(1_000_000_000_000_000_000u64));
     let pending_tx = tx.send().await?;
     pending_tx.await?;
     println!("[TEST] Match created on-chain.");
 
     println!("[TEST] Player B joining match on-chain with 1 ether stake...");
-    let tx = registry_contract_b.join_match(match_id_val)
+    let tx = registry_contract_b
+        .join_match(match_id_val)
         .value(U256::from(1_000_000_000_000_000_000u64));
     let pending_tx = tx.send().await?;
     pending_tx.await?;
@@ -430,17 +471,26 @@ async fn run_test() -> Result<()> {
     }
     let submit_resp = submit_req.send().promise.await?;
     let verifier_sig = submit_resp.get()?.get_signature()?;
-    println!("[TEST] Outcome submission accepted. Verifier signature received ({} bytes).", verifier_sig.len());
+    println!(
+        "[TEST] Outcome submission accepted. Verifier signature received ({} bytes).",
+        verifier_sig.len()
+    );
 
     // 13. Poll on-chain settlement
     println!("[TEST] Polling on-chain Settlement contract state...");
-    let settlement_contract = AMPSettlementContract::new(settlement_addr.parse::<Address>()?, Arc::new(provider.clone()));
+    let settlement_contract = AMPSettlementContract::new(
+        settlement_addr.parse::<Address>()?,
+        Arc::new(provider.clone()),
+    );
     let start_poll = Instant::now();
     let mut settled = false;
 
     while start_poll.elapsed().as_secs() < 30 {
-        if let Ok((_match_id, outcome, _t_hash, _settled_at)) = settlement_contract.settlements(match_id_val).call().await {
-            if outcome == 1 { // WIN_A
+        if let Ok((_match_id, outcome, _t_hash, _settled_at)) =
+            settlement_contract.settlements(match_id_val).call().await
+        {
+            if outcome == 1 {
+                // WIN_A
                 println!("[TEST] Outcome verified on-chain: WIN_A");
                 settled = true;
                 break;
@@ -452,13 +502,28 @@ async fn run_test() -> Result<()> {
     assert!(settled, "Match failed to settle on-chain within timeout");
 
     // 14. Verify balances
-    let pending_withdrawal_a = registry_contract_a.pending_withdrawals(Address::zero(), wallet_a.address()).call().await?;
-    println!("[TEST] Player A pending withdrawal balance: {} Wei (expected 1.98 ether)", pending_withdrawal_a);
+    let pending_withdrawal_a = registry_contract_a
+        .pending_withdrawals(Address::zero(), wallet_a.address())
+        .call()
+        .await?;
+    println!(
+        "[TEST] Player A pending withdrawal balance: {} Wei (expected 1.98 ether)",
+        pending_withdrawal_a
+    );
     // stake is 1 ether from A + 1 ether from B = 2 ether. fee is 1% (100 BPS), so payout is 1.98 ether = 1_980_000_000_000_000_000 Wei.
-    assert_eq!(pending_withdrawal_a, U256::from(1_980_000_000_000_000_000u64));
+    assert_eq!(
+        pending_withdrawal_a,
+        U256::from(1_980_000_000_000_000_000u64)
+    );
 
-    let protocol_fee = registry_contract_a.fee_balances(Address::zero()).call().await?;
-    println!("[TEST] Protocol fees collected: {} Wei (expected 0.02 ether)", protocol_fee);
+    let protocol_fee = registry_contract_a
+        .fee_balances(Address::zero())
+        .call()
+        .await?;
+    println!(
+        "[TEST] Protocol fees collected: {} Wei (expected 0.02 ether)",
+        protocol_fee
+    );
     assert_eq!(protocol_fee, U256::from(20_000_000_000_000_000u64));
 
     // 15. Verify player profile rating updates
@@ -472,16 +537,32 @@ async fn run_test() -> Result<()> {
     let player_id_a = format!("0x{}", hex::encode(wallet_a.address().as_bytes()));
     let player_id_b = format!("0x{}", hex::encode(wallet_b.address().as_bytes()));
 
-    let profile_bytes_a = players_tree.get(player_id_a.as_bytes())?.expect("Player A profile not found in Sled");
+    let profile_bytes_a = players_tree
+        .get(player_id_a.as_bytes())?
+        .expect("Player A profile not found in Sled");
     let profile_a: StoredPlayerProfile = bincode::deserialize(&profile_bytes_a)?;
-    println!("[TEST] Player A final rating: MMR={:.2} (games={})", profile_a.global_mmr, profile_a.games_played);
-    assert!(profile_a.global_mmr > 1200.0, "Player A MMR should have increased after a win");
+    println!(
+        "[TEST] Player A final rating: MMR={:.2} (games={})",
+        profile_a.global_mmr, profile_a.games_played
+    );
+    assert!(
+        profile_a.global_mmr > 1200.0,
+        "Player A MMR should have increased after a win"
+    );
     assert_eq!(profile_a.games_played, 1);
 
-    let profile_bytes_b = players_tree.get(player_id_b.as_bytes())?.expect("Player B profile not found in Sled");
+    let profile_bytes_b = players_tree
+        .get(player_id_b.as_bytes())?
+        .expect("Player B profile not found in Sled");
     let profile_b: StoredPlayerProfile = bincode::deserialize(&profile_bytes_b)?;
-    println!("[TEST] Player B final rating: MMR={:.2} (games={})", profile_b.global_mmr, profile_b.games_played);
-    assert!(profile_b.global_mmr < 1200.0, "Player B MMR should have decreased after a loss");
+    println!(
+        "[TEST] Player B final rating: MMR={:.2} (games={})",
+        profile_b.global_mmr, profile_b.games_played
+    );
+    assert!(
+        profile_b.global_mmr < 1200.0,
+        "Player B MMR should have decreased after a loss"
+    );
     assert_eq!(profile_b.games_played, 1);
 
     println!("\n====================================================");

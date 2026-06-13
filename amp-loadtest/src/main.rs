@@ -241,10 +241,10 @@ async fn run_client(
     let service: service_capnp::game_session_service::Client =
         rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
     tokio::task::spawn_local(async move {
-            if let Err(e) = rpc_system.await {
-                tracing::warn!("Loadtest RPC system error: {}", e);
-            }
-        });
+        if let Err(e) = rpc_system.await {
+            tracing::warn!("Loadtest RPC system error: {}", e);
+        }
+    });
 
     let login_start = Instant::now();
     let session = match login(&service, client_id, &wallet).await {
