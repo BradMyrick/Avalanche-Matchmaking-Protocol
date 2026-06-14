@@ -5,9 +5,15 @@ use ethers_core::utils::hash_message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, warn};
 
 const CHALLENGE_TTL_NS: u64 = 300_000_000_000;
+
+/// Hard cap on the number of outstanding (unused) challenges. Without this,
+/// an unauthenticated attacker can drive unbounded memory growth by spamming
+/// `requestChallenge`. The TTL reaper cleans expired entries every 60s, but
+/// the cap bounds the worst-case live-set between reaper runs.
+const MAX_OUTSTANDING_CHALLENGES: usize = 100_000;
 
 pub struct AuthChallenge {
     pub message: Vec<u8>,
@@ -26,14 +32,35 @@ impl AuthService {
         }
     }
 
-    pub async fn create_challenge(&self, game_id: u64) -> (Vec<u8>, u64) {
+    pub async fn create_challenge(&self, game_id: u64) -> Option<(Vec<u8>, u64)> {
         let nonce = uuid::Uuid::new_v4().to_string();
         let message = format!("AMP_AUTH:{}:{}", game_id, nonce);
         let msg_bytes = message.as_bytes().to_vec();
         let created_at = now_ns();
         let expires_at = created_at + CHALLENGE_TTL_NS;
 
-        self.challenges.write().await.insert(
+        let mut challenges = self.challenges.write().await;
+        if challenges.len() >= MAX_OUTSTANDING_CHALLENGES {
+            // Best-effort eviction of expired entries before refusing, so a
+            // burst of legitimate traffic doesn't immediately trip the cap.
+            let before = challenges.len();
+            challenges.retain(|_, c| now_ns().saturating_sub(c.created_at) < CHALLENGE_TTL_NS);
+            let pruned = before - challenges.len();
+            if pruned > 0 {
+                warn!(target: "auth", "Pruned {} expired challenges during cap enforcement", pruned);
+            }
+            if challenges.len() >= MAX_OUTSTANDING_CHALLENGES {
+                warn!(
+                    target: "auth",
+                    "Challenge map at capacity ({}); refusing new challenge for game_id={}",
+                    challenges.len(),
+                    game_id
+                );
+                return None;
+            }
+        }
+
+        challenges.insert(
             nonce.clone(),
             AuthChallenge {
                 message: msg_bytes.clone(),
@@ -42,8 +69,8 @@ impl AuthService {
             },
         );
 
-        info!(target: "auth", "Created challenge for game_id={}", game_id);
-        (msg_bytes, expires_at)
+        info!(target: "auth", "Created challenge for game_id={} (outstanding={})", game_id, challenges.len());
+        Some((msg_bytes, expires_at))
     }
 
     pub async fn verify_login(

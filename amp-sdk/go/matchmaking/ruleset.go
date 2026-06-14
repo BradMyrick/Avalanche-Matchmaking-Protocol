@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"capnproto.org/go/capnp/v3"
-	"github.com/avalanche-matchmaking-protocol/amp-sdk/go/generated"
+	"github.com/BradMyrick/Avalanche-Matchmaking-Protocol/amp-sdk/go/generated"
 )
 
 type RuleSetBuilder struct {

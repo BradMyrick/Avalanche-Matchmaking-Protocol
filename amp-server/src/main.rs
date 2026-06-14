@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use capnp::capability::Promise;
 use capnp_rpc::{RpcSystem, pry, rpc_twoparty_capnp, twoparty};
 use ethers_core::types::{Address, H256, U256};
@@ -394,25 +394,31 @@ pub(crate) struct SigningConfig {
     settlement_addr: Address,
 }
 
-async fn sign_match_outcome(
-    config: Arc<SigningConfig>,
+/// Compute the canonical EIP-712 digest over `(matchId, outcome, transcriptHash)`.
+///
+/// Both the server's verifier signature and the client's submitter signature
+/// are produced over this same digest, so the on-chain contract and any
+/// observer can confirm both parties attested to the same payload.
+pub(crate) fn compute_outcome_eip712_digest(
     match_id: &str,
     outcome: u8,
     transcript_hash: &[u8],
-) -> Result<Vec<u8>> {
-    let chain_id = config.chain_id;
-    let settlement_addr = config.settlement_addr;
+    chain_id: u64,
+    settlement_addr: Address,
+) -> Result<H256> {
+    if transcript_hash.len() != 32 {
+        anyhow::bail!(
+            "transcript_hash must be exactly 32 bytes, got {}",
+            transcript_hash.len()
+        );
+    }
 
     let match_id_val = if let Ok(val) = U256::from_dec_str(match_id) {
         val
     } else {
         U256::from_big_endian(&ethers_core::utils::keccak256(match_id.as_bytes()))
     };
-    let t_hash = if transcript_hash.len() == 32 {
-        H256::from_slice(transcript_hash)
-    } else {
-        H256::zero()
-    };
+    let t_hash = H256::from_slice(transcript_hash);
 
     let async_result_typehash: [u8; 32] = ethers_core::utils::keccak256(
         "AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)".as_bytes(),
@@ -441,13 +447,92 @@ async fn sign_match_outcome(
     let mut digest_input = vec![0x19, 0x01];
     digest_input.extend_from_slice(&domain_separator);
     digest_input.extend_from_slice(&struct_hash);
-    let digest = H256::from_slice(&ethers_core::utils::keccak256(&digest_input));
+    Ok(H256::from_slice(&ethers_core::utils::keccak256(
+        &digest_input,
+    )))
+}
+
+async fn sign_match_outcome(
+    config: Arc<SigningConfig>,
+    match_id: &str,
+    outcome: u8,
+    transcript_hash: &[u8],
+) -> Result<Vec<u8>> {
+    let digest = compute_outcome_eip712_digest(
+        match_id,
+        outcome,
+        transcript_hash,
+        config.chain_id,
+        config.settlement_addr,
+    )?;
 
     let signature = tokio::task::spawn_blocking(move || config.wallet.sign_hash(digest))
         .await
         .map_err(|e| anyhow::anyhow!("Spawn blocking failed: {}", e))??;
 
     Ok(signature.to_vec())
+}
+
+/// Verify a submitter's EIP-712 signature over `(matchId, outcome, transcriptHash)`.
+///
+/// Returns `Ok(())` only if the recovered signer equals `expected_address`.
+/// This is the server-side enforcement of the schema-documented
+/// `OutcomeSubmission.signature` field (see `amp-sdk/schemas/match.capnp:114`).
+pub(crate) async fn verify_outcome_signature(
+    signature_bytes: &[u8],
+    match_id: &str,
+    outcome: u8,
+    transcript_hash: &[u8],
+    expected_address: Address,
+    chain_id: u64,
+    settlement_addr: Address,
+) -> Result<()> {
+    if signature_bytes.len() != 65 {
+        anyhow::bail!(
+            "submitter signature must be exactly 65 bytes (secp256k1+r+s+v), got {}",
+            signature_bytes.len()
+        );
+    }
+
+    let digest = compute_outcome_eip712_digest(
+        match_id,
+        outcome,
+        transcript_hash,
+        chain_id,
+        settlement_addr,
+    )?;
+
+    let sig_vec = signature_bytes.to_vec();
+    let recovered = tokio::task::spawn_blocking(move || {
+        ethers_core::types::Signature::try_from(&sig_vec[..65])
+            .map_err(|e| anyhow::anyhow!("invalid signature format: {:?}", e))?
+            .recover(digest)
+            .map_err(|e| anyhow::anyhow!("recovery failed: {:?}", e))
+    })
+    .await
+    .context("submitter signature verification panicked")??;
+
+    if recovered != expected_address {
+        anyhow::bail!(
+            "submitter signature does not match participant address (expected 0x{}, recovered 0x{})",
+            hex::encode(expected_address.as_bytes()),
+            hex::encode(recovered.as_bytes())
+        );
+    }
+    Ok(())
+}
+
+/// Parse a player_id string of the form `"0x" + hex(address)` into an
+/// Ethereum [`Address`]. Returns `None` if the string is malformed, which
+/// signals that the player was authenticated by a non-Ethereem path (e.g.
+/// internal test harness) and therefore cannot sign outcomes.
+pub(crate) fn parse_player_address(player_id: &str) -> Option<Address> {
+    let hex = player_id.strip_prefix("0x")?;
+    let bytes = hex::decode(hex).ok()?;
+    if bytes.len() != 20 {
+        return None;
+    }
+    Some(Address::from_slice(&bytes))
 }
 
 pub struct RelayerTask {
@@ -478,8 +563,26 @@ async fn start_relayer_worker(
             String::new()
         }),
     };
-    if api_key.is_empty() {
-        warn!("No relayer API key configured. Relayer requests will be unauthenticated.");
+    // Production policy: refuse to start without an API key unless the
+    // operator explicitly opts out via AMP_ALLOW_UNAUTHENTICATED_RELAYER=1.
+    // The default-unauthenticated posture (S11 in SECURITY_REVIEW.md) lets
+    // any network actor submit fraudulent settlements when the relayer is
+    // reachable.
+    let allow_unauth = env::var("AMP_ALLOW_UNAUTHENTICATED_RELAYER")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if api_key.is_empty() && !allow_unauth {
+        error!(
+            "RELAYER_API_KEY or RELAYER_API_KEY_FILE is required for secure \
+             operation. Set AMP_ALLOW_UNAUTHENTICATED_RELAYER=1 to bypass \
+             (NOT RECOMMENDED — see SECURITY_REVIEW.md S11)."
+        );
+        std::process::exit(1);
+    } else if api_key.is_empty() {
+        warn!(
+            "No relayer API key configured. Relayer requests will be unauthenticated. \
+             This is insecure — see SECURITY_REVIEW.md S11."
+        );
     } else {
         info!("Relayer API key loaded ({} chars)", api_key.len());
     }
@@ -618,6 +721,9 @@ async fn start_telemetry_worker(
 struct MatchSessionImpl {
     match_id: String,
     game_id: String,
+    /// The Ethereum address (as `"0x" + hex`) of the player that holds this
+    /// capability. Used to verify the submitter signature on `submit_outcome`.
+    player_id: String,
     players: Vec<String>,
     player_service: Arc<player_service::PlayerServiceImpl>,
     state: AppState,
@@ -642,109 +748,168 @@ impl match_session::Server for MatchSessionImpl {
             .get_scores()
             .map(|s| s.iter().collect())
             .unwrap_or_default();
-        if !(1..=3).contains(&outcome_val) {
+        // Aligned with the relayer, which accepts 1..=4 (see
+        // amp-relayer/src/main.rs:150). 0 is reserved for "unknown" and is
+        // not a valid victor index.
+        if !(1..=4).contains(&outcome_val) {
             return Promise::err(::capnp::Error::failed(format!(
-                "invalid outcome value: must be 1-3, got {}",
+                "invalid outcome value: must be 1-4, got {}",
                 outcome_val
             )));
         }
         let replay_hash = pry!(submission.get_replay_hash());
         let r_hash = replay_hash.to_vec();
+        // Enforce 32-byte transcript hash to match the relayer's invariant
+        // (amp-relayer/src/main.rs:156-162) and avoid silent zero-hash
+        // signing that would permanently desync server and chain state.
+        if r_hash.len() != 32 {
+            return Promise::err(::capnp::Error::failed(format!(
+                "transcript_hash must be exactly 32 bytes, got {}",
+                r_hash.len()
+            )));
+        }
+        let submitter_sig = pry!(submission.get_signature()).to_vec();
+        // The schema (`amp-sdk/schemas/match.capnp:114`) requires a 65-byte
+        // EIP-712 signature over (matchId, outcome, replayHash) from the
+        // submitter. Reject submissions without one.
+        if submitter_sig.len() != 65 {
+            return Promise::err(::capnp::Error::failed(format!(
+                "submitter signature must be exactly 65 bytes (secp256k1+r+s+v), got {}; \
+                 sign the EIP-712 digest over (matchId, outcome, replayHash) with your wallet",
+                submitter_sig.len()
+            )));
+        }
 
         let m_id = self.match_id.clone();
         let g_id = self.game_id.clone();
+        let caller_player_id = self.player_id.clone();
         let p_ids = self.players.clone();
         let p_service = self.player_service.clone();
         let state = self.state.clone();
         let signing_config = self.signing_config.clone();
         let relayer_tx = self.relayer_tx.clone();
+        let sig_for_verify = submitter_sig.clone();
 
         Promise::from_future(async move {
-            match sign_match_outcome(signing_config, &m_id, outcome_val, &r_hash).await {
-                Ok(sig) => {
-                    results.get().set_signature(&sig);
-
-                    // 1. Atomically mark match as settled FIRST (before MMR)
-                    let m_clone = {
-                        let match_id_for_update = m_id.clone();
-                        let mut m_clone_opt = None;
-
-                        let updated = state.update_active_match(&match_id_for_update, |m| {
-                            if !m.settled {
-                                m.settled = true;
-                                m.settled_at_ms = Some(now_ms());
-                                m_clone_opt = Some(m.clone());
-                            }
-                        });
-
-                        if updated.is_none() || m_clone_opt.is_none() {
-                            return Err(::capnp::Error::failed(
-                                "Match already settled or not found".into(),
-                            ));
-                        }
-
-                        if let Some(m_clone) = m_clone_opt {
-                            state
-                                .archive_settled_match(&match_id_for_update, &m_clone)
-                                .await;
-                            Some(m_clone)
-                        } else {
-                            None
-                        }
-                    };
-
-                    // 2. Now update MMR (after settlement is persisted)
-                    if m_clone.is_some() && p_ids.len() >= 2 {
-                        let p1 = &p_ids[0];
-                        let p2 = &p_ids[1];
-                        let score1 = if outcome_val == 1 {
-                            1.0
-                        } else if outcome_val == 2 {
-                            0.0
-                        } else {
-                            0.5
-                        };
-                        let score2 = 1.0 - score1;
-
-                        if let Err(e) = p_service
-                            .record_match_result(p1, p2, &g_id, score1, 0)
-                            .await
-                        {
-                            warn!("Failed to update MMR for {}: {}", p1, e);
-                        }
-                        if let Err(e) = p_service
-                            .record_match_result(p2, p1, &g_id, score2, 0)
-                            .await
-                        {
-                            warn!("Failed to update MMR for {}: {}", p2, e);
-                        }
-                    }
-
-                    if let Err(e) = relayer_tx
-                        .send(RelayerTask {
-                            match_id: m_id.clone(),
-                            outcome: outcome_val,
-                            transcript_hash: r_hash,
-                            signature: sig,
-                        })
-                        .await
-                    {
-                        warn!("Failed to queue relayer task for {}: {}", m_id, e);
-                    }
-
-                    state.notify_subscribers(
-                        &m_id,
-                        state::MatchSettledEvent {
-                            outcome_type: u16::from(outcome_type_raw),
-                            victor: outcome_val,
-                            scores: scores_raw,
-                        },
-                    );
-
-                    Ok(())
-                }
-                Err(e) => Err(::capnp::Error::failed(format!("Signer error: {}", e))),
+            // 0. Verify the submitter signature BEFORE signing ourselves.
+            //    This is the integrity gate: only a participant holding the
+            //    matching wallet can submit an outcome that the verifier will
+            //    countersign.
+            let caller_address = parse_player_address(&caller_player_id).ok_or_else(|| {
+                ::capnp::Error::failed(format!(
+                    "caller player_id '{}' is not a valid Ethereum address; \
+                     cannot verify submitter signature",
+                    caller_player_id
+                ))
+            })?;
+            if !p_ids.contains(&caller_player_id) {
+                return Err(::capnp::Error::failed(format!(
+                    "caller {} is not a participant in match {}",
+                    caller_player_id, m_id
+                )));
             }
+            verify_outcome_signature(
+                &sig_for_verify,
+                &m_id,
+                outcome_val,
+                &r_hash,
+                caller_address,
+                signing_config.chain_id,
+                signing_config.settlement_addr,
+            )
+            .await
+            .map_err(|e| ::capnp::Error::failed(format!("submitter signature rejected: {}", e)))?;
+
+            // 1. Atomically mark match as settled FIRST (before signing and
+            //    before MMR). This is the idempotency gate: if the match was
+            //    already settled, we bail out WITHOUT performing the expensive
+            //    EIP-712 signing — the previous code signed first and then
+            //    discarded the signature on race loss, burning CPU on every
+            //    duplicate submission (P4 in SECURITY_REVIEW.md).
+            let _m_clone = {
+                let match_id_for_update = m_id.clone();
+                let mut m_clone_opt = None;
+
+                let updated = state.update_active_match(&match_id_for_update, |m| {
+                    if !m.settled {
+                        m.settled = true;
+                        m.settled_at_ms = Some(now_ms());
+                        m_clone_opt = Some(m.clone());
+                    }
+                });
+
+                if updated.is_none() || m_clone_opt.is_none() {
+                    return Err(::capnp::Error::failed(
+                        "Match already settled or not found".into(),
+                    ));
+                }
+
+                if let Some(m_clone) = m_clone_opt {
+                    state
+                        .archive_settled_match(&match_id_for_update, &m_clone)
+                        .await;
+                    m_clone
+                } else {
+                    unreachable!("m_clone_opt checked above")
+                }
+            };
+
+            // 2. Sign the outcome with the verifier key. Runs only once per
+            //    match because the settled-check above is the gate.
+            let sig = sign_match_outcome(signing_config, &m_id, outcome_val, &r_hash)
+                .await
+                .map_err(|e| ::capnp::Error::failed(format!("Signer error: {}", e)))?;
+            results.get().set_signature(&sig);
+
+            // 3. Now update MMR (after settlement is persisted).
+            if p_ids.len() >= 2 {
+                let p1 = &p_ids[0];
+                let p2 = &p_ids[1];
+                let score1 = if outcome_val == 1 {
+                    1.0
+                } else if outcome_val == 2 {
+                    0.0
+                } else {
+                    0.5
+                };
+                let score2 = 1.0 - score1;
+
+                if let Err(e) = p_service
+                    .record_match_result(p1, p2, &g_id, score1, 0)
+                    .await
+                {
+                    warn!("Failed to update MMR for {}: {}", p1, e);
+                }
+                if let Err(e) = p_service
+                    .record_match_result(p2, p1, &g_id, score2, 0)
+                    .await
+                {
+                    warn!("Failed to update MMR for {}: {}", p2, e);
+                }
+            }
+
+            if let Err(e) = relayer_tx
+                .send(RelayerTask {
+                    match_id: m_id.clone(),
+                    outcome: outcome_val,
+                    transcript_hash: r_hash,
+                    signature: sig,
+                })
+                .await
+            {
+                warn!("Failed to queue relayer task for {}: {}", m_id, e);
+            }
+
+            state.notify_subscribers(
+                &m_id,
+                state::MatchSettledEvent {
+                    outcome_type: u16::from(outcome_type_raw),
+                    victor: outcome_val,
+                    scores: scores_raw,
+                },
+            );
+
+            Ok(())
         })
     }
 
@@ -757,10 +922,28 @@ impl match_session::Server for MatchSessionImpl {
         let match_id = self.match_id.clone();
         let state = self.state.clone();
 
+        // Bound the number of subscribers per match to prevent task-amplification
+        // DoS: a malicious participant could otherwise register arbitrarily many
+        // MatchListener callbacks, each spawning a long-lived task. 16 is well
+        // above the realistic need (2 participants + a handful of observers).
+        const MAX_SUBSCRIBERS_PER_MATCH: usize = 16;
+        let current = state.subscriber_count(&match_id);
+        if current >= MAX_SUBSCRIBERS_PER_MATCH {
+            return Promise::err(::capnp::Error::failed(format!(
+                "subscriber cap reached for match {} ({}/{}); refusing new subscription",
+                match_id, current, MAX_SUBSCRIBERS_PER_MATCH
+            )));
+        }
+
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<state::MatchSettledEvent>();
         state.add_event_sender(&match_id, tx);
 
-        info!("Client subscribed to events for match {}", match_id);
+        info!(
+            "Client subscribed to events for match {} ({}/{})",
+            match_id,
+            current + 1,
+            MAX_SUBSCRIBERS_PER_MATCH
+        );
 
         tokio::task::spawn_local(async move {
             while let Some(event) = rx.recv().await {
@@ -919,6 +1102,7 @@ impl user_session::Server for UserSessionImpl {
                 let session = capnp_rpc::new_client(MatchSessionImpl {
                     match_id: payload.match_id.clone(),
                     game_id: game_id.to_string(),
+                    player_id: p_id.clone(),
                     players: std::iter::once(p_id.clone())
                         .chain(payload.opponent_ids.iter().cloned())
                         .collect(),
@@ -963,6 +1147,7 @@ impl user_session::Server for UserSessionImpl {
                     let session = capnp_rpc::new_client(MatchSessionImpl {
                         match_id: match_id.clone(),
                         game_id: m.game_id.clone(),
+                        player_id: player_id.clone(),
                         players: m.players.clone(),
                         player_service: p_service,
                         state: state.clone(),
@@ -1008,10 +1193,16 @@ impl game_session_service::Server for GameSessionServiceImpl {
         let auth = self.auth_service.clone();
 
         Promise::from_future(async move {
-            let (challenge_bytes, expires_at) = auth.create_challenge(game_id).await;
-            results.get().set_challenge(&challenge_bytes);
-            results.get().set_expires_at(expires_at);
-            Ok(())
+            match auth.create_challenge(game_id).await {
+                Some((challenge_bytes, expires_at)) => {
+                    results.get().set_challenge(&challenge_bytes);
+                    results.get().set_expires_at(expires_at);
+                    Ok(())
+                }
+                None => Err(::capnp::Error::failed(
+                    "Server challenge capacity reached; try again shortly".into(),
+                )),
+            }
         })
     }
 
@@ -1433,6 +1624,7 @@ where
 mod tests {
     use super::*;
     use crate::state::{InnerState, StoredRuleSet};
+    use ethers_signers::Signer;
     use std::sync::Arc;
     use tokio::sync::oneshot;
 
@@ -1499,5 +1691,134 @@ mod tests {
         let active = app_state.active_matches.load();
         assert!(active.contains_key(&m1.match_id));
         cancel.cancel();
+    }
+
+    /// The digest must be byte-identical for identical inputs — both server
+    /// and client rely on this to produce/verify the same signature.
+    #[test]
+    fn test_outcome_digest_is_deterministic() {
+        let match_id = "42";
+        let outcome: u8 = 1;
+        let transcript = [0xabu8; 32];
+        let chain_id = 43113;
+        let settlement = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            .parse::<Address>()
+            .unwrap();
+
+        let d1 =
+            compute_outcome_eip712_digest(match_id, outcome, &transcript, chain_id, settlement)
+                .unwrap();
+        let d2 =
+            compute_outcome_eip712_digest(match_id, outcome, &transcript, chain_id, settlement)
+                .unwrap();
+        assert_eq!(d1, d2);
+    }
+
+    /// Known-answer test vector computed by the C# and Python SDKs.
+    /// matchId="1", outcome=1, transcript_hash=zero[32], chain_id=43113,
+    /// verifying_contract=zero[20]. Expected digest:
+    ///   2d2525ad5098ca8f82a2a6cabc6775c40a55df96dfa2fbb46d7c0e372b99096c
+    #[test]
+    fn test_outcome_digest_known_vector_cross_lang() {
+        let settlement = "0x0000000000000000000000000000000000000000"
+            .parse::<Address>()
+            .unwrap();
+        let d = compute_outcome_eip712_digest("1", 1, &[0u8; 32], 43113, settlement).unwrap();
+        assert_eq!(
+            format!("{:x}", d),
+            "2d2525ad5098ca8f82a2a6cabc6775c40a55df96dfa2fbb46d7c0e372b99096c",
+            "Rust digest must match C# and Python SDK output for cross-lang interop"
+        );
+    }
+
+    /// Wrong transcript hash must yield a different digest.
+    #[test]
+    fn test_outcome_digest_differs_on_transcript() {
+        let settlement = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            .parse::<Address>()
+            .unwrap();
+        let d1 = compute_outcome_eip712_digest("1", 1, &[0u8; 32], 43113, settlement).unwrap();
+        let d2 = compute_outcome_eip712_digest("1", 1, &[1u8; 32], 43113, settlement).unwrap();
+        assert_ne!(d1, d2);
+    }
+
+    /// Non-32-byte transcript must be rejected up front.
+    #[test]
+    fn test_outcome_digest_rejects_short_transcript() {
+        let settlement = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            .parse::<Address>()
+            .unwrap();
+        let err = compute_outcome_eip712_digest("1", 1, &[0u8; 16], 43113, settlement).unwrap_err();
+        assert!(err.to_string().contains("32 bytes"));
+    }
+
+    /// End-to-end: a wallet signs the digest, the server recovers the right address.
+    #[tokio::test]
+    async fn test_verify_outcome_signature_round_trip() {
+        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let expected_address = wallet.address();
+        let settlement = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            .parse::<Address>()
+            .unwrap();
+        let transcript = [0xcdu8; 32];
+
+        let digest =
+            compute_outcome_eip712_digest("42", 1, &transcript, 43113, settlement).unwrap();
+        let sig = wallet.sign_hash(digest).unwrap().to_vec();
+
+        verify_outcome_signature(
+            &sig,
+            "42",
+            1,
+            &transcript,
+            expected_address,
+            43113,
+            settlement,
+        )
+        .await
+        .expect("self-signed signature must verify");
+
+        // Wrong expected address must fail.
+        let other = LocalWallet::new(&mut rand::thread_rng()).address();
+        let err = verify_outcome_signature(&sig, "42", 1, &transcript, other, 43113, settlement)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("does not match"));
+    }
+
+    /// Malformed signatures (wrong length) must be rejected without recovery.
+    #[tokio::test]
+    async fn test_verify_outcome_signature_rejects_wrong_length() {
+        let settlement = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            .parse::<Address>()
+            .unwrap();
+        let err = verify_outcome_signature(
+            &[0u8; 64],
+            "1",
+            1,
+            &[0u8; 32],
+            Address::zero(),
+            43113,
+            settlement,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("65 bytes"));
+    }
+
+    /// `parse_player_address` accepts canonical `"0x" + 40-hex` and rejects the rest.
+    #[test]
+    fn test_parse_player_address_canonical() {
+        let addr = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+        assert!(parse_player_address(addr).is_some());
+
+        // Missing 0x prefix
+        assert!(parse_player_address("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef").is_none());
+        // Wrong length
+        assert!(parse_player_address("0xdead").is_none());
+        // Non-hex
+        assert!(parse_player_address("0xZZzzbeefdeadbeefdeadbeefdeadbeefdeadbeef").is_none());
+        // Internal test-player id used by the harness
+        assert!(parse_player_address("p1").is_none());
     }
 }

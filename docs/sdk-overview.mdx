@@ -10,90 +10,162 @@ AMP provides lightweight, high-performance SDKs for multiple languages. These SD
 
 | Language | Typical Use Case | Status | Directory |
 | :--- | :--- | :--- | :--- |
-| **C++** | Unreal / Custom Engines | Beta | `amp-sdk/cpp` |
-| **C#** | Unity / Godot | Beta | `amp-sdk/csharp` |
-| **Go** | Server-side / CLI | Beta | `amp-sdk/go` |
-| **Python** | Data / AI / Research | Beta | `amp-sdk/python` |
+| **Go** | Server-side / CLI | Stable | `amp-sdk/go` |
 | **Rust** | Performance Tools | Beta | `amp-sdk/rust` |
+| **C#** | Unity / Godot | Beta | `amp-sdk/csharp` |
+| **C++** | Unreal / Custom Engines | Beta | `amp-sdk/cpp` |
+| **Python** | Data / AI / Research | Beta | `amp-sdk/python` |
+| **JavaScript / TypeScript** | Node.js tooling | Alpha | `amp-sdk/js` |
+
+All SDKs produce byte-identical EIP-712 outcome signatures — see
+[Signing Schemes](/signing) for the cross-language known-answer test vector.
 
 ---
 
 ## Authentication Flow
 
-All SDKs use a challenge-response authentication flow:
+All SDKs use an EIP-191 challenge/response authentication flow:
 
 1. **Request Challenge**: Client calls `requestChallenge(gameId)` on the `GameSessionService`.
-2. **Sign Challenge**: Client receives a nonce and signs it with their wallet private key.
-3. **Login**: Client calls `login(gameId, signedChallenge)` with the signed nonce.
-4. **Session**: Server returns a `UserSession` capability for matchmaking and match operations.
+2. **Sign Challenge**: Client receives the challenge bytes (`"AMP_AUTH:<gameId>:<uuid>"`) and signs them with their wallet using EIP-191 `personal_sign`.
+3. **Login**: Client calls `login(gameId, signature, challengePayload)` — passing back the ORIGINAL challenge bytes so the server can locate its outstanding nonce.
+4. **Session**: Server recovers the signer's Ethereum address, uses it as the player identity, and returns a `UserSession` capability.
+
+<Warning>
+The `requestChallenge` RPC must be called before `login()`. Challenges are single-use and expire after 5 minutes. SDKs validate `expiresAt` client-side before signing to avoid burning a one-time nonce on a stale attempt.
+</Warning>
+
+<Info>
+SDKs that accept a `privateKeyHex` (custodial mode) will automatically use the
+same wallet to sign match outcomes later. Wallet-integrated SDKs accept a
+`signCallback` for auth and a separate `signDigestCallback` / `signOutcome`
+for outcome signing. **No SDK silently generates an ephemeral identity** — see
+the [Security Review](/security-review) S2.
+</Info>
+
+---
+
+## Outcome Submission
+
+When a match concludes, the player must cryptographically attest to the result
+before the verifier will countersign:
+
+1. **Sign the outcome**: Compute the canonical EIP-712 digest over
+   `(matchId, outcome, transcriptHash)` using the same wallet as login.
+2. **Submit**: Call `submitOutcome(submission)` with a 65-byte signature and a
+   32-byte transcript hash (keccak256 of the match transcript).
+3. **Verify**: The server recovers the address from the signature and requires
+   it to match the authenticated player's `player_id` (see
+   [Security Review](/security-review) S1).
 
 ```rust
 // Example (Rust SDK)
-let challenge = client.request_challenge(game_id).await?;
-let signature = wallet.sign(&challenge.nonce);
-let session = client.login(game_id, &signature).await?;
+let outcome = amp_sdk::OutcomeSubmission {
+    match_id: assigned.assignment.match_id,
+    outcome_type: amp_sdk::match_capnp::OutcomeType::Win,
+    scores: vec![1, 0],
+    victor: 1,
+    metadata: Vec::new(),
+    replay_hash: transcript_hash_32_bytes,
+    signature: my_wallet.sign_eip712_outcome_digest(&match_id, 1, &transcript_hash),
+};
+let verifier_sig = assigned.session.submit_outcome(outcome).await?;
 ```
 
 <Warning>
-The `requestChallenge` RPC (method `@1` on `GameSessionService`) must be called before `login()`. Challenges expire after 60 seconds.
+The server rejects submissions where:
+- `signature.len() != 65`
+- `transcriptHash.len() != 32`
+- `outcome < 1` or `outcome > 4` (victor index, NOT `OutcomeType`)
+- The recovered address does not match the caller's `player_id`
 </Warning>
 
 ---
 
 ## Installation
 
-The AMP SDK folder is organized by language, with generated bindings and examples for each.
-
-### Unity / .NET (C#)
-1. Import the files from `amp-sdk/csharp/generated` into your project.
-2. Consult the example in `amp-sdk/examples/csharp`.
-
-### Native C++
-1. Include the headers from `amp-sdk/cpp/include/amp` and `amp-sdk/cpp/generated`.
-2. Use the `CMakeLists.txt` provided in `amp-sdk/examples/cpp` as a reference.
+The AMP SDK folder is organized by language. See `amp-sdk/README.md` for
+per-language setup instructions.
 
 ### Go
-```bash
-go get github.com/avalanche-matchmaking-protocol/amp-sdk/go
-```
 
-### Python
 ```bash
-pip install pycapnp
+go get github.com/BradMyrick/Avalanche-Matchmaking-Protocol/amp-sdk/go
 ```
-Use the schemas in `amp-sdk/python/generated` with `pycapnp`.
 
 ### Rust
+
 Add to `Cargo.toml`:
 ```toml
 [dependencies]
 amp-sdk = { path = "../amp-sdk/rust" }
+# Optional TLS support:
+# amp-sdk = { path = "../amp-sdk/rust", features = ["tls"] }
 ```
+
+### Unity / .NET (C#)
+
+1. Open `amp-sdk/csharp/AmpSdk/AmpSdk.csproj` in Visual Studio / Rider / `dotnet build`.
+2. The package ships with `link.xml` for IL2CPP preservation on Android/iOS.
+3. Transitive deps are pinned to avoid known-vulnerable versions (see
+   [Security Review](/security-review) S12).
+
+### Native C++
+
+1. Use the `CMakeLists.txt` in `amp-sdk/examples/cpp` as a reference.
+2. The C++ SDK does NOT bundle a Keccak-256 implementation — install
+   `set_outcome_signer()` with a callback that uses a vetted library.
+
+### Python
+
+```bash
+cd amp-sdk/python && pip install -e ".[dev]"
+```
+
+### JavaScript / TypeScript
+
+```bash
+cd amp-sdk/js && npm install && npm run build
+```
+
+Node.js only today (raw TCP). Browser support requires a TLS-terminating
+WebSocket bridge.
 
 ---
 
 ## Core SDK API
 
 ### `AmpClient` / `AMPClient`
-The top-level client that connects to an AMP server via Cap'n Proto RPC. Provides `request_challenge`, `login`, `close`, and factory methods for sessions.
+The top-level client that connects to an AMP server via Cap'n Proto RPC.
+Provides `connect`, `request_challenge`, `login`, `close`, and TLS options.
 
 ### `UserSession`
-Created upon successful login. Used for global actions like matchmaking and reconnection.
+Created upon successful login. Used for global actions like matchmaking
+(`request_match`) and reconnection (`reconnect`).
 
-### `MatchSession`
-A short-lived capability granted when a match is found. Used to submit outcomes, emit game events, and stream telemetry.
+### `MatchSession` / `MatchAssignment`
+`request_match` returns both an `AssignedMatch` (descriptive: match id,
+quality, opponents) and a live `MatchSession` capability for further RPCs
+(`submit_outcome`, `emit_telemetry`, `emit_game_event`, `subscribe_to_events`).
 
 ### `RuleSetBuilder`
-A fluent builder for constructing matchmaking rule sets with skill windows, latency limits, and backfill configuration.
+A fluent builder for constructing matchmaking rule sets with skill windows,
+latency limits, and backfill configuration.
 
 ### `ProfileBuilder`
-A fluent builder for constructing player profiles with MMR data and display metadata.
+A fluent builder for constructing player profiles with MMR data and display
+metadata.
 
-### `UpdateMMR` (Go / Rust)
-A local Glicko-2 rating implementation for client-side skill tracking.
+### `UpdateMMR` (Go)
+A local Glicko-2 rating implementation with NaN/Inf guards and a bounded
+iteration cap. Returns `ErrInvalidMMR` on corrupt input rather than hanging
+the caller (see [Security Review](/security-review) P8).
 
 ---
 
 ## Versioning Philosophy
 
-The AMP SDKs follow strict semantic versioning. Because the protocol relies on **Cap'n Proto**, the RPC interfaces are backwards and forwards compatible. You can usually update your game server without forcing an immediate update to all deployed game clients.
+The AMP SDKs follow strict semantic versioning. Because the protocol relies on
+**Cap'n Proto**, the RPC interfaces are backwards and forwards compatible. You
+can usually update your game server without forcing an immediate update to all
+deployed game clients.

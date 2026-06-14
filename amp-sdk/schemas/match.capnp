@@ -2,7 +2,7 @@
 
 using Go = import "go_v3.capnp";
 $Go.package("generated");
-$Go.import("github.com/avalanche-matchmaking-protocol/amp-sdk/go/generated");
+$Go.import("github.com/BradMyrick/Avalanche-Matchmaking-Protocol/amp-sdk/go/generated");
 
 using Rust = import "rust.capnp";
 $Rust.parentModule("match_capnp");
@@ -12,7 +12,12 @@ using GameCore = import "game_core.capnp";
 using TimeStamp     = UInt64;  # Nanoseconds since epoch
 using Address       = Data;    # 20-byte Ethereum address
 using AmpId         = Data;    # e.g., UUID or specialized ID
-using Signature     = Data;    # 65-byte EIP-712 signature
+using Signature     = Data;    # 65-byte secp256k1+r+s+v signature. For EIP-191
+                               # auth signatures (hash_message), use 27/28 for v.
+                               # For EIP-712 outcome signatures, the 0x1901
+                               # prefix is built into the digest; sign the raw
+                               # 32-byte digest and serialize as r||s||v with
+                               # v in {27, 28}.
 
 enum MatchType {
     turnBased   @0; 

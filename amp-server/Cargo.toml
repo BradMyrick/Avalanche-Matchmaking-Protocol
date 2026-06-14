@@ -30,3 +30,6 @@ num_cpus = "1.16"
 
 [build-dependencies]
 capnpc = "0.19"
+
+[dev-dependencies]
+rand = "0.8"

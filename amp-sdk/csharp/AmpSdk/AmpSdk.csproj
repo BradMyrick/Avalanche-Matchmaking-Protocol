@@ -6,20 +6,40 @@
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
     <PackageId>AmpSdk</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>AMP Protocol</Authors>
     <Description>Avalanche Matchmaking Protocol SDK for C# / Unity</Description>
+    <!--
+      Emit a link.xml alongside the DLL so Unity/IL2CPP users don't have to
+      author one. Without it, managed-code stripping on Android/iOS breaks
+      runtime RPC (Capnp.Net.Runtime uses reflection heavily).
+    -->
+    <IncludeContentInPack>true</IncludeContentInPack>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Capnp.Net.Runtime" Version="1.3.118" />
     <PackageReference Include="Nethereum.Signer" Version="4.20.0" />
     <PackageReference Include="Nethereum.Hex" Version="4.20.0" />
+    <!--
+      Pin the transitive dependencies that Nethereum leaves as floating
+      ranges. Without these direct pins, restores can pull 7-year-old
+      crypto/JSON libraries (SECURITY_REVIEW.md S12).
+    -->
+    <PackageReference Include="Portable.BouncyCastle" Version="1.9.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Include generated code from the parent directory -->
-    <Compile Include="../generated/**/*.cs" />
+    <!-- Use the canonical tracked bindings at amp-sdk/schemas/generated/csharp/
+         so fresh clones build without requiring capnpc-csharp to be installed.
+         The local amp-sdk/csharp/generated/ directory (populated by
+         amp-sdk/generate_bindings.sh) is a regeneration target and is
+         gitignored. -->
+    <Compile Include="../../schemas/generated/csharp/**/*.cs" />
+    <!-- Ship link.xml in the package so Unity users get IL2CPP preservation. -->
+    <Content Include="link.xml" Pack="true" PackagePath="contentFiles/any/any/" />
+    <None Include="link.xml" Pack="true" PackagePath="lib/$(TargetFramework)/" />
   </ItemGroup>
 
 </Project>

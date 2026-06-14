@@ -1,0 +1,29 @@
+<linker>
+  <!--
+    IL2CPP / managed-code stripping preservation for AmpSdk.
+
+    Unity's IL2CPP backend (used on Android, iOS, consoles) strips types
+    that aren't statically referenced. Capnp.Net.Runtime and the generated
+    *capnp.cs files use reflection heavily (CapnpSerializable.Create<T>,
+    Proxy/Skeleton discovery via attributes, dynamic serializer rewiring).
+    Without this link.xml, IL2CPP silently removes types and runtime RPC
+    fails with NullReferenceException / MissingMethodException.
+
+    This file must be placed alongside AmpSdk.dll in Assets/Plugins/ or
+    shipped inside the UPM package.
+  -->
+  <assembly fullname="Capnp" preserve="all" />
+  <assembly fullname="Capnp.Net.Runtime" preserve="all" />
+  <assembly fullname="AmpSdk" preserve="all" />
+  <assembly fullname="Nethereum.Signer" preserve="all" />
+  <assembly fullname="Nethereum.Hex" preserve="all" />
+  <assembly fullname="Nethereum.Util" preserve="all" />
+  <assembly fullname="Nethereum.Model" preserve="all" />
+  <assembly fullname="BouncyCastle.Crypto" preserve="all" />
+  <!--
+    The generated CapnpGen assembly (when compiled separately) or the
+    CapnpGen namespace (when compiled into AmpSdk) — preserve all types
+    since they are discovered reflectively.
+  -->
+  <assembly fullname="CapnpGen" preserve="all" />
+</linker>

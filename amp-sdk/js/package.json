@@ -1,6 +1,6 @@
 {
   "name": "@avalanche-matchmaking-protocol/amp-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Avalanche Matchmaking Protocol SDK for JavaScript/TypeScript",
   "type": "module",
   "main": "dist/index.js",
@@ -9,19 +9,20 @@
   "exports": {
     ".": {
       "import": "./dist/index.esm.js",
-      "require": "./dist/index.js"
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
     }
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "README.md"
   ],
   "scripts": {
-    "build": "tsc && rollup -c",
+    "build": "tsc",
     "dev": "tsc --watch",
-    "test": "jest",
-    "lint": "eslint src/**/*.ts",
-    "format": "prettier --write src/**/*.ts",
+    "test": "node --test --experimental-test-coverage dist/test/**/*.test.js",
+    "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -35,29 +36,16 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/avalanche-matchmaking-protocol/amp.git"
+    "url": "https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
-    "@ava-labs/avalanchejs": "^5.0.0",
-    "axios": "^1.6.0",
-    "bn.js": "^5.2.0",
-    "bs58": "^5.0.0",
-    "capnp-ts": "^0.9.0"
+    "ethers": "^6.13.0"
   },
   "devDependencies": {
-    "@rollup/plugin-node-resolve": "^15.0.0",
-    "@rollup/plugin-typescript": "^11.0.0",
-    "@types/bn.js": "^5.1.0",
-    "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
-    "eslint": "^8.0.0",
-    "jest": "^29.5.0",
-    "prettier": "^3.0.0",
-    "rollup": "^4.0.0",
-    "ts-jest": "^29.1.0",
-    "ts-node": "^10.9.0",
     "typescript": "^5.0.0"
   }
 }

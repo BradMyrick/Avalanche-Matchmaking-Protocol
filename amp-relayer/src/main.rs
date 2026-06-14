@@ -291,6 +291,28 @@ async fn main() -> Result<()> {
     let cfg = config::Config::from_env()?;
     let addr: SocketAddr = cfg.rpc_addr.parse()?;
 
+    // Mirror the server's policy: refuse to start without an API key unless
+    // the operator explicitly opts out. Without this, the relayer's
+    // submit_outcome endpoint is wide open to anyone who can reach the port
+    // — see SECURITY_REVIEW.md S11.
+    let allow_unauth = std::env::var("AMP_ALLOW_UNAUTHENTICATED_RELAYER")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if cfg.api_keys.is_empty() && !allow_unauth {
+        anyhow::bail!(
+            "RELAYER_API_KEY (or RELAYER_API_KEY_FILE / RELAYER_API_KEYS) is \
+             required for secure operation. Set \
+             AMP_ALLOW_UNAUTHENTICATED_RELAYER=1 to bypass (NOT RECOMMENDED — \
+             see SECURITY_REVIEW.md S11)."
+        );
+    } else if cfg.api_keys.is_empty() {
+        tracing::warn!(
+            "Relayer starting with no API keys. All incoming submit_outcome \
+             requests will be accepted. This is insecure — see \
+             SECURITY_REVIEW.md S11."
+        );
+    }
+
     let provider = Provider::<Http>::try_from(&cfg.fuji_rpc_url)?;
     let wallet: LocalWallet = cfg.relayer_private_key.parse()?;
     let chain_id = provider.get_chainid().await?.as_u64();
@@ -417,8 +439,19 @@ async fn accept_loop(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(50);
+    // Per-IP connection cap. The server-to-relayer hop is normally a single
+    // known source; a burst from one IP signals misbehavior. Default 10.
+    let max_per_ip: usize = std::env::var("RELAYER_MAX_PER_IP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
     let active = Arc::new(AtomicUsize::new(0));
-    info!("Relayer max concurrent connections: {}", max_connections);
+    let per_ip: Arc<std::sync::Mutex<std::collections::HashMap<std::net::IpAddr, usize>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    info!(
+        "Relayer max concurrent connections: {} (max per IP: {})",
+        max_connections, max_per_ip
+    );
 
     loop {
         let (stream, peer) = listener.accept().await?;
@@ -430,6 +463,34 @@ async fn accept_loop(
             drop(stream);
             continue;
         }
+
+        // Per-IP cap to prevent a single compromised server from saturating
+        // the relayer's connection pool. Lifted when the connection closes.
+        let ip = peer.ip();
+        let over_ip = {
+            let mut m = per_ip.lock().unwrap();
+            let e = m.entry(ip).or_insert(0);
+            if *e >= max_per_ip {
+                true
+            } else {
+                *e += 1;
+                false
+            }
+        };
+        if over_ip {
+            tracing::warn!(
+                "Relayer per-IP cap reached for {} ({}/{}), rejecting",
+                ip,
+                {
+                    let m = per_ip.lock().unwrap();
+                    m.get(&ip).copied().unwrap_or(0)
+                },
+                max_per_ip
+            );
+            drop(stream);
+            continue;
+        }
+
         active.fetch_add(1, Ordering::Relaxed);
 
         let state = state.clone();
@@ -437,6 +498,7 @@ async fn accept_loop(
         let api_keys = api_keys.clone();
         let acceptor = tls_acceptor.clone();
         let counter = active.clone();
+        let per_ip_clone = per_ip.clone();
 
         tokio::task::spawn_local(async move {
             let relayer_impl = RelayerImpl {
@@ -463,6 +525,18 @@ async fn accept_loop(
                 run_rpc(reader, writer, client).await;
             }
             counter.fetch_sub(1, Ordering::Relaxed);
+            // Release the per-IP slot.
+            let mut guard = per_ip_clone.lock().unwrap();
+            let should_remove = guard.get_mut(&ip).map(|c| {
+                if *c > 0 {
+                    *c -= 1;
+                }
+                *c == 0
+            }) == Some(true);
+            if should_remove {
+                guard.remove(&ip);
+            }
+            drop(guard);
         });
     }
 }

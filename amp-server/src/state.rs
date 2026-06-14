@@ -519,6 +519,16 @@ impl InnerState {
             .push(tx);
     }
 
+    /// Number of currently-registered event subscribers for a match.
+    /// Used by the RPC layer to enforce a per-match subscriber cap and
+    /// prevent task-amplification DoS.
+    pub fn subscriber_count(&self, match_id: &str) -> usize {
+        self.match_event_senders
+            .get(match_id)
+            .map(|s| s.len())
+            .unwrap_or(0)
+    }
+
     pub fn notify_subscribers(&self, match_id: &str, event: MatchSettledEvent) {
         if let Some((_, senders)) = self.match_event_senders.remove(match_id) {
             for tx in senders {

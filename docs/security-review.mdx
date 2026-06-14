@@ -1,0 +1,25 @@
+---
+title: Security Review
+---
+
+# Security Review & Remediation Status
+
+This page mirrors [`SECURITY_REVIEW.md`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/blob/main/SECURITY_REVIEW.md)
+in the repository root. The canonical source is the markdown file; this page
+is auto-rendered for the docs site.
+
+Please refer to the
+[canonical SECURITY_REVIEW.md on GitHub](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/blob/main/SECURITY_REVIEW.md)
+for the full threat model, findings table, and remediation status. The
+document covers:
+
+- **15 findings (S1–S15)** spanning authentication, authorization, transport
+  security, input validation, and dependency hygiene.
+- **5 performance fixes (P4–P9)** including the CPU-waste fix in
+  `submit_outcome` and the Glicko-2 NaN guard.
+- **Cross-SDK integrity** verification for the EIP-712 outcome digest.
+- **Configuration changes** required when upgrading to this version.
+- **Open work** tracked for future releases.
+
+The canonical signing schemes (EIP-191 auth and EIP-712 outcome signatures)
+are documented in [Signing Schemes](/signing).

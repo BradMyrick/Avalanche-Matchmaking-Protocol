@@ -3,7 +3,8 @@
 
 .PHONY: help setup build test clean localnet-up localnet-down deploy-local \
         lint format docs build-rust build-contracts build-sdk-go build-sdk-cpp \
-        build-sdk-csharp build-sdk-python test-rust test-contracts test-integration test-sdk-go \
+        build-sdk-csharp build-sdk-python test-rust test-contracts test-integration \
+        test-sdk-go test-sdk-python test-sdk-js \
         lint-rust lint-contracts format-rust check-contracts
 
 help:
@@ -13,7 +14,7 @@ help:
 	@echo "  help           Show this help message"
 	@echo "  setup          Install dependencies and set up development environment"
 	@echo "  build          Build all Rust components + contracts"
-	@echo "  test           Run all tests (Rust + Forge + Go SDK)"
+	@echo "  test           Run all tests (Rust + Forge + SDKs)"
 	@echo "  clean          Clean all build artifacts"
 	@echo "  localnet-up    Start local Avalanche testnet (Docker)"
 	@echo "  localnet-down  Stop local Avalanche testnet"
@@ -59,7 +60,7 @@ build-rust:
 
 # ─── Test ────────────────────────────────────────────────────────────────
 
-test: test-rust test-contracts
+test: test-rust test-contracts test-sdk-go test-sdk-python test-sdk-js
 	@echo "All tests passed"
 
 test-rust:
@@ -77,6 +78,16 @@ test-integration: build
 test-sdk-go:
 	@echo "Running Go SDK tests..."
 	cd amp-sdk/go && go test ./...
+
+test-sdk-python:
+	@echo "Running Python SDK tests..."
+	@cd amp-sdk/python && pip install -e ".[dev]" 2>/dev/null || echo "  (pip install skipped — ensure pycapnp, eth-account, eth-keys, eth-utils, pytest are installed in your environment)"
+	@cd amp-sdk/python && pytest || (echo "  Python tests failed. If dependencies are missing, run: pip install -e amp-sdk/python[dev]" && false)
+
+test-sdk-js:
+	@echo "Running JavaScript SDK tests..."
+	@cd amp-sdk/js && npm install --silent 2>/dev/null || echo "  (npm install skipped — ensure ethers is installed)"
+	@cd amp-sdk/js && npm run build && npm test
 
 # ─── Lint & Format ───────────────────────────────────────────────────────
 

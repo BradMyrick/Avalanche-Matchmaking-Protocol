@@ -4,9 +4,25 @@ build-backend = "hatchling.build"
 
 [project]
 name = "amp-sdk"
-version = "0.1.0"
-requires-python = ">=3.8"
-dependencies = ["pycapnp>=1.0", "eth-account>=0.8"]
+version = "0.2.0"
+description = "Avalanche Matchmaking Protocol client SDK (Python)"
+requires-python = ">=3.9"
+dependencies = [
+    "pycapnp>=1.0,<3",
+    "eth-account>=0.8,<6",
+    "eth-keys>=0.4,<2",
+    "eth-utils>=2,<6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-asyncio>=0.21"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["amp_sdk"]
+# Force-include the Cap'n Proto schemas into the wheel so that
+# `capnp.load(...)` works after `pip install`. Without this, the wheel only
+# ships amp_sdk/*.py and `import amp_sdk` fails with FileNotFoundError.
+force-include = { "generated" = "amp_sdk/generated" }
+
+[tool.hatch.build.targets.sdist]
+include = ["amp_sdk", "generated", "pyproject.toml"]

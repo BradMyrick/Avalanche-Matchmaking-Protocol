@@ -2,7 +2,7 @@
 
 using Go = import "go_v3.capnp";
 $Go.package("generated");
-$Go.import("github.com/avalanche-matchmaking-protocol/amp-sdk/go/generated");
+$Go.import("github.com/BradMyrick/Avalanche-Matchmaking-Protocol/amp-sdk/go/generated");
 
 using Rust = import "rust.capnp";
 $Rust.parentModule("service_capnp");
@@ -27,13 +27,31 @@ interface GameSessionService {
     # The entry point for any client connecting to the system.
     
     login @0 (gameId :UInt64, signature :Data, challengePayload :Data) -> (session :UserSession);
-    # Authenticates the user for a specific game. 
-    # The signature must verify against a challenge (e.g. nonce) for the game's admin address.
-    # Returns a UserSession capability which holds the user's identity and game context.
+    # Authenticates a player wallet for a specific game.
+    # The signature is an EIP-191 personal_sign over the challenge returned by
+    # requestChallenge(). The server recovers the signer's Ethereum address and
+    # uses it as the player identity for this session.
+    # 
+    # Authorization policy:
+    #   * Any valid Ethereum wallet may authenticate as a player. The recovered
+    #     address becomes the player_id and is later used to verify the
+    #     submitter signature on submitOutcome().
+    #   * Admin-level RPCs (ruleset upload, player bans, etc.) are NOT exposed
+    #     on this capability; they require a separate, operator-issued
+    #     capability. See amp-server/src/player_service.rs.
+    #   * Game operators who wish to restrict login to a known player
+    #     set should front the AMP server with an admission proxy or
+    #     enable per-game allowlisting when that feature is wired in.
+    # 
+    # Returns a UserSession capability which holds the recovered address
+    # and the game context.
     
     requestChallenge @1 (gameId :UInt64) -> (challenge :Data, expiresAt :UInt64);
     # Requests a one-time authentication challenge for the given game.
-    # The client must sign the returned challenge bytes and pass them to login().
+    # The challenge is the ASCII string "AMP_AUTH:<gameId>:<uuid>". The client
+    # must EIP-191-sign the raw bytes and pass the resulting 65-byte signature
+    # (with the original challenge bytes) to login().
+    # The challenge is single-use and expires 5 minutes after issuance.
 }
 
 interface UserSession {

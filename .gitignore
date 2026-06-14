@@ -8,7 +8,6 @@ Thumbs.db
 *.swo
 *~
 *.sublime-workspace
-build/
 
 # ---- Secrets & Environment ----
 .env
@@ -31,63 +30,87 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# ---- Rust (match_maker + mm-client) ----
+# ---- Rust ----
 target/
 **/*.rs.bk
 *.pdb
 
-# ---- Foundry / Solidity (contracts) ----
-# Ignore build artifacts but keep the lib submodules
+# ---- Foundry / Solidity ----
+# Keep lib/ submodules; ignore build artifacts
 contracts/out/
 contracts/cache/
 contracts/broadcast/
-# Do not ignore contracts/lib/ as they are git submodules
+contracts/lib/
 
-# ---- Other ----
+# ---- Editor / IDE ----
+.vscode/
+.idea/
 *.tsbuildinfo
 
-# ---- VSCode ----
-.vscode/
-
-# --- Contracts/Forge ---
-contracts/lib/
-broadcast/
-cache/
-out/
-lib/
-
-# ---- SDK Generated Bindings ----
-amp-sdk/cpp/generated/
-amp-sdk/csharp/generated/
-amp-sdk/go/generated/
-amp-sdk/python/generated/
-amp-sdk/rust/src/generated_*
-
-# --- Build Artifacts ---
-amp-sdk/examples/cpp/build/
-dist/
+# ---- Build artifacts (all languages) ----
 build/
+dist/
 .cache/
+out/
+lib/  # generic catch-all; doesn't affect contracts/lib above
 
-# --- C# ---
-amp-sdk/csharp/**/bin/
-amp-sdk/csharp/**/obj/
-amp-sdk/examples/csharp/**/bin/
-amp-sdk/examples/csharp/**/obj/
+# ---- C++ ----
+/amp-sdk/examples/cpp/build/
+compile_commands.json
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
 
-# --- Python ---
+# ---- C# ----
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# ---- Python ----
 __pycache__/
 *.pyc
+*.pyo
 *.egg-info/
 .pytest_cache/
 .tox/
 .coverage
 htmlcov/
-# Slither and Python
 .slither_venv/
-__pycache__/
-*.pyc
 git-pip.py
-
-# data files
+# Data files used by local runs (relayer-data, amp-data, etc.)
 *-data/
+
+# ---- JavaScript / TypeScript ----
+**/node_modules/
+# Don't commit package-lock.json for SDK libraries; consumers pin their own.
+**/package-lock.json
+**/yarn.lock
+**/pnpm-lock.yaml
+
+# ---- AMP SDK generated bindings ----
+# Generated bindings are produced by `amp-sdk/generate_bindings.sh` and
+# by each language's build system. The following patterns hide them from
+# version control because they are reproducible from the canonical schemas
+# in `amp-sdk/schemas/*.capnp`.
+#
+# Note: `amp-sdk/schemas/generated/{cpp,csharp}/` IS intentionally tracked
+# (these are the outputs that the C++ CMakeLists and the C# .csproj compile
+# against, so a fresh clone builds without requiring the capnp compilers to
+# be installed).
+#
+# Note: `amp-sdk/python/amp_sdk/generated/` IS intentionally tracked because
+# those are stripped schema SOURCES (not bindings) that ship in the wheel
+# and are loaded by pycapnp at runtime.
+amp-sdk/csharp/generated/
+amp-sdk/go/generated/
+amp-sdk/rust/src/generated_*
+
+# ---- Local development data ----
+relayer-data/
+amp-data/
+anvil.log

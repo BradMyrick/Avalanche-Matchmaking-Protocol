@@ -31,45 +31,52 @@ You will receive a unique `gameId` for your project.
 Add the appropriate AMP SDK to your game project and implement the challenge-response auth flow.
 
 ```csharp
-// Example: C# SDK
+// Example: C# SDK (custodial mode)
 var ampClient = new AmpClient("fuji.amp.rpc.endpoint:50051");
+await ampClient.ConnectAsync();
 
-// Step 1: Request a challenge from the server
-var challenge = await ampClient.RequestChallengeAsync(gameId);
-
+// Step 1: Request a challenge (the SDK validates expiresAt client-side)
 // Step 2: Sign the challenge with the player's wallet
-var signature = wallet.Sign(challenge.Nonce);
-
 // Step 3: Login with the signed challenge
-var connected = await ampClient.ConnectAsync(gameId, signature);
+var connected = await ampClient.AuthenticateAsync(gameId, privateKeyHex: playerKeyHex);
 ```
 
 <Warning>
-The `requestChallenge` step is **required**. The server will reject `login` calls without a valid signed challenge. Challenges expire after 60 seconds.
+The `requestChallenge` step is **required**. The server will reject `login` calls without a valid signed challenge. Challenges are single-use and expire after 5 minutes.
+
+No SDK silently generates an ephemeral identity — you must supply either a
+`privateKeyHex` (custodial) or a `signCallback` (wallet-integrated). See
+[Security Review](/security-review) S2.
 </Warning>
 
 ### 3. Request a Match
 When a player wants to find a match:
 
-1. Call `session.RequestMatch(gameId, rulesetId)`.
+1. Call `session.requestMatch(gameId, rulesetId)`.
 2. The server validates the request and places the player in the match queue (bucketed by `gameId` + `rulesetId`, sorted by MMR).
 3. The matchmaker runs every 50ms, using binary search for skill-compatible pairs.
-4. Once matched, the SDK receives a **MatchAssignment** with the match ID, opponent details, and a `MatchSession` capability.
+4. Once matched, the SDK receives both a **MatchAssignment** (with match ID, opponent details, quality) and a live `MatchSession` capability.
 
 ### 4. Gameplay & Telemetry
 During gameplay:
 
-1. Use `matchSession.EmitGameEvent(eventType, data)` to log significant state changes.
-2. Use `matchSession.EmitTelemetry(telemetryEvent)` to stream performance data.
-3. For `RT_HASH_AGREE` mode, maintain a rolling hash of the match state.
+1. Use `matchSession.emitGameEvent(eventType)` to log significant state changes.
+2. Use `matchSession.emitTelemetry(eventType, timestamp)` to stream performance data.
+3. For `RT_HASH_AGREE` mode, maintain a rolling hash of the match state (the final value becomes your 32-byte transcript hash).
 
 ### 5. Submit Outcome & Settlement
 At the end of the match:
 
-1. Call `matchSession.SubmitOutcome(matchId, outcome, transcriptHash)`.
-2. The verifier validates the outcome and signs an attestation.
-3. The `amp-relayer` submits the attestation to `AMPSettlement` on-chain.
-4. Funds are released from escrow to the winner.
+1. Compute the canonical EIP-712 digest over `(matchId, outcome, transcriptHash)` using the SAME wallet as login. SDKs that ship custodial signing do this automatically.
+2. Call `matchSession.submitOutcome(matchId, outcome, transcriptHash)` with the 65-byte submitter signature and 32-byte transcript hash.
+3. The server verifies the submitter signature recovers to the authenticated player (see [Security Review](/security-review) S1), then applies its own verifier EIP-712 signature.
+4. The `amp-relayer` submits the verifier attestation to `AMPSettlement` on-chain.
+5. Funds are released from escrow to the winner.
+
+<Warning>
+The server rejects submissions where the signature is not exactly 65 bytes,
+the transcript hash is not exactly 32 bytes, or `outcome` is outside 1..=4.
+</Warning>
 
 ---
 
@@ -77,11 +84,14 @@ At the end of the match:
 
 - [ ] Game registered on Fuji Testnet with verifiers and settlement mode.
 - [ ] AMP SDK linked in project.
-- [ ] Challenge-response auth implemented (`requestChallenge` -> sign -> `login`).
+- [ ] Challenge-response auth implemented (`requestChallenge` → sign → `login`).
 - [ ] Player can authenticate and get a valid `UserSession`.
-- [ ] Matchmaker successfully pairs two clients via `RequestMatch`.
+- [ ] Matchmaker successfully pairs two clients via `requestMatch`.
 - [ ] Game events and telemetry streaming during match.
-- [ ] Outcome submission returns verifier signature.
+- [ ] **Outcome submission includes a 65-byte EIP-712 submitter signature** (see [Signing Schemes](/signing)).
+- [ ] **`transcriptHash` is exactly 32 bytes** (keccak256 of the match transcript).
+- [ ] Outcome submission returns the verifier signature.
 - [ ] Settlement contract reflects verified outcomes on-chain.
+- [ ] `RELAYER_API_KEY` set on both server and relayer (required by default — see [Security Review](/security-review) S11).
 
 **Tip:** Use the **Local Development Flow** (`./scripts/start-localnet.sh` with Anvil) to test your integration before deploying to the public testnet. It's faster and provides an isolated sandbox.

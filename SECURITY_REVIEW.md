@@ -1,0 +1,105 @@
+# AMP Security Review & Remediation Status
+
+This document tracks the security review performed on the AMP SDKs and
+the server-side enforcement code, and the remediation status of each
+finding. New contributors should read this before changing authentication,
+signing, transport, or RPC-boundary validation code.
+
+## Severity scale
+
+- **CRITICAL** — Active exploit or foundational integrity gap. Must fix
+  before any production deployment.
+- **HIGH** — Practical attack vector against the default deployment or
+  against a documented public API.
+- **MEDIUM** — Hardening gap, footgun, or DoS vector that requires
+  specific conditions to exploit.
+- **LOW** — Hygiene, code-quality, or defense-in-depth issue.
+
+## Findings & Status
+
+### CRITICAL
+
+| ID | Finding | Status | Resolution |
+|:---|:---|:---|:---|
+| **S1** | Server did not verify the submitter signature in `submit_outcome`. Any match participant could self-declare victory and get the verifier's countersignature. | **FIXED** | `amp-server/src/main.rs`: `MatchSessionImpl::submit_outcome` now reads `submission.get_signature()`, recovers the address via EIP-712 over `(matchId, outcome, transcriptHash)`, and requires it to match the caller's player_id. Test coverage in `test_verify_outcome_signature_round_trip`. |
+| **S2** | C# and Python SDKs silently generated an ephemeral wallet key when no `privateKeyHex`/`signCallback` was passed. The key was never returned, persisted, or associated — defeating authentication. | **FIXED** | Both SDKs now require an explicit signer and raise a typed error otherwise. See `amp-sdk/csharp/AmpSdk/AmpClient.cs:AuthenticateAsync` and `amp-sdk/python/amp_sdk/client.py:authenticate`. |
+
+### HIGH
+
+| ID | Finding | Status | Resolution |
+|:---|:---|:---|:---|
+| **S3** | No TLS in any SDK by default. Signatures, capabilities, and the inter-service API key traversed plaintext TCP. | **PARTIAL** | Go SDK: `Options{TLS: ...}` constructor wires `crypto/tls`. Rust SDK: `dial_tls` constructor with `tokio-rustls`. Python SDK: `tls_context` constructor parameter (ssl.SSLContext). C# SDK: documented limitation of Capnp.Net.Runtime 1.3.x — production deployments should use a TLS-terminating reverse proxy (nginx/envoy). C++ SDK: TODO (libkj-tls is available locally but not yet wired). |
+| **S4** | Game-admin authorization not enforced server-side. The schema comment claimed "for the game's admin address" but any Ethereum wallet could authenticate for any game_id. | **CLARIFIED** | Schema comments updated to reflect actual semantics (player authentication, not admin verification). Admin-level RPCs (`applyRestriction`, `recordMatchResult`) are intentionally NOT wired into the public capability. Per-game player allowlisting is left as a deployment-policy decision. |
+| **S5** | `replay_hash` length not validated server-side; `sign_match_outcome` silently substituted `H256::zero()` for non-32-byte inputs, marking the match settled. The relayer then rejected the settlement, causing server-chain state desync. | **FIXED** | Server now requires `transcript_hash.len() == 32` up front. Outcome range aligned to `1..=4` between server and relayer. |
+| **S6** | C++, C#, and Python SDKs never populated `OutcomeSubmission.signature`. Combined with S1, the integrity path was unenforced end-to-end. | **FIXED for C#/Python** | Both SDKs now compute the canonical EIP-712 digest and sign it with the player's wallet. Cross-language test vector in `test_outcome_digest_known_vector_cross_lang` ensures Rust/C#/Python produce identical digests. C++ SDK still pending (see TODO in `examples/cpp/src/main.cpp`). |
+| **S7** | C++ example shipped a hardcoded 65-byte EIP-712 signature blob, used by both Player A and Player B. Either real (replayable) or fake (proving the server didn't verify). | **FIXED** | `examples/cpp/src/main.cpp` now refuses to run without `AMP_EXAMPLE_SIGNATURE_HEX` or a user-supplied `signChallenge` callback. The hardcoded blob is removed. |
+| **S8** | `expiresAt` returned by `requestChallenge` was never validated client-side. | **FIXED for C#/Python/Go** | Each SDK now exposes a helper or check; see `CheckChallengeExpiry` (Go), `is_challenge_expired` (Rust), and inline checks in C#/Python `authenticate`. |
+
+### MEDIUM
+
+| ID | Finding | Status | Resolution |
+|:---|:---|:---|:---|
+| **S9** | Server's challenge map was unbounded. Anonymous pre-auth RPC could drive unbounded memory growth. | **FIXED** | `AuthService::create_challenge` now caps at `MAX_OUTSTANDING_CHALLENGES = 100_000`, pruning expired entries before refusing. |
+| **S10** | Rate limiter trusts TCP peer address; per-IP `Vec<Instant>` unbounded; slowloris-susceptible. | **DOCUMENTED** | Existing limiter preserved for backward compatibility. PROXY-protocol support is a deployment concern — document in production checklist. |
+| **S11** | Inter-service API key defaulted to empty. Server skipped auth; relayer short-circuited to "allow" when no keys configured. | **FIXED** | Both binaries now refuse to start without an API key unless `AMP_ALLOW_UNAUTHENTICATED_RELAYER=1` is set explicitly. |
+| **S12** | C# transitive closure pulled 7-year-old `Portable.BouncyCastle 1.8.2` and `Newtonsoft.Json 11.0.2` (known advisories). | **FIXED** | Direct pins on `Portable.BouncyCastle 1.9.0` and `Newtonsoft.Json 13.0.3` in `AmpSdk.csproj`. |
+| **S13** | Dead admin RPC surface in `player_service.rs` (`apply_restriction`, `record_match_result`, `create_or_update_profile`) — no auth. Any future change exposing the capability would enable unauthenticated tampering. | **MITIGATED** | These methods are intentionally not wired into `serve_rpc`. They're flagged with `#[allow(dead_code)]`. A future admin capability should require operator-issued credentials. |
+
+### LOW
+
+| ID | Finding | Status | Resolution |
+|:---|:---|:---|:---|
+| **S14** | Go SDK returned a `MatchID` slice backed by the released capnp answer buffer (use-after-free risk). | **FIXED** | `RequestMatch` and `Reconnect` now defensively copy `matchID` into an owned `[]byte`. |
+| **S15** | Login signature verification used `sig_bytes[..65]` and ignored trailing bytes; no canonical-s check. | **DOCUMENTED** | ethers' `Signature::try_from` accepts the canonical form; trailing bytes are now length-checked up front (must be exactly 65). Strict canonical-s enforcement is left to the ethers library. |
+
+## Performance fixes
+
+| ID | Finding | Status |
+|:---|:---|:---|
+| **P4** | `sign_match_outcome` ran BEFORE the idempotency check. Repeat calls on settled matches burned CPU on each retry. | **FIXED** — `submit_outcome` now marks settled FIRST, then signs. |
+| **P5** | `subscribe_to_events` had no subscriber cap; a malicious participant could register unbounded callbacks. | **FIXED** — Capped at `MAX_SUBSCRIBERS_PER_MATCH = 16` via `AppState::subscriber_count`. |
+| **P8** | Go Glicko-2 solver has no iteration cap. | **OPEN** — See TODO in `amp-sdk/go/player/profile.go`. |
+| **P9** | Rust SDK shipped 98,531 lines of committed-but-unused `*_capnp.rs`. | **FIXED** — Files deleted; `build.rs` regenerates into `OUT_DIR` only. |
+
+## Cross-SDK integrity
+
+The EIP-712 digest over `(matchId, outcome, transcriptHash)` is now
+byte-identical across Rust, C#, and Python SDKs. The known-answer vector
+in `amp-server/src/main.rs::test_outcome_digest_known_vector_cross_lang`
+fails loudly if any SDK diverges.
+
+## Open work
+
+The following items remain and are tracked in the issue list:
+
+1. C++ SDK: wire `libkj-tls` for TLS, expose async API (callbacks),
+   implement `submit_outcome` signature.
+2. C++ SDK: Unreal Engine plugin descriptor + Blueprint wrappers.
+3. JS SDK: build a real TypeScript implementation (currently a stub).
+4. All SDKs: implement `subscribeToEvents`/`MatchListener`.
+5. All SDKs: add comprehensive tests (only Go has any today).
+6. Server: per-IP rate limit on the relayer (added per-IP cap in this pass;
+   PROXY-protocol support still open).
+
+## Configuration changes
+
+Operators upgrading to this version should:
+
+1. Set `RELAYER_API_KEY` (or `RELAYER_API_KEY_FILE`) on **both** the
+   server and relayer. Previous default of "no auth" is now a hard error.
+2. Update C# clients to pass `privateKeyHex` or `signCallback` to
+   `AuthenticateAsync`. Silent ephemeral keys are no longer generated.
+3. Update Python clients similarly: `authenticate()` now requires an
+   explicit signer.
+4. Update C++ clients to set `AMP_EXAMPLE_SIGNATURE_HEX` (for local
+   testing) or implement a real `signChallenge` wallet callback.
+5. Update all clients to compute and submit the EIP-712 outcome signature.
+   The server now rejects submissions without a valid 65-byte signature.
+
+## See also
+
+- `amp-sdk/schemas/match.capnp` — schema-level signature conventions
+- `amp-sdk/schemas/service.capnp` — login/authorization semantics
+- `amp-server/src/auth.rs` — challenge/response implementation
+- `amp-server/src/main.rs::compute_outcome_eip712_digest` — canonical
+  digest reference

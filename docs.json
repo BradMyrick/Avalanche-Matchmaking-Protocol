@@ -28,6 +28,8 @@
         { "title": "Verifier Architecture", "href": "/verifier-architecture" },
         { "title": "Cap'n Proto Schemas", "href": "/capnp-schemas" },
         { "title": "Contracts Reference", "href": "/contracts-reference" },
+        { "title": "Signing Schemes", "href": "/signing" },
+        { "title": "Security Review", "href": "/security-review" },
         { "title": "Roadmap", "href": "/roadmap" },
         { "title": "FAQ", "href": "/faq" },
         { "title": "Glossary", "href": "/glossary" }

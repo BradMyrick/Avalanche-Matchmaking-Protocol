@@ -1,4 +1,4 @@
-module github.com/avalanche-matchmaking-protocol/amp-sdk/go
+module github.com/BradMyrick/Avalanche-Matchmaking-Protocol/amp-sdk/go
 
 go 1.21
 
