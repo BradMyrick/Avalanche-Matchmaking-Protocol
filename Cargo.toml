@@ -7,6 +7,7 @@ members = [
     "amp-tls",
     "trace-viewer",
     "amp-sdk/rust",
+    "amp-sdk/js/native",
     "amp-loadtest",
     "amp-integration-tests",
 ]

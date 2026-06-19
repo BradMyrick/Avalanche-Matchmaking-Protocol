@@ -14,14 +14,20 @@
   "files": [
     "dist",
     "src",
+    "native/amp-native.*.node",
+    "native/amp-native.js",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build:native": "napi build --manifest-path native/Cargo.toml --platform -o native --js amp-native.js --dts amp-native.d.ts --esm --release",
+    "build": "npm run build:native && tsc",
     "dev": "tsc --watch",
     "test": "node --test --experimental-test-coverage dist/test/**/*.test.js",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build"
+  },
+  "napi": {
+    "binaryName": "amp-native"
   },
   "keywords": [
     "avalanche",
@@ -43,6 +49,7 @@
     "ethers": "^6.13.0"
   },
   "devDependencies": {
+    "@napi-rs/cli": "^3.7.2",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
   }

@@ -373,6 +373,7 @@ impl SettlementQueue {
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;
         info!("Submitted tx {} for match {}", pending.tx_hash(), match_id);
+        metrics::counter!("amp_settlements_submitted_total").increment(1);
 
         let db_clone = self.db.clone();
         let match_id_clone = s.match_id.clone();
@@ -531,6 +532,7 @@ fn handle_confirmed(db: &Db, match_id: &[u8], tx_hash: &str) -> Result<(), Relay
         record_result_db(db, &s)?;
     }
     cf.remove(match_id)?;
+    metrics::counter!("amp_settlements_confirmed_total").increment(1);
     Ok(())
 }
 
@@ -570,6 +572,7 @@ fn handle_failure(
             label,
             s.retry_count
         );
+        metrics::counter!("amp_settlements_dead_lettered_total").increment(1);
         record_result_db(db, &s)?;
         cf.remove(&s.match_id)?;
     } else {
@@ -580,6 +583,7 @@ fn handle_failure(
             label,
             s.retry_count
         );
+        metrics::counter!("amp_settlement_retries_total").increment(1);
         let updated = bincode::serialize(&s)?;
         cf.insert(&s.match_id, &updated as &[u8])?;
     }

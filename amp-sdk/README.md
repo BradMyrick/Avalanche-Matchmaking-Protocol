@@ -13,7 +13,7 @@ Service, join matchmaking, and submit verified game outcomes.
 | **C# (.NET)** | [`csharp/`](csharp/) | Beta (Unity/Godot) | via reverse proxy | ✅ (custodial) |
 | **C++** | [`cpp/`](cpp/) | Beta (Unreal) | ✅ (`kj-tls`, optional) | via callback |
 | **Python** | [`python/`](python/) | Beta | ✅ (`ssl.SSLContext`) | ✅ (custodial) |
-| **JavaScript / TypeScript** | [`js/`](js/) | Alpha (Node.js) | ✅ | ✅ (custodial) |
+| **JavaScript / TypeScript** | [`js/`](js/) | Beta (Node.js, native) | via native | ✅ (custodial) |
 
 See [`docs/SDK_USAGE.md`](docs/SDK_USAGE.md) for the integration flow and
 [`../docs/signing.mdx`](../docs/signing.mdx) for the canonical signing schemes.
@@ -85,13 +85,13 @@ pytest                         # Run unit tests
 
 ```bash
 cd amp-sdk/js
-npm install
-npm run build
-npm test                       # Verifies the cross-language EIP-712 digest KAT
+npm install                    # pulls @napi-rs/cli + ethers
+npm run build                  # builds the native .node (napi build) + tsc
+npm test                       # cross-language EIP-712 KAT + native digest tests
 ```
 
-The JS SDK is Node.js-only today (raw TCP). For browser use, front the AMP
-server with a TLS-terminating WebSocket bridge.
+The JS SDK is Node.js-only and built on a native Rust core (napi-rs). For
+browser use, front the AMP server with a TLS-terminating WebSocket bridge.
 
 ## E2E Testing
 

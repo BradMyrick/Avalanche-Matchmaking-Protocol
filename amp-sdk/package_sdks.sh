@@ -93,9 +93,11 @@ mkdir -p "$DIST_DIR/js_staging"
 cp "$SDK_DIR/js/package.json" "$DIST_DIR/js_staging/"
 cp "$SDK_DIR/js/tsconfig.json" "$DIST_DIR/js_staging/"
 cp -r "$SDK_DIR/js/src" "$DIST_DIR/js_staging/"
+cp -r "$SDK_DIR/js/native" "$DIST_DIR/js_staging/"
 # Include the pre-built dist/ if present (built by `npm run build`).
 [ -d "$SDK_DIR/js/dist" ] && cp -r "$SDK_DIR/js/dist" "$DIST_DIR/js_staging/" || true
 cp "$SDK_DIR/js/README.md" "$DIST_DIR/js_staging/" 2>/dev/null || true
+cp -r "$SDK_DIR/schemas" "$DIST_DIR/js_staging/"
 tar -C "$DIST_DIR" -czf "$DIST_DIR/amp_js_sdk.tar.gz" js_staging
 rm -rf "$DIST_DIR/js_staging"
 

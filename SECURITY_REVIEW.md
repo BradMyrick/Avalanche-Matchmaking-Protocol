@@ -70,14 +70,24 @@ fails loudly if any SDK diverges.
 
 ## Open work
 
-The following items remain and are tracked in the issue list:
+The Developer Beta closes the original open-work list. Status as of the Beta:
 
-1. C++ SDK: wire `libkj-tls` for TLS, expose async API (callbacks),
-   implement `submit_outcome` signature.
-2. C++ SDK: Unreal Engine plugin descriptor + Blueprint wrappers.
-3. JS SDK: build a real TypeScript implementation (currently a stub).
-4. All SDKs: implement `subscribeToEvents`/`MatchListener`.
+1. C++ SDK: TLS via `libkj-tls` (guarded by `__has_include`), async coroutine
+   API (guarded by `AMP_USE_COROUTINES`), and `submit_outcome` callback
+   signing — **DONE**.
+2. C++ SDK: Unreal Engine plugin descriptor + Blueprint wrappers — **DONE**
+   (`amp-sdk/cpp/unreal/`).
+3. JS SDK: native TypeScript/Node.js implementation via **napi-rs** wrapping
+   the Rust SDK — **DONE** (full RPC: connect, auth, match, submitOutcome,
+   events). Was a stub; now feature-complete.
+4. All SDKs: `subscribeToEvents` / `MatchListener` — **DONE** in Rust, Go,
+   C++, C#, Python, and JS.
 5. All SDKs: add comprehensive tests (only Go has any today).
+
+   * Go has Glicko-2 + EIP-712 KAT tests; Rust has the digest KAT + a
+     disconnect-cleanup test; JS has the cross-language digest KAT +
+     native-digest tests; Python has the digest KAT + helper tests.
+     C++ and C# still lack unit tests (tracked).
 6. Server: per-IP rate limit on the relayer (added per-IP cap in this pass;
    PROXY-protocol support still open).
 

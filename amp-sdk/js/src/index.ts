@@ -1,45 +1,38 @@
 /**
- * AMP client SDK for Node.js.
+ * AMP client SDK for Node.js (native, via napi-rs).
  *
- * Transport: TCP via Node's `net.Socket`. Browsers cannot open raw TCP
- * sockets; a WebSocket transport will be added when the AMP server exposes
- * one (see issue tracker). For browser use today, front the AMP server with
- * a TLS-terminating WebSocket bridge.
+ * This module wraps the native Rust SDK binding (`amp-native`) with the
+ * canonical EIP-191 challenge signing and EIP-712 outcome signing (via
+ * ethers). The Cap'n Proto RPC, LocalSet event loop, and all wire framing
+ * run inside the native module on a dedicated worker thread.
  *
- * Threading: all methods are async; the event loop handles concurrency.
- * A single AmpClient is NOT safe to share across concurrent requests —
- * create one per active session.
+ * Crypto (challenge + outcome signing) is done in JS with ethers so games can
+ * substitute their own wallet / signer. The native module handles transport.
  */
 
-import * as net from "net";
-import * as tls from "tls";
 import { ethers } from "ethers";
-import {
-  computeOutcomeEip712Digest,
-  type Eip712DomainParams,
-} from "./eip712.js";
+import * as native from "../native/amp-native.js";
 
-export { computeOutcomeEip712Digest, type Eip712DomainParams };
+export { computeOutcomeEip712Digest } from "../native/amp-native.js";
+export type { MatchEventPayload } from "../native/amp-native.js";
 
-/**
- * Configuration for an AmpClient.
- */
+/** EIP-712 domain parameters for outcome signing. */
+export interface Eip712DomainParams {
+  /** Chain id (e.g. 43113 for Fuji). */
+  chainId: number;
+  /** 20-byte AMPSettlement address (hex or 20 bytes). */
+  verifyingContract: string | Uint8Array;
+}
+
+/** Configuration for an AmpClient. */
 export interface AmpClientOptions {
   /** host:port of the AMP matchmaker. */
   address: string;
-  /** When true, use TLS (Node tls.connect). Implies SNI = host. */
-  tls?: boolean;
-  /** Optional TLS options (CA, cert, etc.). */
-  tlsOptions?: tls.ConnectionOptions;
-  /** Connect timeout in ms (default: 10_000). */
-  connectTimeoutMs?: number;
-  /** EIP-712 domain parameters for outcome signing. */
+  /** EIP-712 domain for outcome signing. Required before `submitOutcome`. */
   domain?: Eip712DomainParams;
 }
 
-/**
- * Custom error classes for AMP failures.
- */
+/** Custom error classes. */
 export class AmpError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
     super(message);
@@ -49,7 +42,6 @@ export class AmpError extends Error {
 export class AmpConnectionError extends AmpError {}
 export class AmpAuthError extends AmpError {}
 export class AmpMatchError extends AmpError {}
-export class AmpTimeoutError extends AmpError {}
 
 /** Result of requestMatch. */
 export interface MatchAssignment {
@@ -57,151 +49,191 @@ export interface MatchAssignment {
   quality: number;
 }
 
+/** A settled match event delivered to `subscribeToEvents`. */
+export interface MatchSettledEvent {
+  victor: number;
+  scores: number[];
+}
+
+/** Listener handles for `subscribeToEvents`. */
+export interface MatchEventListeners {
+  onSettled?: (event: MatchSettledEvent) => void;
+  onOpponentDisconnected?: () => void;
+}
+
+function toAddressBytes(v: string | Uint8Array): Uint8Array {
+  if (typeof v === "string") {
+    return ethers.getBytes(v);
+  }
+  return v;
+}
+
+/** Convert any byte-like value to a Node Buffer (the native binding's type). */
+function toBuf(v: Uint8Array): Buffer {
+  return Buffer.isBuffer(v) ? v : Buffer.from(v);
+}
+
 /**
- * AMP client. Cap'n Proto RPC over TCP.
- *
- * NOTE: This SDK currently implements connect + EIP-712 outcome digest
- * helpers. Full Cap'n Proto RPC framing is in development; for now,
- * downstream tools use this module for digest computation and wallet
- * integration while the wire layer matures.
+ * AMP client. Native Cap'n Proto RPC over TCP (or TLS), driven on a worker
+ * thread. One AmpClient per active session.
  */
 export class AmpClient {
-  private socket: net.Socket | tls.TLSSocket | null = null;
+  private readonly native: native.AmpClient;
   private readonly options: AmpClientOptions;
-  private connected = false;
-  /** @internal */ playerAddress: string | null = null;
-  private custodialSigner: ethers.Wallet | null = null;
+  private wallet: ethers.Wallet | null = null;
+  private eventLoop: Promise<void> | null = null;
 
   constructor(options: AmpClientOptions) {
     if (!options.address || !options.address.includes(":")) {
-      throw new Error(`options.address must be host:port, got ${options.address}`);
+      throw new AmpError(`options.address must be host:port, got ${options.address}`);
     }
     this.options = options;
+    this.native = new native.AmpClient();
   }
 
-  /**
-   * Open the TCP/TLS connection to the AMP server.
-   * Resolves once the socket is established (does NOT include any RPC
-   * handshake — that happens lazily on the first RPC).
-   */
+  /** Open the transport to the AMP server. */
   async connect(): Promise<void> {
-    if (this.connected) return;
-    const [host, portStr] = splitHostPort(this.options.address);
-    const port = Number.parseInt(portStr, 10);
-    const timeoutMs = this.options.connectTimeoutMs ?? 10_000;
-
-    return new Promise<void>((resolve, reject) => {
-      const socket = this.options.tls
-        ? tls.connect({ host, port, ...(this.options.tlsOptions ?? {}) })
-        : net.connect({ host, port });
-      const timer = setTimeout(() => {
-        socket.destroy();
-        reject(new AmpTimeoutError(`connect to ${this.options.address} timed out`));
-      }, timeoutMs);
-      socket.once("connect", () => {
-        clearTimeout(timer);
-        this.socket = socket;
-        this.connected = true;
-        // Disable Nagle for low-latency RPC.
-        socket.setNoDelay(true);
-        resolve();
-      });
-      socket.once("error", (err) => {
-        clearTimeout(timer);
-        reject(new AmpConnectionError(`connect failed: ${err.message}`, err));
-      });
-    });
+    try {
+      await this.native.connect(this.options.address);
+    } catch (e) {
+      throw new AmpConnectionError(`connect failed: ${(e as Error).message}`, e);
+    }
   }
 
-  /** Close the underlying transport. Idempotent. */
+  /** Close the transport and release the worker. Idempotent. */
   async close(): Promise<void> {
-    if (!this.connected || !this.socket) return;
-    await new Promise<void>((resolve) => {
-      this.socket!.once("close", () => resolve());
-      this.socket!.end();
-    });
-    this.socket = null;
-    this.connected = false;
-    this.playerAddress = null;
-    this.custodialSigner = null;
+    this.eventLoop = null;
+    await this.native.close();
+    this.wallet = null;
   }
 
   /**
    * Authenticate via the EIP-191 challenge/response flow.
    * Either `privateKeyHex` (custodial) or `signCallback` (wallet) is required.
-   * The SDK never generates a silent ephemeral identity.
    */
   async authenticate(
-    _gameId: bigint,
+    gameId: number,
     privateKeyHex?: string,
     signCallback?: (challenge: Uint8Array) => Promise<Uint8Array>,
   ): Promise<void> {
-    // The full Cap'n Proto RPC framing for requestChallenge/login is in
-    // development. This stub validates inputs and stores the signer so it
-    // can be used by submitOutcome once the RPC layer is wired.
     if (!privateKeyHex && !signCallback) {
       throw new AmpAuthError(
-        "authenticate requires either privateKeyHex (custodial) or signCallback (wallet). " +
-          "AMP no longer generates silent ephemeral identities — see SECURITY_REVIEW.md S2.",
+        "authenticate requires either privateKeyHex (custodial) or signCallback (wallet).",
       );
     }
     if (privateKeyHex) {
-      this.custodialSigner = new ethers.Wallet(privateKeyHex);
-      this.playerAddress = await this.custodialSigner.getAddress();
-    } else if (signCallback) {
-      // Address recovery happens server-side; caller-supplied signers must
-      // populate playerAddress via setCustodialAddress if they want outcome
-      // signing via this client.
-      this.playerAddress = null;
+      this.wallet = new ethers.Wallet(privateKeyHex);
     }
-    throw new AmpError(
-      "authenticate() RPC framing is not yet implemented in the JS SDK; " +
-        "use the Go or Python SDK for full client functionality. The JS SDK " +
-        "currently supports connect() and computeOutcomeEip712Digest() / " +
-        "signOutcome() helpers.",
-    );
+    const { bytes: challenge, expiresAtNs } = await this.native.requestChallenge(gameId);
+    if (expiresAtNs > 0 && expiresAtNs <= Date.now() * 1_000_000) {
+      throw new AmpAuthError("challenge expired before signing");
+    }
+    const sigHex = privateKeyHex
+      ? await this.wallet!.signMessage(challenge)
+      : ethers.hexlify(await signCallback!(challenge));
+    const sigBytes = ethers.getBytes(sigHex);
+    if (sigBytes.length !== 65) {
+      throw new AmpAuthError(`signature must be 65 bytes, got ${sigBytes.length}`);
+    }
+    try {
+      await this.native.login(gameId, toBuf(sigBytes), challenge);
+    } catch (e) {
+      throw new AmpAuthError(`login failed: ${(e as Error).message}`, e);
+    }
+  }
+
+  /** Enter the matchmaking queue. Resolves when paired. */
+  async requestMatch(gameId: string): Promise<MatchAssignment> {
+    try {
+      const r = await this.native.requestMatch(gameId);
+      return { matchId: r.matchId, quality: r.quality };
+    } catch (e) {
+      throw new AmpMatchError(`requestMatch failed: ${(e as Error).message}`, e);
+    }
+  }
+
+  /** Reconnect to an existing active match. */
+  async reconnect(matchId: string): Promise<void> {
+    try {
+      await this.native.reconnect(matchId);
+    } catch (e) {
+      throw new AmpMatchError(`reconnect failed: ${(e as Error).message}`, e);
+    }
   }
 
   /**
-   * Sign the EIP-712 outcome digest with the custodial wallet.
-   * Requires `privateKeyHex` was passed to authenticate().
+   * Submit the final outcome. Computes the EIP-712 submitter signature over
+   * (matchId, outcome, transcriptHash) with the custodial wallet and sends it.
    */
-  async signOutcome(
+  async submitOutcome(
     matchId: string,
     outcome: number,
     transcriptHash: Uint8Array,
   ): Promise<Uint8Array> {
-    if (!this.custodialSigner) {
-      throw new AmpAuthError(
-        "Outcome signing requires a custodial wallet (privateKeyHex at authenticate)",
-      );
+    if (!this.wallet) {
+      throw new AmpAuthError("submitOutcome requires a custodial wallet (privateKeyHex at authenticate)");
     }
-    const digest = computeOutcomeEip712Digest(
+    if (!(transcriptHash instanceof Uint8Array) || transcriptHash.length !== 32) {
+      throw new AmpError("transcriptHash must be a 32-byte Uint8Array");
+    }
+    if (!this.options.domain) {
+      throw new AmpError("options.domain (chainId + verifyingContract) is required for outcome signing");
+    }
+    const verifyingContract = toAddressBytes(this.options.domain.verifyingContract);
+    if (verifyingContract.length !== 20) {
+      throw new AmpError("domain.verifyingContract must be 20 bytes");
+    }
+    const digest = native.computeOutcomeEip712Digest(
       matchId,
       outcome,
-      transcriptHash,
-      this.options.domain,
+      toBuf(transcriptHash),
+      this.options.domain.chainId,
+      toBuf(verifyingContract),
     );
-    // signHash signs a pre-computed digest (no EIP-191 re-prefix — EIP-712's
-    // 0x1901 prefix is already in the digest).
-    const sig = this.custodialSigner.signingKey.sign(digest);
-    // ethers produces { r, s, v } with v in {0, 1}; ethers expects 27/28 for
-    // wire-format compatibility. Use Signature.ser to get the canonical
-    // 65-byte form with v already in 27/28 convention.
-    return ethers.getBytes(ethers.Signature.from(sig).serialized);
+    const sig = this.wallet.signingKey.sign(digest);
+    const sigBytes = ethers.getBytes(ethers.Signature.from(sig).serialized);
+    try {
+      return await this.native.submitOutcome(matchId, outcome, toBuf(transcriptHash), toBuf(sigBytes));
+    } catch (e) {
+      throw new AmpMatchError(`submitOutcome failed: ${(e as Error).message}`, e);
+    }
+  }
+
+  /** Fire-and-forget game event. */
+  async emitGameEvent(eventType: string): Promise<void> {
+    await this.native.emitGameEvent(eventType);
+  }
+
+  /** Fire-and-forget telemetry event. */
+  async emitTelemetry(eventType: number): Promise<void> {
+    await this.native.emitTelemetry(eventType);
+  }
+
+  /**
+   * Subscribe to server-pushed match events. Runs an internal poll loop on the
+   * JS side (the native module exposes a poll-based event API). The returned
+   * promise resolves when the event stream ends (match settled or channel
+   * closed); call after a match is active.
+   */
+  async subscribeToEvents(listeners: MatchEventListeners): Promise<void> {
+    await this.native.startEvents();
+    this.eventLoop = (async () => {
+      for (;;) {
+        const evt = await this.native.pollEvent(1000);
+        if (evt === null) continue;
+        if (evt.kind === "settled") {
+          listeners.onSettled?.({ victor: evt.victor, scores: evt.scores });
+          return;
+        }
+        if (evt.kind === "opponent_disconnected") {
+          listeners.onOpponentDisconnected?.();
+        }
+      }
+    })();
+    await this.eventLoop;
   }
 }
 
-function splitHostPort(addr: string): [string, string] {
-  // Handle bracketed IPv6: [::1]:50051
-  if (addr.startsWith("[")) {
-    const end = addr.indexOf("]");
-    if (end < 0 || end + 1 >= addr.length || addr[end + 1] !== ":") {
-      throw new Error(`malformed IPv6 address: ${addr}`);
-    }
-    return [addr.slice(1, end), addr.slice(end + 2)];
-  }
-  const colon = addr.lastIndexOf(":");
-  if (colon < 0) return [addr, "50051"];
-  return [addr.slice(0, colon), addr.slice(colon + 1)];
-}
+// Re-export the raw native client for advanced users who want the poll-based
+// event API without the ethers/crypto wrapper.
+export { AmpClient as NativeAmpClient } from "../native/amp-native.js";

@@ -22,6 +22,9 @@ sled = "0.34"
 dashmap = "6.0"
 amp-tls = { path = "../amp-tls" }
 sha2 = "0.10"
+# Observability (release Phase 7): Prometheus /metrics endpoint.
+metrics = "0.23"
+metrics-exporter-prometheus = { version = "0.15", default-features = false, features = ["http-listener"] }
 
 [build-dependencies]
 capnpc = "0.19"

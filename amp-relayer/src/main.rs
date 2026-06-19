@@ -324,6 +324,24 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     dotenv::dotenv().ok();
 
+    // Install the Prometheus metrics exporter (release Phase 7). Exposes
+    // /metrics on RELAYER_METRICS_ADDR (default 127.0.0.1:9101). Disable by
+    // setting RELAYER_METRICS_ADDR=disabled.
+    let metrics_addr =
+        std::env::var("RELAYER_METRICS_ADDR").unwrap_or_else(|_| "127.0.0.1:9101".to_string());
+    if metrics_addr != "disabled" {
+        let parsed: std::net::SocketAddr = metrics_addr
+            .parse()
+            .unwrap_or_else(|_| "127.0.0.1:9101".parse().expect("fallback metrics addr"));
+        match metrics_exporter_prometheus::PrometheusBuilder::new()
+            .with_http_listener(parsed)
+            .install()
+        {
+            Ok(()) => info!("Prometheus /metrics exposed on {}", parsed),
+            Err(e) => tracing::warn!("Failed to install Prometheus exporter: {}", e),
+        }
+    }
+
     let args: Vec<String> = env::args().collect();
     if args.len() >= 3 {
         return run_cli_mode(args).await;

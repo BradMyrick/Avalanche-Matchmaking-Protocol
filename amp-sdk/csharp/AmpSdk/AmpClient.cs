@@ -31,6 +31,9 @@ public class AmpClient : IDisposable {
     private IGameSessionService _sessionService;
     private IUserSession _userSession;
     private IMatchSession _matchSession;
+    // Keep-alive for any active match-event listener so it isn't GC'd while
+    // the server holds the (weak) callback capability reference.
+    private IMatchListener _activeListener;
 
     /// <summary>
     /// The Ethereum address (20 bytes) recovered from the authenticated signer.
@@ -381,6 +384,53 @@ public class AmpClient : IDisposable {
     };
 
     /// <summary>
+    /// Subscribe to server-pushed match events. The server invokes
+    /// <paramref name="onMatchSettled"/> when the match settles and
+    /// <paramref name="onOpponentDisconnected"/> when an opponent drops
+    /// (release Phase 2.3 server hook). Callbacks fire on the RPC dispatch
+    /// thread — keep them short.
+    /// </summary>
+    public async Task SubscribeToEventsAsync(
+        Action<Outcome> onMatchSettled = null,
+        Action onOpponentDisconnected = null,
+        CancellationToken cancellationToken = default) {
+        if (!HasMatchSession) throw new InvalidOperationException("No match session.");
+        // Capnp.Net.Runtime's serializer auto-wraps a bare IMatchListener impl
+        // into a Skeleton via CapabilityReflection.CreateSkeleton when the
+        // capability field is written (LinkObject). We retain the impl on the
+        // client so it outlives the SubscribeToEvents RPC.
+        var listener = new MatchListenerImpl(onMatchSettled, onOpponentDisconnected);
+        _activeListener = listener;
+        await _matchSession.SubscribeToEvents(listener, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Local <see cref="IMatchListener"/> implementation that forwards
+    /// server-pushed callbacks onto user-supplied delegates.
+    /// </summary>
+    private sealed class MatchListenerImpl : IMatchListener {
+        private readonly Action<Outcome> _onSettled;
+        private readonly Action _onDisconnected;
+
+        public MatchListenerImpl(Action<Outcome> onSettled, Action onDisconnected) {
+            _onSettled = onSettled;
+            _onDisconnected = onDisconnected;
+        }
+
+        public Task OnMatchSettled(Outcome outcome, CancellationToken cancellationToken_ = default) {
+            _onSettled?.Invoke(outcome);
+            return Task.CompletedTask;
+        }
+
+        public Task OnOpponentDisconnected(CancellationToken cancellationToken_ = default) {
+            _onDisconnected?.Invoke();
+            return Task.CompletedTask;
+        }
+
+        public void Dispose() { }
+    }
+
+    /// <summary>
     /// Releases all RPC resources.
     /// </summary>
     public void Dispose() {
@@ -391,6 +441,7 @@ public class AmpClient : IDisposable {
     /// <summary>Releases unmanaged RPC resources and zeros the in-memory key.</summary>
     protected virtual void Dispose(bool disposing) {
         if (!disposing) return;
+        _activeListener = null;
         _matchSession?.Dispose();
         _userSession?.Dispose();
         _sessionService?.Dispose();

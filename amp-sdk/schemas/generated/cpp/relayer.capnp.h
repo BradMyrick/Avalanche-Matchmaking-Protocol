@@ -30,6 +30,9 @@ CAPNP_DECLARE_SCHEMA(c344a2b6a3339ab6);
 CAPNP_DECLARE_SCHEMA(d34678a07ecb91c0);
 CAPNP_DECLARE_SCHEMA(abe5c49dc1e547fd);
 CAPNP_DECLARE_SCHEMA(f03b24998d73879a);
+CAPNP_DECLARE_SCHEMA(e3dfb62f1e0e597a);
+CAPNP_DECLARE_SCHEMA(ab2e110fff9c4e5f);
+CAPNP_DECLARE_SCHEMA(e14f3e5d9fb37052);
 
 }  // namespace schemas
 }  // namespace capnp
@@ -51,6 +54,8 @@ struct RelayerService {
   struct SubmitOutcomeResults;
   struct AuthenticateParams;
   struct AuthenticateResults;
+  struct GetSettlementStatusParams;
+  struct GetSettlementStatusResults;
 
   #if !CAPNP_LITE
   struct _capnpPrivate {
@@ -180,6 +185,51 @@ struct RelayerService::AuthenticateResults {
   };
 };
 
+struct RelayerService::GetSettlementStatusParams {
+  GetSettlementStatusParams() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(e3dfb62f1e0e597a, 0, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct RelayerService::GetSettlementStatusResults {
+  GetSettlementStatusResults() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(ab2e110fff9c4e5f, 0, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct SettlementStatusInfo {
+  SettlementStatusInfo() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(e14f3e5d9fb37052, 2, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
 // =======================================================================================
 
 #if !CAPNP_LITE
@@ -208,6 +258,8 @@ public:
   ::capnp::Request< ::RelayerService::SubmitOutcomeParams,  ::RelayerService::SubmitOutcomeResults> submitOutcomeRequest(
       ::kj::Maybe< ::capnp::MessageSize> sizeHint = nullptr);
   ::capnp::Request< ::RelayerService::AuthenticateParams,  ::RelayerService::AuthenticateResults> authenticateRequest(
+      ::kj::Maybe< ::capnp::MessageSize> sizeHint = nullptr);
+  ::capnp::Request< ::RelayerService::GetSettlementStatusParams,  ::RelayerService::GetSettlementStatusResults> getSettlementStatusRequest(
       ::kj::Maybe< ::capnp::MessageSize> sizeHint = nullptr);
 
 protected:
@@ -241,6 +293,10 @@ protected:
   typedef  ::RelayerService::AuthenticateResults AuthenticateResults;
   typedef ::capnp::CallContext<AuthenticateParams, AuthenticateResults> AuthenticateContext;
   virtual ::kj::Promise<void> authenticate(AuthenticateContext context);
+  typedef  ::RelayerService::GetSettlementStatusParams GetSettlementStatusParams;
+  typedef  ::RelayerService::GetSettlementStatusResults GetSettlementStatusResults;
+  typedef ::capnp::CallContext<GetSettlementStatusParams, GetSettlementStatusResults> GetSettlementStatusContext;
+  virtual ::kj::Promise<void> getSettlementStatus(GetSettlementStatusContext context);
 
   inline  ::RelayerService::Client thisCap() {
     return ::capnp::Capability::Server::thisCap()
@@ -911,6 +967,265 @@ private:
 };
 #endif  // !CAPNP_LITE
 
+class RelayerService::GetSettlementStatusParams::Reader {
+public:
+  typedef GetSettlementStatusParams Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasMatchId() const;
+  inline  ::capnp::Data::Reader getMatchId() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class RelayerService::GetSettlementStatusParams::Builder {
+public:
+  typedef GetSettlementStatusParams Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasMatchId();
+  inline  ::capnp::Data::Builder getMatchId();
+  inline void setMatchId( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initMatchId(unsigned int size);
+  inline void adoptMatchId(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownMatchId();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class RelayerService::GetSettlementStatusParams::Pipeline {
+public:
+  typedef GetSettlementStatusParams Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class RelayerService::GetSettlementStatusResults::Reader {
+public:
+  typedef GetSettlementStatusResults Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasInfo() const;
+  inline  ::SettlementStatusInfo::Reader getInfo() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class RelayerService::GetSettlementStatusResults::Builder {
+public:
+  typedef GetSettlementStatusResults Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasInfo();
+  inline  ::SettlementStatusInfo::Builder getInfo();
+  inline void setInfo( ::SettlementStatusInfo::Reader value);
+  inline  ::SettlementStatusInfo::Builder initInfo();
+  inline void adoptInfo(::capnp::Orphan< ::SettlementStatusInfo>&& value);
+  inline ::capnp::Orphan< ::SettlementStatusInfo> disownInfo();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class RelayerService::GetSettlementStatusResults::Pipeline {
+public:
+  typedef GetSettlementStatusResults Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+  inline  ::SettlementStatusInfo::Pipeline getInfo();
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class SettlementStatusInfo::Reader {
+public:
+  typedef SettlementStatusInfo Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint8_t getStatus() const;
+
+  inline bool hasTxHash() const;
+  inline  ::capnp::Data::Reader getTxHash() const;
+
+  inline  ::uint32_t getRetryCount() const;
+
+  inline  ::uint64_t getUpdatedAtMs() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class SettlementStatusInfo::Builder {
+public:
+  typedef SettlementStatusInfo Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint8_t getStatus();
+  inline void setStatus( ::uint8_t value);
+
+  inline bool hasTxHash();
+  inline  ::capnp::Data::Builder getTxHash();
+  inline void setTxHash( ::capnp::Data::Reader value);
+  inline  ::capnp::Data::Builder initTxHash(unsigned int size);
+  inline void adoptTxHash(::capnp::Orphan< ::capnp::Data>&& value);
+  inline ::capnp::Orphan< ::capnp::Data> disownTxHash();
+
+  inline  ::uint32_t getRetryCount();
+  inline void setRetryCount( ::uint32_t value);
+
+  inline  ::uint64_t getUpdatedAtMs();
+  inline void setUpdatedAtMs( ::uint64_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class SettlementStatusInfo::Pipeline {
+public:
+  typedef SettlementStatusInfo Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
 // =======================================================================================
 
 #if !CAPNP_LITE
@@ -1229,6 +1544,155 @@ inline bool RelayerService::AuthenticateResults::Builder::getOk() {
 inline void RelayerService::AuthenticateResults::Builder::setOk(bool value) {
   _builder.setDataField<bool>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool RelayerService::GetSettlementStatusParams::Reader::hasMatchId() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool RelayerService::GetSettlementStatusParams::Builder::hasMatchId() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader RelayerService::GetSettlementStatusParams::Reader::getMatchId() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder RelayerService::GetSettlementStatusParams::Builder::getMatchId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void RelayerService::GetSettlementStatusParams::Builder::setMatchId( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder RelayerService::GetSettlementStatusParams::Builder::initMatchId(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void RelayerService::GetSettlementStatusParams::Builder::adoptMatchId(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> RelayerService::GetSettlementStatusParams::Builder::disownMatchId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool RelayerService::GetSettlementStatusResults::Reader::hasInfo() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool RelayerService::GetSettlementStatusResults::Builder::hasInfo() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::SettlementStatusInfo::Reader RelayerService::GetSettlementStatusResults::Reader::getInfo() const {
+  return ::capnp::_::PointerHelpers< ::SettlementStatusInfo>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::SettlementStatusInfo::Builder RelayerService::GetSettlementStatusResults::Builder::getInfo() {
+  return ::capnp::_::PointerHelpers< ::SettlementStatusInfo>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::SettlementStatusInfo::Pipeline RelayerService::GetSettlementStatusResults::Pipeline::getInfo() {
+  return  ::SettlementStatusInfo::Pipeline(_typeless.getPointerField(0));
+}
+#endif  // !CAPNP_LITE
+inline void RelayerService::GetSettlementStatusResults::Builder::setInfo( ::SettlementStatusInfo::Reader value) {
+  ::capnp::_::PointerHelpers< ::SettlementStatusInfo>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::SettlementStatusInfo::Builder RelayerService::GetSettlementStatusResults::Builder::initInfo() {
+  return ::capnp::_::PointerHelpers< ::SettlementStatusInfo>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void RelayerService::GetSettlementStatusResults::Builder::adoptInfo(
+    ::capnp::Orphan< ::SettlementStatusInfo>&& value) {
+  ::capnp::_::PointerHelpers< ::SettlementStatusInfo>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::SettlementStatusInfo> RelayerService::GetSettlementStatusResults::Builder::disownInfo() {
+  return ::capnp::_::PointerHelpers< ::SettlementStatusInfo>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint8_t SettlementStatusInfo::Reader::getStatus() const {
+  return _reader.getDataField< ::uint8_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint8_t SettlementStatusInfo::Builder::getStatus() {
+  return _builder.getDataField< ::uint8_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void SettlementStatusInfo::Builder::setStatus( ::uint8_t value) {
+  _builder.setDataField< ::uint8_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool SettlementStatusInfo::Reader::hasTxHash() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool SettlementStatusInfo::Builder::hasTxHash() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Data::Reader SettlementStatusInfo::Reader::getTxHash() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Data::Builder SettlementStatusInfo::Builder::getTxHash() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void SettlementStatusInfo::Builder::setTxHash( ::capnp::Data::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Data::Builder SettlementStatusInfo::Builder::initTxHash(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void SettlementStatusInfo::Builder::adoptTxHash(
+    ::capnp::Orphan< ::capnp::Data>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Data>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Data> SettlementStatusInfo::Builder::disownTxHash() {
+  return ::capnp::_::PointerHelpers< ::capnp::Data>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint32_t SettlementStatusInfo::Reader::getRetryCount() const {
+  return _reader.getDataField< ::uint32_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint32_t SettlementStatusInfo::Builder::getRetryCount() {
+  return _builder.getDataField< ::uint32_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void SettlementStatusInfo::Builder::setRetryCount( ::uint32_t value) {
+  _builder.setDataField< ::uint32_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t SettlementStatusInfo::Reader::getUpdatedAtMs() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t SettlementStatusInfo::Builder::getUpdatedAtMs() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void SettlementStatusInfo::Builder::setUpdatedAtMs( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
 }
 
 
