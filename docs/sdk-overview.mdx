@@ -31,17 +31,17 @@ All SDKs use an EIP-191 challenge/response authentication flow:
 3. **Login**: Client calls `login(gameId, signature, challengePayload)` — passing back the ORIGINAL challenge bytes so the server can locate its outstanding nonce.
 4. **Session**: Server recovers the signer's Ethereum address, uses it as the player identity, and returns a `UserSession` capability.
 
-<Callout type="warning">
+<Warning>
 The `requestChallenge` RPC must be called before `login()`. Challenges are single-use and expire after 5 minutes. SDKs validate `expiresAt` client-side before signing to avoid burning a one-time nonce on a stale attempt.
-</Callout>
+</Warning>
 
-<Callout type="info">
+<Info>
 SDKs that accept a `privateKeyHex` (custodial mode) will automatically use the
 same wallet to sign match outcomes later. Wallet-integrated SDKs accept a
 `signCallback` for auth and a separate `signDigestCallback` / `signOutcome`
 for outcome signing. **No SDK silently generates an ephemeral identity** — see
 the [Security Review](/security-review) S2.
-</Callout>
+</Info>
 
 ---
 
@@ -72,13 +72,13 @@ let outcome = amp_sdk::OutcomeSubmission {
 let verifier_sig = assigned.session.submit_outcome(outcome).await?;
 ```
 
-<Callout type="warning">
+<Warning>
 The server rejects submissions where:
 - `signature.len() != 65`
 - `transcriptHash.len() != 32`
 - `outcome < 1` or `outcome > 4` (victor index, NOT `OutcomeType`)
 - The recovered address does not match the caller's `player_id`
-</Callout>
+</Warning>
 
 ---
 

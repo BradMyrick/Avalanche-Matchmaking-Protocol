@@ -41,13 +41,13 @@ await ampClient.ConnectAsync();
 var connected = await ampClient.AuthenticateAsync(gameId, privateKeyHex: playerKeyHex);
 ```
 
-<Callout type="warning">
+<Warning>
 The `requestChallenge` step is **required**. The server will reject `login` calls without a valid signed challenge. Challenges are single-use and expire after 5 minutes.
 
 No SDK silently generates an ephemeral identity — you must supply either a
 `privateKeyHex` (custodial) or a `signCallback` (wallet-integrated). See
 [Security Review](/security-review) S2.
-</Callout>
+</Warning>
 
 ### 3. Request a Match
 When a player wants to find a match:
@@ -73,10 +73,10 @@ At the end of the match:
 4. The `amp-relayer` submits the verifier attestation to `AMPSettlement` on-chain.
 5. Funds are released from escrow to the winner.
 
-<Callout type="warning">
+<Warning>
 The server rejects submissions where the signature is not exactly 65 bytes,
 the transcript hash is not exactly 32 bytes, or `outcome` is outside 1..=4.
-</Callout>
+</Warning>
 
 ---
 
