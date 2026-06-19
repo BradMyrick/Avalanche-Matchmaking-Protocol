@@ -13,12 +13,37 @@ use super::gas::GasManager;
 use super::nonce::NonceManager;
 
 const CF_PENDING: &str = "pending_settlements";
-const CF_DEAD_LETTER: &str = "dead_letter";
+/// Terminal outcomes (Confirmed / Reverted / TimedOut / DeadLettered) are
+/// retained here so `getSettlementStatus` can report them after the entry
+/// leaves the pending tree. Keyed by match_id.
+const CF_RESULTS: &str = "settlement_results";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SettlementStatus {
-    Queued,
-    InFlight,
+    Queued = 1,
+    InFlight = 2,
+    Confirmed = 3,
+    Reverted = 4,
+    TimedOut = 5,
+    DeadLettered = 6,
+}
+
+impl SettlementStatus {
+    /// Wire code returned by `getSettlementStatus`. `Unknown` (0) is only used
+    /// by the RPC layer when no record is found in any tree.
+    pub fn wire_code(self) -> u8 {
+        self as u8
+    }
+    #[allow(dead_code)]
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            SettlementStatus::Confirmed
+                | SettlementStatus::Reverted
+                | SettlementStatus::TimedOut
+                | SettlementStatus::DeadLettered
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +61,14 @@ pub struct PendingSettlement {
     pub last_max_fee: Option<String>,
     #[serde(default)]
     pub last_priority_fee: Option<String>,
+    /// Broadcast tx hash (hex-encoded with 0x prefix) once known. Empty until
+    /// the submit call returns a pending tx. Reported back to the server via
+    /// `getSettlementStatus`.
+    #[serde(default)]
+    pub tx_hash: String,
+    /// Wall-clock millis of the last status transition. Used to TTL results.
+    #[serde(default)]
+    pub updated_at_ms: u64,
 }
 
 fn default_status() -> SettlementStatus {
@@ -95,7 +128,7 @@ impl SettlementQueue {
                 .as_millis() as u64;
 
             if let Some(last) = settlement.last_attempt_at_ms {
-                let delay = self.base_retry_delay_ms * 2u64.pow(settlement.retry_count.min(4));
+                let delay = self.delay_with_jitter(settlement.retry_count);
                 if now.saturating_sub(last) < delay {
                     continue;
                 }
@@ -115,8 +148,13 @@ impl SettlementQueue {
         Ok(())
     }
 
-    pub fn dead_letter(&self, settlement: PendingSettlement) -> Result<(), RelayerError> {
-        let cf = self.db.open_tree(CF_DEAD_LETTER)?;
+    pub fn dead_letter(&self, mut settlement: PendingSettlement) -> Result<(), RelayerError> {
+        let now = now_ms();
+        settlement.status = SettlementStatus::DeadLettered;
+        settlement.updated_at_ms = now;
+        // Terminal outcomes are retained in CF_RESULTS so the server can
+        // reconcile via getSettlementStatus (release Phase 2.1).
+        let cf = self.db.open_tree(CF_RESULTS)?;
         let key = settlement.match_id.clone();
         let value = bincode::serialize(&settlement)?;
         cf.insert(&key, &value as &[u8])?;
@@ -126,6 +164,47 @@ impl SettlementQueue {
             settlement.retry_count
         );
         Ok(())
+    }
+
+    /// Exponential backoff with up to ±25% jitter to prevent thundering-herd
+    /// retries when many settlements fail simultaneously (release Phase 2.8).
+    /// Caps the exponent at 4 (16×) regardless of retry_count.
+    fn delay_with_jitter(&self, retry_count: u32) -> u64 {
+        let base = self
+            .base_retry_delay_ms
+            .saturating_mul(2u64.pow(retry_count.min(4)));
+        if base == 0 {
+            return 0;
+        }
+        // Time-derived jitter in [0, base/4]: avoids a new dependency while
+        // still decorrelating concurrent retries.
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos() as u64)
+            .unwrap_or(0);
+        let jitter = now_ns % (base / 4).saturating_add(1);
+        base.saturating_add(jitter)
+    }
+
+    /// Look up the current status of a settlement. Returns:
+    /// - `Some((status, tx_hash, retry_count, updated_at))` if a record exists
+    ///   in either the pending or results tree.
+    /// - `None` if the match is unknown (RPC reports status code 0).
+    pub fn get_status(
+        &self,
+        match_id: &[u8],
+    ) -> Result<Option<(SettlementStatus, String, u32, u64)>, RelayerError> {
+        if let Ok(Some(bytes)) = self.db.open_tree(CF_PENDING)?.get(match_id)
+            && let Ok(s) = bincode::deserialize::<PendingSettlement>(&bytes)
+        {
+            return Ok(Some((s.status, s.tx_hash, s.retry_count, s.updated_at_ms)));
+        }
+        if let Ok(Some(bytes)) = self.db.open_tree(CF_RESULTS)?.get(match_id)
+            && let Ok(s) = bincode::deserialize::<PendingSettlement>(&bytes)
+        {
+            return Ok(Some((s.status, s.tx_hash, s.retry_count, s.updated_at_ms)));
+        }
+        Ok(None)
     }
 
     pub async fn process_next(
@@ -298,8 +377,25 @@ impl SettlementQueue {
         let db_clone = self.db.clone();
         let match_id_clone = s.match_id.clone();
         let match_id_parsed_clone = match_id;
+        let max_retries = self.max_retries;
 
         let tx_hash = pending.tx_hash();
+        let tx_hash_str = format!("{:?}", tx_hash);
+
+        // Record the broadcast tx hash so getSettlementStatus can report it
+        // while the entry is InFlight (release Phase 2.1).
+        {
+            if let Ok(cf) = db_clone.open_tree(CF_PENDING)
+                && let Ok(Some(bytes)) = cf.get(&match_id_clone)
+                && let Ok(mut inflight) = bincode::deserialize::<PendingSettlement>(&bytes)
+            {
+                inflight.tx_hash = tx_hash_str.clone();
+                inflight.updated_at_ms = now_ms();
+                if let Ok(updated) = bincode::serialize(&inflight) {
+                    let _ = cf.insert(&match_id_clone, &updated as &[u8]);
+                }
+            }
+        }
 
         tokio::spawn(async move {
             let mut attempts = 0;
@@ -311,28 +407,29 @@ impl SettlementQueue {
                                 "Settlement for match {} successfully mined",
                                 match_id_parsed_clone
                             );
-                            #[allow(clippy::collapsible_if)]
-                            if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
-                                let _ = cf.remove(&match_id_clone);
+                            if let Err(e) =
+                                handle_confirmed(&db_clone, &match_id_clone, &tx_hash_str)
+                            {
+                                warn!(
+                                    "Failed to record confirmed settlement for match {}: {:?}",
+                                    match_id_parsed_clone, e
+                                );
                             }
                         } else {
                             warn!(
                                 "Settlement tx {} for match {} reverted on-chain",
                                 tx_hash, match_id_parsed_clone
                             );
-                            #[allow(clippy::collapsible_if)]
-                            if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
-                                if let Ok(Some(bytes)) = cf.get(&match_id_clone) {
-                                    if let Ok(mut pending_s) =
-                                        bincode::deserialize::<PendingSettlement>(&bytes)
-                                    {
-                                        pending_s.status = SettlementStatus::Queued;
-                                        pending_s.retry_count += 1;
-                                        if let Ok(updated) = bincode::serialize(&pending_s) {
-                                            let _ = cf.insert(&match_id_clone, &updated as &[u8]);
-                                        }
-                                    }
-                                }
+                            if let Err(e) = handle_failure(
+                                &db_clone,
+                                max_retries,
+                                &match_id_clone,
+                                SettlementStatus::Reverted,
+                            ) {
+                                warn!(
+                                    "Failed to handle reverted settlement for match {}: {:?}",
+                                    match_id_parsed_clone, e
+                                );
                             }
                         }
                         break;
@@ -345,19 +442,16 @@ impl SettlementQueue {
                                 "Settlement tx {} for match {} timed out waiting for receipt",
                                 tx_hash, match_id_parsed_clone
                             );
-                            #[allow(clippy::collapsible_if)]
-                            if let Ok(cf) = db_clone.open_tree(CF_PENDING) {
-                                if let Ok(Some(bytes)) = cf.get(&match_id_clone) {
-                                    if let Ok(mut pending_s) =
-                                        bincode::deserialize::<PendingSettlement>(&bytes)
-                                    {
-                                        pending_s.status = SettlementStatus::Queued;
-                                        pending_s.retry_count += 1;
-                                        if let Ok(updated) = bincode::serialize(&pending_s) {
-                                            let _ = cf.insert(&match_id_clone, &updated as &[u8]);
-                                        }
-                                    }
-                                }
+                            if let Err(e) = handle_failure(
+                                &db_clone,
+                                max_retries,
+                                &match_id_clone,
+                                SettlementStatus::TimedOut,
+                            ) {
+                                warn!(
+                                    "Failed to handle timed-out settlement for match {}: {:?}",
+                                    match_id_parsed_clone, e
+                                );
                             }
                             break;
                         }
@@ -404,4 +498,90 @@ impl SettlementQueue {
         }
         Ok(count)
     }
+}
+
+// ─── module-level helpers (usable from spawned tasks without &self) ──────
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Write a terminal outcome to CF_RESULTS (keyed by match_id) so the server
+/// can reconcile via getSettlementStatus.
+fn record_result_db(db: &Db, settlement: &PendingSettlement) -> Result<(), RelayerError> {
+    let cf = db.open_tree(CF_RESULTS)?;
+    let value = bincode::serialize(settlement)?;
+    cf.insert(&settlement.match_id, &value as &[u8])?;
+    Ok(())
+}
+
+/// Mark a settlement as Confirmed: record the terminal status (with tx hash)
+/// and remove the entry from the pending tree.
+fn handle_confirmed(db: &Db, match_id: &[u8], tx_hash: &str) -> Result<(), RelayerError> {
+    let cf = db.open_tree(CF_PENDING)?;
+    if let Ok(Some(bytes)) = cf.get(match_id)
+        && let Ok(mut s) = bincode::deserialize::<PendingSettlement>(&bytes)
+    {
+        s.status = SettlementStatus::Confirmed;
+        s.tx_hash = tx_hash.to_string();
+        s.updated_at_ms = now_ms();
+        record_result_db(db, &s)?;
+    }
+    cf.remove(match_id)?;
+    Ok(())
+}
+
+/// Receipt-time failure (revert or timeout): re-queue, or dead-letter once
+/// `max_retries` is exceeded. Unlike the pre-fix behavior — which re-queued
+/// forever and never surfaced the failure to the server (release Phase 2.8) —
+/// this records a terminal `DeadLettered` result so the server reconciliation
+/// loop can flag the desync.
+fn handle_failure(
+    db: &Db,
+    max_retries: u32,
+    match_id: &[u8],
+    failure: SettlementStatus,
+) -> Result<(), RelayerError> {
+    let cf = db.open_tree(CF_PENDING)?;
+    let Some(bytes) = cf.get(match_id)? else {
+        // Entry already gone (e.g. finalized); nothing to re-queue.
+        return Ok(());
+    };
+    let mut s = bincode::deserialize::<PendingSettlement>(&bytes)?;
+    let now = now_ms();
+    s.retry_count = s.retry_count.saturating_add(1);
+    s.last_attempt_at_ms = Some(now);
+    s.updated_at_ms = now;
+
+    let label = match failure {
+        SettlementStatus::Reverted => "reverted on-chain",
+        SettlementStatus::TimedOut => "timed out",
+        _ => "failed",
+    };
+
+    if s.retry_count >= max_retries {
+        s.status = SettlementStatus::DeadLettered;
+        warn!(
+            "Settlement for match {:?} {} for the last time after {} attempts; dead-lettering",
+            hex::encode(&s.match_id),
+            label,
+            s.retry_count
+        );
+        record_result_db(db, &s)?;
+        cf.remove(&s.match_id)?;
+    } else {
+        s.status = SettlementStatus::Queued;
+        warn!(
+            "Settlement for match {:?} {} (attempt {}); re-queueing",
+            hex::encode(&s.match_id),
+            label,
+            s.retry_count
+        );
+        let updated = bincode::serialize(&s)?;
+        cf.insert(&s.match_id, &updated as &[u8])?;
+    }
+    Ok(())
 }

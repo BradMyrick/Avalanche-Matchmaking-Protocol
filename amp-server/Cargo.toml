@@ -27,6 +27,9 @@ amp-tls = { path = "../amp-tls" }
 arc-swap = "1.6.0"
 socket2 = { version = "0.5", features = ["all"] }
 num_cpus = "1.16"
+# Observability (release Phase 7): Prometheus /metrics endpoint.
+metrics = "0.23"
+metrics-exporter-prometheus = { version = "0.15", default-features = false, features = ["http-listener"] }
 
 [build-dependencies]
 capnpc = "0.19"

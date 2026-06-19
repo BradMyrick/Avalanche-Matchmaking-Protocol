@@ -290,6 +290,63 @@ func (c *AMPClient) EmitGameEvent(ctx context.Context, matchSession *MatchSessio
 	return nil
 }
 
+// MatchEventListener receives server-pushed match events. Implementations must
+// be safe to call from the capnp dispatch goroutine.
+type MatchEventListener interface {
+	OnMatchSettled(victor uint8, scores []uint64)
+	OnOpponentDisconnected()
+}
+
+// matchListenerAdapter adapts the capnp-generated MatchListener_Server
+// interface onto a user-supplied MatchEventListener.
+type matchListenerAdapter struct {
+	listener MatchEventListener
+}
+
+func (a *matchListenerAdapter) OnMatchSettled(ctx context.Context, p generated.MatchListener_onMatchSettled) error {
+	outcome, err := p.Args().Outcome()
+	if err == nil {
+		scores := []uint64{}
+		if s, err := outcome.Scores(); err == nil {
+			for s.Len() > len(scores) && len(scores) < s.Len() {
+				scores = append(scores, s.At(len(scores)))
+			}
+		}
+		if a.listener != nil {
+			a.listener.OnMatchSettled(outcome.Victor(), scores)
+		}
+	}
+	return nil
+}
+
+func (a *matchListenerAdapter) OnOpponentDisconnected(ctx context.Context, p generated.MatchListener_onOpponentDisconnected) error {
+	if a.listener != nil {
+		a.listener.OnOpponentDisconnected()
+	}
+	return nil
+}
+
+// SubscribeToEvents registers a MatchEventListener with the server for the
+// given match session. The server pushes onMatchSettled / onOpponentDisconnected
+// (release Phase 2.3) until the match ends or the session is closed.
+func (c *AMPClient) SubscribeToEvents(ctx context.Context, matchSession *MatchSession, listener MatchEventListener) error {
+	if matchSession == nil || !matchSession.Session.IsValid() {
+		return fmt.Errorf("matchSession is nil or invalid")
+	}
+	adapter := &matchListenerAdapter{listener: listener}
+	cap := generated.MatchListener_ServerToClient(adapter)
+
+	future, release := matchSession.Session.SubscribeToEvents(ctx, func(p generated.MatchSession_subscribeToEvents_Params) error {
+		return p.SetSubscriber(cap)
+	})
+	defer release()
+
+	if _, err := future.Struct(); err != nil {
+		return fmt.Errorf("subscribeToEvents failed: %w", err)
+	}
+	return nil
+}
+
 // Close releases all capabilities and the underlying transport. Idempotent —
 // subsequent calls return ErrClosed. Safe for concurrent use with in-flight
 // RPCs (the rpc layer drains on close).

@@ -36,8 +36,18 @@ target/
 *.pdb
 
 # ---- Foundry / Solidity ----
-# Keep lib/ submodules; ignore build artifacts
-contracts/out/
+# Keep lib/ submodules; ignore build artifacts.
+# The two ABI JSONs below ARE committed because amp-relayer and
+# amp-integration-tests `abigen!`/`include_str!` them at compile time
+# (see Phase 0.1 of the release plan). Re-run `forge build` and recommit
+# them whenever contracts/src/*.sol changes.
+contracts/out/**
+!contracts/out/AMPRegistry.sol/
+contracts/out/AMPRegistry.sol/*
+!contracts/out/AMPRegistry.sol/AMPRegistry.json
+!contracts/out/AMPSettlement.sol/
+contracts/out/AMPSettlement.sol/*
+!contracts/out/AMPSettlement.sol/AMPSettlement.json
 contracts/cache/
 contracts/broadcast/
 contracts/lib/

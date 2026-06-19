@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 mod auth;
@@ -169,7 +169,29 @@ pub mod security_capnp {
 
 use service_capnp::*;
 
-type MatchQueue = tokio::sync::mpsc::Sender<QueueEntry>;
+/// Commands sent to the matchmaker loop's queue. `RemovePlayer` lets the
+/// disconnect-detection path dequeue a player who dropped while waiting
+/// (release Phase 2.3); previously a disconnected queued player's entry
+/// lingered until matched (and then silently failed to notify).
+enum QueueCmd {
+    Enqueue(QueueEntry),
+    RemovePlayer(String),
+}
+
+type MatchQueue = tokio::sync::mpsc::Sender<QueueCmd>;
+
+/// Grace period workers get to finish in-flight RPCs (e.g. a `submit_outcome`
+/// that already has the verifier signature but still needs to enqueue the
+/// `RelayerTask`) after the shutdown signal arrives. Without this the process
+/// exited 500ms after cancel, abandoning settlements mid-flight (release
+/// Phase 2.2). Override via `AMP_SHUTDOWN_GRACE_MS`.
+fn shutdown_grace() -> Duration {
+    let ms = std::env::var("AMP_SHUTDOWN_GRACE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(5_000);
+    Duration::from_millis(ms.max(100))
+}
 
 mod rate_limit {
     use std::collections::HashMap;
@@ -257,7 +279,7 @@ fn load_secret(env_var: &str, file_env_var: &str) -> Result<String> {
 
 async fn start_matchmaker_loop(
     state: AppState,
-    mut rx: tokio::sync::mpsc::Receiver<QueueEntry>,
+    mut rx: tokio::sync::mpsc::Receiver<QueueCmd>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
     tokio::spawn(async move {
@@ -281,9 +303,20 @@ async fn start_matchmaker_loop(
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {}
             }
 
-            while let Ok(entry) = rx.try_recv() {
-                q.push(entry);
+            while let Ok(cmd) = rx.try_recv() {
+                match cmd {
+                    QueueCmd::Enqueue(entry) => {
+                        q.push(entry);
+                    }
+                    QueueCmd::RemovePlayer(pid) => {
+                        if q.remove_player(&pid) {
+                            info!("Removed disconnected player {} from match queue", pid);
+                        }
+                    }
+                }
             }
+            metrics::gauge!("amp_queue_depth").set(q.len() as f64);
+            metrics::gauge!("amp_active_matches").set(active_matches_cache.load().len() as f64);
 
             let rulesets_snapshot = rulesets_cache.load();
             let mut active_count = active_matches_cache.load().len();
@@ -306,6 +339,22 @@ async fn start_matchmaker_loop(
                         Some(m) => m,
                         None => break,
                     };
+
+                    // Ghost-match guard (release Phase 2.3 / audit §2a): if
+                    // either participant dropped their `request_match` future
+                    // before we could notify them, abandon the pairing rather
+                    // than persisting a one-sided active match that would
+                    // occupy an MAX_ACTIVE_MATCHES slot and pollute reconnect
+                    // lookups. Dropping both senders unblocks the still-live
+                    // receiver as Err so that player re-queues.
+                    if m.entry_a.sender.is_closed() || m.entry_b.sender.is_closed() {
+                        info!(
+                            "Skipping ghost pairing [{}] vs [{}]: a participant disconnected \
+                             while queued",
+                            m.entry_a.player_id, m.entry_b.player_id
+                        );
+                        continue;
+                    }
 
                     let match_id = Uuid::new_v4().to_string();
                     info!(
@@ -351,10 +400,13 @@ async fn start_matchmaker_loop(
                         settled: false,
                         settled_at_ms: None,
                         expires_at_ms: Some(now + state::MATCH_TTL_MS),
+                        settlement_failed: false,
+                        settlement_tx_hash: String::new(),
                     };
                     state.insert_active_match(match_id, active.clone());
                     state.persist_match(&active.match_id, &active).await;
                     active_count += 1;
+                    metrics::counter!("amp_matches_created_total").increment(1);
                 }
             }
         }
@@ -544,6 +596,7 @@ pub struct RelayerTask {
 
 async fn start_relayer_worker(
     mut rx: tokio::sync::mpsc::Receiver<RelayerTask>,
+    state: state::AppState,
     cancel: tokio_util::sync::CancellationToken,
 ) {
     let relayer_rpc_addr =
@@ -591,81 +644,278 @@ async fn start_relayer_worker(
 
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => return,
+            _ = cancel.cancelled() => {
+                // Drain phase (release Phase 2.2): server workers may still be
+                // finishing in-flight `submit_outcome` calls during their
+                // shutdown grace and will enqueue RelayerTasks after we've
+                // received the cancel signal. Keep processing the queue,
+                // bounded by the grace deadline, so those settlements actually
+                // reach the relayer instead of being dropped.
+                let deadline = tokio::time::Instant::now() + shutdown_grace();
+                info!(
+                    "Relayer worker draining pending settlement tasks until {:?}",
+                    deadline
+                );
+                loop {
+                    match tokio::time::timeout_at(deadline, rx.recv()).await {
+                        Ok(Some(task)) => {
+                            process_relayer_task(
+                                &mut client_opt,
+                                task,
+                                &relayer_rpc_addr,
+                                &api_key,
+                                &state,
+                            )
+                            .await;
+                        }
+                        _ => {
+                            info!("Relayer worker drain complete");
+                            return;
+                        }
+                    }
+                }
+            }
             task_opt = rx.recv() => {
                 let task = match task_opt {
                     Some(t) => t,
                     None => return,
                 };
-
-                let mut retries = 0;
-                loop {
-                    if client_opt.is_none() {
-                        if let Ok(stream) = tokio::net::TcpStream::connect(&relayer_rpc_addr).await {
-                            let (reader, writer) = stream.into_split();
-                            let network = twoparty::VatNetwork::new(
-                                reader.compat(),
-                                writer.compat_write(),
-                                rpc_twoparty_capnp::Side::Client,
-                                Default::default(),
-                            );
-                            let mut rpc_system = RpcSystem::new(Box::new(network), None);
-                            let c: relayer_capnp::relayer_service::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-                            tokio::task::spawn_local(rpc_system);
-
-                            if !api_key.is_empty() {
-                                let mut auth_req = c.authenticate_request();
-                                auth_req.get().set_api_key(api_key.as_bytes());
-                                if let Ok(auth_resp) = auth_req.send().promise.await {
-                                    if auth_resp.get().map(|r| r.get_ok()).unwrap_or(false) {
-                                        client_opt = Some(c);
-                                    } else {
-                                        error!("relayer authentication failed: invalid API key for match {}", task.match_id);
-                                        break; // Fatal error, drop task
-                                    }
-                                } else {
-                                    // Network error on auth
-                                }
-                            } else {
-                                client_opt = Some(c);
-                            }
-                        } else {
-                            tokio::time::sleep(Duration::from_millis(500 * 2u64.pow(retries.min(3)))).await;
-                            retries += 1;
-                            if retries > 5 {
-                                error!("Failed to connect to relayer for {}", task.match_id);
-                                break; // drop task
-                            }
-                            continue;
-                        }
-                    }
-
-                    if let Some(client) = &client_opt {
-                        let mut req = client.submit_outcome_request();
-
-                        let match_id_val = if let Ok(val) = U256::from_dec_str(&task.match_id) {
-                            let mut b = [0u8; 32];
-                            val.to_big_endian(&mut b);
-                            b.to_vec()
-                        } else {
-                            let hash = ethers_core::utils::keccak256(task.match_id.as_bytes());
-                            hash.to_vec()
-                        };
-
-                        req.get().set_match_id(&match_id_val);
-                        req.get().set_outcome(task.outcome);
-                        req.get().set_transcript_hash(&task.transcript_hash);
-                        req.get().set_signature(&task.signature);
-
-                        if req.send().promise.await.is_err() {
-                            client_opt = None; // Reconnect
-                        } else {
-                            info!("Notified relayer for match {}", task.match_id);
-                            break;
-                        }
-                    }
-                }
+                process_relayer_task(
+                    &mut client_opt,
+                    task,
+                    &relayer_rpc_addr,
+                    &api_key,
+                    &state,
+                )
+                .await;
             }
+        }
+    }
+}
+
+/// Process one settlement task: connect/auth to the relayer (with backoff),
+/// submit the outcome, and on success spawn a reconciliation poll. Extracted
+/// from `start_relayer_worker` so the shutdown drain path can reuse it
+/// (release Phase 2.1 / 2.6).
+async fn process_relayer_task(
+    client_opt: &mut Option<relayer_capnp::relayer_service::Client>,
+    task: RelayerTask,
+    relayer_rpc_addr: &str,
+    api_key: &str,
+    state: &state::AppState,
+) {
+    let mut retries = 0;
+    loop {
+        if client_opt.is_none() {
+            if let Ok(stream) = tokio::net::TcpStream::connect(relayer_rpc_addr).await {
+                let (reader, writer) = stream.into_split();
+                let network = twoparty::VatNetwork::new(
+                    reader.compat(),
+                    writer.compat_write(),
+                    rpc_twoparty_capnp::Side::Client,
+                    Default::default(),
+                );
+                let mut rpc_system = RpcSystem::new(Box::new(network), None);
+                let c: relayer_capnp::relayer_service::Client =
+                    rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+                tokio::task::spawn_local(rpc_system);
+
+                if !api_key.is_empty() {
+                    let mut auth_req = c.authenticate_request();
+                    auth_req.get().set_api_key(api_key.as_bytes());
+                    if let Ok(auth_resp) = auth_req.send().promise.await {
+                        if auth_resp.get().map(|r| r.get_ok()).unwrap_or(false) {
+                            *client_opt = Some(c);
+                            retries = 0; // connection healthy again
+                        } else {
+                            error!(
+                                "relayer authentication failed: invalid API key for match {}",
+                                task.match_id
+                            );
+                            break; // Fatal error, drop task
+                        }
+                    } else {
+                        // Network error on the auth RPC. Previously this fell
+                        // through and reconnected in a tight loop (CPU spin)
+                        // — release Phase 2.6.
+                        tokio::time::sleep(Duration::from_millis(500 * 2u64.pow(retries.min(3))))
+                            .await;
+                        retries += 1;
+                        if retries > 5 {
+                            error!(
+                                "Failed to authenticate to relayer for {}: repeated auth RPC errors",
+                                task.match_id
+                            );
+                            break; // drop task
+                        }
+                        continue;
+                    }
+                } else {
+                    *client_opt = Some(c);
+                    retries = 0;
+                }
+            } else {
+                tokio::time::sleep(Duration::from_millis(500 * 2u64.pow(retries.min(3)))).await;
+                retries += 1;
+                if retries > 5 {
+                    error!("Failed to connect to relayer for {}", task.match_id);
+                    break; // drop task
+                }
+                continue;
+            }
+        }
+
+        if let Some(client) = client_opt.as_ref() {
+            let mut req = client.submit_outcome_request();
+
+            let match_id_val = if let Ok(val) = U256::from_dec_str(&task.match_id) {
+                let mut b = [0u8; 32];
+                val.to_big_endian(&mut b);
+                b.to_vec()
+            } else {
+                let hash = ethers_core::utils::keccak256(task.match_id.as_bytes());
+                hash.to_vec()
+            };
+
+            req.get().set_match_id(&match_id_val);
+            req.get().set_outcome(task.outcome);
+            req.get().set_transcript_hash(&task.transcript_hash);
+            req.get().set_signature(&task.signature);
+
+            if req.send().promise.await.is_err() {
+                *client_opt = None; // Reconnect
+                // Back off before reconnecting so a relayer that is
+                // TCP-reachable but erroring doesn't CPU-spin this task
+                // forever (release Phase 2.6).
+                tokio::time::sleep(Duration::from_millis(500 * 2u64.pow(retries.min(3)))).await;
+                retries += 1;
+                if retries > 5 {
+                    error!(
+                        "Failed to submit outcome to relayer for {} after {} retries",
+                        task.match_id, retries
+                    );
+                    break; // drop task
+                }
+            } else {
+                info!("Notified relayer for match {}", task.match_id);
+
+                // Spawn a reconciliation poll: the server has already marked
+                // the match settled + returned the verifier signature, but the
+                // relayer may still fail to land the tx on-chain (revert,
+                // timeout, dead-letter). Previously this was fire-and-forget
+                // and the desync was invisible — release Phase 2.1.
+                let poll_client = client.clone();
+                let poll_match_id = task.match_id.clone();
+                let poll_match_id_bytes = match_id_val.clone();
+                let poll_state = state.clone();
+                tokio::task::spawn_local(async move {
+                    reconcile_settlement(
+                        poll_client,
+                        poll_match_id,
+                        poll_match_id_bytes,
+                        poll_state,
+                    )
+                    .await;
+                });
+                break;
+            }
+        }
+    }
+}
+
+/// Polls the relayer's `getSettlementStatus` for a match that the server has
+/// already marked settled, until it reaches a terminal on-chain outcome.
+///
+/// On `Confirmed`: records the tx hash (best-effort) and exits.
+/// On `Reverted`/`TimedOut`/`DeadLettered`: flips `ActiveMatch::settlement_failed`
+/// so the desync is observable instead of silent (release Phase 2.1).
+async fn reconcile_settlement(
+    client: relayer_capnp::relayer_service::Client,
+    match_id: String,
+    match_id_bytes: Vec<u8>,
+    state: state::AppState,
+) {
+    // Status codes from relayer.capnp::getSettlementStatus.
+    const CONFIRMED: u8 = 3;
+    const REVERTED: u8 = 4;
+    const TIMED_OUT: u8 = 5;
+    const DEAD_LETTERED: u8 = 6;
+
+    // ~3 minutes max reconciliation window at 10s spacing. Generous enough for
+    // the relayer's own ~2-min receipt poll plus retry.
+    const POLL_INTERVAL: Duration = Duration::from_secs(10);
+    const MAX_POLL_ATTEMPTS: u32 = 18;
+
+    let mut attempts = 0u32;
+    loop {
+        tokio::time::sleep(POLL_INTERVAL).await;
+        attempts += 1;
+
+        let mut req = client.get_settlement_status_request();
+        req.get().set_match_id(&match_id_bytes);
+
+        // Copy the primitive values out of the borrowed capnp reader so they
+        // outlive the response.
+        let (status, tx_hash_bytes): (u8, Vec<u8>) = match req.send().promise.await {
+            Ok(r) => match r.get() {
+                Ok(g) => match g.get_info() {
+                    Ok(info) => (
+                        info.get_status(),
+                        info.get_tx_hash().unwrap_or(&[]).to_vec(),
+                    ),
+                    Err(_) => (0, Vec::new()),
+                },
+                Err(_) => (0, Vec::new()),
+            },
+            Err(e) => {
+                warn!(
+                    "settlement status poll failed for match {}: {}",
+                    match_id, e
+                );
+                if attempts >= MAX_POLL_ATTEMPTS {
+                    return;
+                }
+                continue;
+            }
+        };
+
+        // Best-effort: surface the tx hash as soon as the relayer knows it.
+        if !tx_hash_bytes.is_empty()
+            && let Ok(s) = std::str::from_utf8(&tx_hash_bytes)
+        {
+            state.record_settlement_tx_hash(&match_id, s).await;
+        }
+
+        match status {
+            CONFIRMED => {
+                info!(
+                    "Settlement confirmed on-chain for match {} after {} poll(s)",
+                    match_id, attempts
+                );
+                return;
+            }
+            REVERTED | TIMED_OUT | DEAD_LETTERED => {
+                error!(
+                    "Settlement for match {} failed on-chain (relayer status {}); \
+                     flagging settlement_failed — server/chain state is desynced",
+                    match_id, status
+                );
+                metrics::counter!("amp_settlement_desync_total").increment(1);
+                state.mark_settlement_failed(&match_id).await;
+                return;
+            }
+            _ => {
+                // 0 unknown / 1 queued / 2 inFlight — keep polling.
+            }
+        }
+
+        if attempts >= MAX_POLL_ATTEMPTS {
+            warn!(
+                "Settlement reconciliation for match {} timed out without a terminal status \
+                 (last status {}); giving up",
+                match_id, status
+            );
+            return;
         }
     }
 }
@@ -855,11 +1105,12 @@ impl match_session::Server for MatchSessionImpl {
             };
 
             // 2. Sign the outcome with the verifier key. Runs only once per
-            //    match because the settled-check above is the gate.
+            // match because the settled-check above is the gate.
             let sig = sign_match_outcome(signing_config, &m_id, outcome_val, &r_hash)
                 .await
                 .map_err(|e| ::capnp::Error::failed(format!("Signer error: {}", e)))?;
             results.get().set_signature(&sig);
+            metrics::counter!("amp_matches_settled_total").increment(1);
 
             // 3. Now update MMR (after settlement is persisted).
             if p_ids.len() >= 2 {
@@ -935,7 +1186,7 @@ impl match_session::Server for MatchSessionImpl {
             )));
         }
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<state::MatchSettledEvent>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<state::MatchEvent>();
         state.add_event_sender(&match_id, tx);
 
         info!(
@@ -947,27 +1198,46 @@ impl match_session::Server for MatchSessionImpl {
 
         tokio::task::spawn_local(async move {
             while let Some(event) = rx.recv().await {
-                let mut req = subscriber.on_match_settled_request();
-                {
-                    let mut outcome = req.get().init_outcome();
-                    outcome.set_victor(event.victor);
-                    match match_capnp::OutcomeType::try_from(event.outcome_type) {
-                        Ok(t) => outcome.set_type(t),
-                        Err(_) => outcome.set_type(match_capnp::OutcomeType::Unknown),
-                    }
-                    {
-                        let mut scores = outcome.init_scores(event.scores.len() as u32);
-                        for (i, s) in event.scores.iter().enumerate() {
-                            scores.set(i as u32, *s);
+                match event {
+                    state::MatchEvent::Settled(settled) => {
+                        let mut req = subscriber.on_match_settled_request();
+                        {
+                            let mut outcome = req.get().init_outcome();
+                            outcome.set_victor(settled.victor);
+                            match match_capnp::OutcomeType::try_from(settled.outcome_type) {
+                                Ok(t) => outcome.set_type(t),
+                                Err(_) => outcome.set_type(match_capnp::OutcomeType::Unknown),
+                            }
+                            {
+                                let mut scores = outcome.init_scores(settled.scores.len() as u32);
+                                for (i, s) in settled.scores.iter().enumerate() {
+                                    scores.set(i as u32, *s);
+                                }
+                            }
+                        }
+                        if let Err(e) = req.send().promise.await {
+                            warn!(
+                                "Failed to deliver onMatchSettled to subscriber for match {}: {}",
+                                match_id, e
+                            );
+                            break;
                         }
                     }
-                }
-                if let Err(e) = req.send().promise.await {
-                    warn!(
-                        "Failed to deliver onMatchSettled to subscriber for match {}: {}",
-                        match_id, e
-                    );
-                    break;
+                    state::MatchEvent::OpponentDisconnected { player_id } => {
+                        debug!(
+                            "Notifying subscriber for match {} that opponent {} disconnected",
+                            match_id, player_id
+                        );
+                        let req = subscriber.on_opponent_disconnected_request();
+                        if let Err(e) = req.send().promise.await {
+                            warn!(
+                                "Failed to deliver onOpponentDisconnected to subscriber for \
+                                 match {}: {}",
+                                match_id, e
+                            );
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -1069,7 +1339,7 @@ impl user_session::Server for UserSessionImpl {
 
             let (tx, rx) = oneshot::channel();
             if queue
-                .try_send(QueueEntry {
+                .try_send(QueueCmd::Enqueue(QueueEntry {
                     player_id: p_id.clone(),
                     game_id: game_id.to_string(),
                     ruleset_id: ruleset_id.clone(),
@@ -1081,7 +1351,7 @@ impl user_session::Server for UserSessionImpl {
                     max_ping_ms: max_ping,
                     enqueued_at_ms: now_ms(),
                     sender: tx,
-                })
+                }))
                 .is_err()
             {
                 return Err(::capnp::Error::failed(
@@ -1181,6 +1451,10 @@ struct GameSessionServiceImpl {
     signing_config: Arc<SigningConfig>,
     telemetry_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     relayer_tx: tokio::sync::mpsc::Sender<RelayerTask>,
+    /// Set on successful `login` so the connection's serving loop can run
+    /// disconnect cleanup (dequeue, mark offline, notify opponents) once the
+    /// TCP connection drops (release Phase 2.3).
+    logged_in_player: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl game_session_service::Server for GameSessionServiceImpl {
@@ -1223,6 +1497,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
         let signing_config = self.signing_config.clone();
         let telemetry_tx = self.telemetry_tx.clone();
         let relayer_tx = self.relayer_tx.clone();
+        let logged_in = self.logged_in_player.clone();
 
         Promise::from_future(async move {
             match auth
@@ -1242,6 +1517,12 @@ impl game_session_service::Server for GameSessionServiceImpl {
                         state.persist_player(&player_id, &profile_clone).await;
                     }
 
+                    // Record the authenticated player so this connection's
+                    // serving loop can clean up when the socket drops.
+                    if let Ok(mut g) = logged_in.lock() {
+                        *g = Some(player_id.clone());
+                    }
+
                     info!("Authenticated player {} for game {}", player_id, game_id);
                     let session = capnp_rpc::new_client(UserSessionImpl {
                         player_id,
@@ -1258,6 +1539,7 @@ impl game_session_service::Server for GameSessionServiceImpl {
                 }
                 Err(e) => {
                     warn!("Authentication failed for game {}: {}", game_id, e);
+                    metrics::counter!("amp_auth_failures_total").increment(1);
                     Err(::capnp::Error::failed(format!(
                         "Authentication failed: {}",
                         e
@@ -1271,6 +1553,24 @@ impl game_session_service::Server for GameSessionServiceImpl {
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     dotenv::dotenv().ok();
+
+    // Install the Prometheus metrics exporter (release Phase 7). Exposes
+    // /metrics on AMP_METRICS_ADDR (default 127.0.0.1:9100). Disable by
+    // setting AMP_METRICS_ADDR=disabled.
+    let metrics_addr =
+        std::env::var("AMP_METRICS_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".to_string());
+    if metrics_addr != "disabled" {
+        let parsed: std::net::SocketAddr = metrics_addr
+            .parse()
+            .unwrap_or_else(|_| "127.0.0.1:9100".parse().expect("fallback metrics addr"));
+        match metrics_exporter_prometheus::PrometheusBuilder::new()
+            .with_http_listener(parsed)
+            .install()
+        {
+            Ok(()) => info!("Prometheus /metrics exposed on {}", parsed),
+            Err(e) => warn!("Failed to install Prometheus exporter: {}", e),
+        }
+    }
 
     let addr: SocketAddr = env::var("AMP_ADDR")
         .unwrap_or_else(|_| "0.0.0.0:50051".to_string())
@@ -1308,7 +1608,8 @@ fn main() -> Result<()> {
 
     let signing_config = Arc::new(SigningConfig {
         wallet: load_secret("VERIFIER_KEY", "VERIFIER_KEY_FILE")?.parse()?,
-        chain_id: env::var("AMP_CHAIN_ID")
+        chain_id: env::var("AMP_EIP712_CHAIN_ID")
+            .or_else(|_| env::var("AMP_CHAIN_ID"))
             .unwrap_or_else(|_| "43113".to_string())
             .parse()?,
         settlement_addr: env::var("AMP_SETTLEMENT_ADDRESS")?.parse()?,
@@ -1394,6 +1695,7 @@ fn main() -> Result<()> {
 
     // Spawn relayer worker on its own dedicated thread with its own LocalSet
     let relayer_cancel = cancel.clone();
+    let relayer_state = ctx.state.clone();
     std::thread::Builder::new()
         .name("amp-relayer-client".to_string())
         .spawn(move || {
@@ -1403,7 +1705,7 @@ fn main() -> Result<()> {
                 .unwrap();
             let local = tokio::task::LocalSet::new();
             rt.block_on(local.run_until(async {
-                start_relayer_worker(relayer_rx, relayer_cancel).await;
+                start_relayer_worker(relayer_rx, relayer_state, relayer_cancel).await;
             }));
         })?;
 
@@ -1451,7 +1753,7 @@ fn main() -> Result<()> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    rt.block_on(async {
+    rt.block_on(async move {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
             _ = wait_sigterm() => {}
@@ -1463,7 +1765,28 @@ fn main() -> Result<()> {
         let active = matches.iter().filter(|(_, m)| !m.settled).count();
         info!("Active unsettled matches: {}", active);
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // Give workers (and the relayer/telemetry client threads) the full
+        // grace window to drain in-flight RPCs and flush queued settlement /
+        // telemetry tasks before we tear the process down (release Phase 2.2).
+        let grace = shutdown_grace();
+        info!("Waiting {:?} for workers to drain in-flight RPCs...", grace);
+        tokio::time::sleep(grace).await;
+
+        // Best-effort join: observe panicked workers and warn about any that
+        // are still alive (don't block shutdown on a hung thread).
+        for (i, h) in worker_handles.into_iter().enumerate() {
+            if h.is_finished() {
+                if let Err(p) = h.join() {
+                    error!("Worker {} panicked during shutdown: {:?}", i, p);
+                }
+            } else {
+                warn!(
+                    "Worker {} still alive after grace period; forcing process exit",
+                    i
+                );
+            }
+        }
+
         info!("Shutdown complete.");
     });
 
@@ -1520,6 +1843,19 @@ async fn run_worker(
                 }
                 _ = accept_loop(listener, ctx, tls_acceptor, rate_limiter) => {}
             }
+            // Drain window: keep the LocalSet alive so in-flight serve_rpc
+            // tasks (spawned by accept_loop) can finish — notably any
+            // submit_outcome that already returned a verifier signature but
+            // still needs to enqueue the RelayerTask. Dropping the LocalSet
+            // immediately would abandon those settlements mid-flight
+            // (release Phase 2.2).
+            let grace = shutdown_grace();
+            info!(
+                "Worker {} draining in-flight RPCs for {:?}",
+                worker_id, grace
+            );
+            tokio::time::sleep(grace).await;
+            info!("Worker {} drain complete", worker_id);
             Ok::<(), anyhow::Error>(())
         })
         .await?;
@@ -1605,6 +1941,17 @@ where
         rpc_twoparty_capnp::Side::Server,
         Default::default(),
     );
+
+    // Clone the pieces needed for disconnect cleanup before moving the rest
+    // into the session capability. On TCP/RPC termination we dequeue the
+    // player, mark them offline, and notify any active match's subscribers
+    // that an opponent disconnected (release Phase 2.3). Previously the
+    // server had no disconnect observation at all, leaving ghost matches and
+    // stale `is_online` flags.
+    let logged_in_player = Arc::new(std::sync::Mutex::new(None::<String>));
+    let cleanup_state = ctx.state.clone();
+    let cleanup_queue = ctx.match_queue.clone();
+
     let service: game_session_service::Client = capnp_rpc::new_client(GameSessionServiceImpl {
         state: ctx.state,
         player_service: ctx.player_service,
@@ -1613,10 +1960,55 @@ where
         signing_config: ctx.signing_config,
         telemetry_tx: ctx.telemetry_tx,
         relayer_tx: ctx.relayer_tx,
+        logged_in_player: logged_in_player.clone(),
     });
     let rpc_system = RpcSystem::new(Box::new(network), Some(service.client));
     if let Err(e) = rpc_system.await {
-        error!("RPC error: {}", e);
+        debug!("RPC connection ended: {}", e);
+    }
+
+    // Connection is gone — run disconnect cleanup for whoever logged in on it.
+    let player_id = logged_in_player.lock().map(|g| g.clone()).ok().flatten();
+    if let Some(pid) = player_id {
+        cleanup_on_disconnect(&pid, cleanup_state, cleanup_queue).await;
+    }
+}
+
+/// Disconnect cleanup (release Phase 2.3):
+/// 1. Dequeue the player so they can't be matched into a ghost game.
+/// 2. Flip `is_online = false` and persist.
+/// 3. For every unsettled active match the player was part of, notify the
+///    other participants' subscribers via `onOpponentDisconnected`.
+async fn cleanup_on_disconnect(player_id: &str, state: AppState, queue: MatchQueue) {
+    info!("Player {} disconnected; running cleanup", player_id);
+    metrics::counter!("amp_player_disconnects_total").increment(1);
+
+    // (1) Best-effort dequeue. The matchmaker loop applies this on its next
+    //     50ms tick. Ignore send errors (server shutting down).
+    let _ = queue.try_send(QueueCmd::RemovePlayer(player_id.to_string()));
+
+    // (2) Mark offline + persist.
+    let profile_snapshot = {
+        if let Some(mut p) = state.players.get_mut(player_id) {
+            p.is_online = false;
+            Some(p.clone())
+        } else {
+            None
+        }
+    };
+    if let Some(p) = profile_snapshot {
+        state.persist_player(player_id, &p).await;
+    }
+
+    // (3) Notify opponents in any live (unsettled) match.
+    let matches = state.active_matches.load();
+    for (match_id, m) in matches.iter() {
+        if m.settled {
+            continue;
+        }
+        if m.players.iter().any(|p| p == player_id) {
+            state.notify_opponent_disconnected(match_id, player_id);
+        }
     }
 }
 
@@ -1651,7 +2043,7 @@ mod tests {
         let (p1_tx, p1_rx) = oneshot::channel();
         let (p2_tx, p2_rx) = oneshot::channel();
 
-        tx.send(QueueEntry {
+        tx.send(QueueCmd::Enqueue(QueueEntry {
             player_id: "p1".into(),
             game_id: "test_game".into(),
             ruleset_id: "test_game".into(),
@@ -1663,11 +2055,11 @@ mod tests {
             max_ping_ms: 100,
             enqueued_at_ms: crate::state::now_ms(),
             sender: p1_tx,
-        })
+        }))
         .await
         .unwrap();
 
-        tx.send(QueueEntry {
+        tx.send(QueueCmd::Enqueue(QueueEntry {
             player_id: "p2".into(),
             game_id: "test_game".into(),
             ruleset_id: "test_game".into(),
@@ -1679,7 +2071,7 @@ mod tests {
             max_ping_ms: 100,
             enqueued_at_ms: crate::state::now_ms(),
             sender: p2_tx,
-        })
+        }))
         .await
         .unwrap();
 
@@ -1820,5 +2212,81 @@ mod tests {
         assert!(parse_player_address("0xZZzzbeefdeadbeefdeadbeefdeadbeefdeadbeef").is_none());
         // Internal test-player id used by the harness
         assert!(parse_player_address("p1").is_none());
+    }
+
+    /// Disconnect cleanup (Phase 2.3): a disconnecting player must be marked
+    /// offline and their opponents' subscribers must receive an
+    /// `onOpponentDisconnected` notification, without touching settled matches.
+    #[tokio::test]
+    async fn test_cleanup_on_disconnect_marks_offline_and_notifies() {
+        let app_state: AppState = Arc::new(InnerState::new(None));
+
+        // Online player who will disconnect.
+        {
+            let mut p = app_state.players.entry("0xp1".into()).or_default();
+            p.is_online = true;
+        }
+
+        // An unsettled live match containing p1 + p2, plus a settled match
+        // that must NOT trigger a notification.
+        let now = crate::state::now_ms();
+        app_state.insert_active_match(
+            "m_live".into(),
+            crate::state::ActiveMatch {
+                match_id: "m_live".into(),
+                game_id: "g".into(),
+                players: vec!["0xp1".into(), "0xp2".into()],
+                created_at_ms: now,
+                settled: false,
+                settled_at_ms: None,
+                expires_at_ms: None,
+                settlement_failed: false,
+                settlement_tx_hash: String::new(),
+            },
+        );
+        app_state.insert_active_match(
+            "m_done".into(),
+            crate::state::ActiveMatch {
+                match_id: "m_done".into(),
+                game_id: "g".into(),
+                players: vec!["0xp1".into(), "0xp3".into()],
+                created_at_ms: now,
+                settled: true,
+                settled_at_ms: Some(now),
+                expires_at_ms: None,
+                settlement_failed: false,
+                settlement_tx_hash: String::new(),
+            },
+        );
+
+        // Subscribe a listener to the live match.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<crate::state::MatchEvent>();
+        app_state.add_event_sender("m_live", tx);
+
+        // Dropped receiver simulates a relayer-less queue; cleanup ignores the
+        // send error.
+        let (qtx, _qrx) = tokio::sync::mpsc::channel::<QueueCmd>(8);
+        cleanup_on_disconnect("0xp1", app_state.clone(), qtx).await;
+
+        // is_online flipped + persisted path executed.
+        assert!(
+            !app_state
+                .players
+                .get("0xp1")
+                .map(|p| p.is_online)
+                .unwrap_or(true),
+            "disconnect must mark the player offline"
+        );
+
+        // The live match's subscriber received exactly one OpponentDisconnected.
+        let evt = rx.recv().await.expect("subscriber should be notified");
+        match evt {
+            crate::state::MatchEvent::OpponentDisconnected { player_id } => {
+                assert_eq!(player_id, "0xp1");
+            }
+            other => panic!("expected OpponentDisconnected, got {:?}", other),
+        }
+        // No further events (settled match did not notify).
+        assert!(rx.try_recv().is_err());
     }
 }

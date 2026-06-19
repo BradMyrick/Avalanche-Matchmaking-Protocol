@@ -468,16 +468,54 @@ async fn run_test() -> Result<()> {
 
     // 12. Submit match outcome
     println!("[TEST] Submitting outcome (Player A wins) to verifier...");
+
+    // Compute the submitter's EIP-712 signature over (matchId, outcome,
+    // transcriptHash). Must match AMP-Server's `compute_outcome_eip712_digest`
+    // exactly or the S1 verification gate rejects it.
+    let transcript_hash = ethers::utils::keccak256(match_id_uuid.as_bytes());
+    let outcome_val: u8 = 1; // Player A wins
+    let match_id_val_for_digest =
+        U256::from_big_endian(&ethers::utils::keccak256(match_id_uuid.as_bytes()));
+    let async_result_typehash = ethers::utils::keccak256(
+        "AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)".as_bytes(),
+    );
+    let struct_hash = ethers::utils::keccak256(ethers::abi::encode(&[
+        ethers::abi::Token::FixedBytes(async_result_typehash.to_vec()),
+        ethers::abi::Token::Uint(match_id_val_for_digest),
+        ethers::abi::Token::Uint(U256::from(outcome_val)),
+        ethers::abi::Token::FixedBytes(transcript_hash.to_vec()),
+    ]));
+    let eip712_domain_typehash = ethers::utils::keccak256(
+        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+            .as_bytes(),
+    );
+    let name_hash = ethers::utils::keccak256("AMPSettlement".as_bytes());
+    let version_hash = ethers::utils::keccak256("1".as_bytes());
+    let settlement_address: Address = settlement_addr.parse()?;
+    let domain_separator = ethers::utils::keccak256(ethers::abi::encode(&[
+        ethers::abi::Token::FixedBytes(eip712_domain_typehash.to_vec()),
+        ethers::abi::Token::FixedBytes(name_hash.to_vec()),
+        ethers::abi::Token::FixedBytes(version_hash.to_vec()),
+        ethers::abi::Token::Uint(U256::from(43113u64)),
+        ethers::abi::Token::Address(settlement_address),
+    ]));
+    let mut digest_input = vec![0x19u8, 0x01];
+    digest_input.extend_from_slice(&domain_separator);
+    digest_input.extend_from_slice(&struct_hash);
+    let digest = H256::from_slice(&ethers::utils::keccak256(&digest_input));
+    let submitter_sig = wallet_a.sign_hash(digest)?;
+    let submitter_sig_bytes = submitter_sig.to_vec();
+
     let mut submit_req = match_session_a.submit_outcome_request();
     {
         let mut sub = submit_req.get().init_submission();
         sub.set_match_id(match_id_uuid.as_bytes());
-        sub.set_replay_hash(&[0u8; 32]);
-        sub.set_signature(&[0u8; 65]);
+        sub.set_replay_hash(&transcript_hash);
+        sub.set_signature(&submitter_sig_bytes);
         {
             let mut outcome = sub.reborrow().init_outcome();
             outcome.set_type(match_capnp::OutcomeType::Win);
-            outcome.set_victor(1); // Player A wins
+            outcome.set_victor(outcome_val); // Player A wins
             let mut scores = outcome.init_scores(2);
             scores.set(0, 1);
             scores.set(1, 0);
@@ -533,10 +571,26 @@ async fn run_test() -> Result<()> {
         .call()
         .await?;
     println!(
-        "[TEST] Protocol fees collected: {} Wei (expected 0.02 ether)",
+        "[TEST] Protocol fee pot (fee_balances): {} Wei (expected 0)",
         protocol_fee
     );
-    assert_eq!(protocol_fee, U256::from(20_000_000_000_000_000u64));
+    // Phase 3.1: fees now route to the Settlement's `protocolFeeRecipient`
+    // (the deployer, anvil account 0) via pendingWithdrawals instead of the
+    // Registry's owner fee pot.
+    assert_eq!(protocol_fee, U256::zero());
+
+    let deployer: Address = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        .parse()
+        .expect("anvil account 0 address");
+    let fee_recipient_balance = registry_contract_a
+        .pending_withdrawals(Address::zero(), deployer)
+        .call()
+        .await?;
+    println!(
+        "[TEST] Fee-recipient pending withdrawal: {} Wei (expected 0.02 ether)",
+        fee_recipient_balance
+    );
+    assert_eq!(fee_recipient_balance, U256::from(20_000_000_000_000_000u64));
 
     // 15. Verify player profile rating updates
     println!("[TEST] Shutting down matchmaking server to verify database MMR updates...");

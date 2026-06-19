@@ -21,7 +21,13 @@ impl IndexedQueue {
         self.total_count
     }
 
-    pub fn push(&mut self, entry: QueueEntry) {
+    pub fn push(&mut self, entry: QueueEntry) -> bool {
+        // Enqueue uniqueness: a player may only be queued once at a time.
+        // A duplicate requestMatch (or a re-queue on reconnect) replaces the
+        // stale entry; dropping its oneshot::Sender unblocks the original
+        // request_match future as superseded rather than leaving it dangling.
+        let replaced = self.remove_player(&entry.player_id);
+
         let key = (entry.game_id.clone(), entry.ruleset_id.clone());
         let bucket = self.buckets.entry(key).or_default();
         let mmr = entry.mmr;
@@ -33,6 +39,29 @@ impl IndexedQueue {
         };
         bucket.insert(pos, entry);
         self.total_count += 1;
+        replaced
+    }
+
+    /// Remove any queued entry for `player_id`. Returns `true` if an entry was
+    /// removed. Used both for dedup-on-push and for disconnect cleanup.
+    pub fn remove_player(&mut self, player_id: &str) -> bool {
+        let mut removed = false;
+        for bucket in self.buckets.values_mut() {
+            let before = bucket.len();
+            bucket.retain(|e| e.player_id != player_id);
+            let gone = before - bucket.len();
+            self.total_count = self.total_count.saturating_sub(gone);
+            removed |= gone > 0;
+        }
+        removed
+    }
+
+    /// Returns true if `player_id` is currently queued.
+    #[allow(dead_code)]
+    pub fn contains_player(&self, player_id: &str) -> bool {
+        self.buckets
+            .values()
+            .any(|b| b.iter().any(|e| e.player_id == player_id))
     }
 
     pub fn drain_all(&mut self) -> Vec<QueueEntry> {
@@ -231,5 +260,39 @@ mod tests {
         let all = q.drain_all();
         assert_eq!(all.len(), 2);
         assert_eq!(q.len(), 0);
+    }
+
+    #[test]
+    fn test_push_dedups_existing_player() {
+        // A player who re-queues must replace their stale entry rather than
+        // appear twice (which would allow being matched into two matches).
+        let mut q = IndexedQueue::new();
+        q.push(make_entry("p1", "g1", "r1", 1500.0));
+        // Same player, different mmr/ruleset — should replace, not append.
+        let replaced = q.push(make_entry("p1", "g1", "r1", 1600.0));
+
+        assert!(replaced, "push should report it replaced an existing entry");
+        assert_eq!(q.len(), 1, "queue must hold exactly one entry per player");
+        assert!(q.contains_player("p1"));
+        assert!(!q.contains_player("p2"));
+
+        // A second distinct player does not trigger replacement.
+        let replaced2 = q.push(make_entry("p2", "g1", "r1", 1400.0));
+        assert!(!replaced2);
+        assert_eq!(q.len(), 2);
+    }
+
+    #[test]
+    fn test_remove_player_clears_across_buckets() {
+        let mut q = IndexedQueue::new();
+        q.push(make_entry("p1", "g1", "r1", 1500.0));
+        q.push(make_entry("p2", "g2", "r1", 1400.0));
+
+        assert!(q.remove_player("p1"));
+        assert!(!q.contains_player("p1"));
+        assert_eq!(q.len(), 1);
+
+        // Removing a non-queued player is a no-op.
+        assert!(!q.remove_player("nobody"));
     }
 }

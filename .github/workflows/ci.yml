@@ -119,3 +119,35 @@ jobs:
       - name: Verify C# SDK compiles
         working-directory: amp-sdk/examples/csharp
         run: dotnet build
+
+  integration:
+    name: End-to-End Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cap'n Proto
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: integration
+
+      - name: Install Foundry (forge + anvil)
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install Foundry libraries
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts --no-git
+          forge install foundry-rs/forge-std --no-git
+
+      - name: Build release binaries
+        run: cargo build --release -p AMP-Server -p amp-relayer -p amp-telemetry -p amp-integration-tests
+
+      - name: Run E2E integration tests
+        run: cargo run --release -p amp-integration-tests

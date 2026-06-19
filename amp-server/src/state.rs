@@ -31,6 +31,15 @@ pub struct MatchSettledEvent {
     pub scores: Vec<u64>,
 }
 
+/// Server→subscriber push events. `Settled` is terminal (clears the
+/// subscriber list); `OpponentDisconnected` is informational and leaves the
+/// subscription live so the remaining player can keep interacting.
+#[derive(Debug, Clone)]
+pub enum MatchEvent {
+    Settled(MatchSettledEvent),
+    OpponentDisconnected { player_id: String },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredPlayerProfile {
     pub display_name: String,
@@ -409,6 +418,16 @@ pub struct ActiveMatch {
     pub settled_at_ms: Option<u64>,
     #[serde(default)]
     pub expires_at_ms: Option<u64>,
+    /// Set by the settlement-reconciliation loop when the relayer reports a
+    /// terminal on-chain failure (reverted / timed-out / dead-lettered) after
+    /// the server already marked the match settled. Closes the silent
+    /// server/chain state-desync gap (release Phase 2.1).
+    #[serde(default)]
+    pub settlement_failed: bool,
+    /// On-chain tx hash once the relayer reports it back via
+    /// getSettlementStatus. Empty until known.
+    #[serde(default)]
+    pub settlement_tx_hash: String,
 }
 
 pub const MAX_ACTIVE_MATCHES: usize = 10_000;
@@ -419,8 +438,7 @@ pub struct InnerState {
     pub players: DashMap<AmpId, StoredPlayerProfile>,
     pub rulesets: Arc<ArcSwap<HashMap<AmpId, Arc<StoredRuleSet>>>>,
     pub active_matches: Arc<ArcSwap<HashMap<String, ActiveMatch>>>,
-    pub match_event_senders:
-        DashMap<String, Vec<tokio::sync::mpsc::UnboundedSender<MatchSettledEvent>>>,
+    pub match_event_senders: DashMap<String, Vec<tokio::sync::mpsc::UnboundedSender<MatchEvent>>>,
     persistence: Option<Persistence>,
 }
 
@@ -483,6 +501,47 @@ impl InnerState {
         if updated { Some(()) } else { None }
     }
 
+    /// Called by the settlement-reconciliation loop when the relayer reports a
+    /// terminal on-chain failure. Flips `settlement_failed` and re-persists so
+    /// the flag survives a restart. This is the non-silent half of the
+    /// server/chain state-desync fix (release Phase 2.1).
+    pub async fn mark_settlement_failed(&self, match_id: &str) {
+        let mut snapshot: Option<ActiveMatch> = None;
+        if self
+            .update_active_match(match_id, |m| {
+                m.settlement_failed = true;
+                snapshot = Some(m.clone());
+            })
+            .is_some()
+        {
+            if let Some(m) = snapshot {
+                self.persist_match(match_id, &m).await;
+            }
+            warn!(
+                target: "settlement",
+                "Match {} flagged as settlement-failed (on-chain revert/timeout/dead-letter)",
+                match_id
+            );
+        }
+    }
+
+    /// Record the on-chain tx hash returned by the relayer's
+    /// `getSettlementStatus`. Best-effort: a missing match (already archived)
+    /// is a no-op.
+    pub async fn record_settlement_tx_hash(&self, match_id: &str, tx_hash: &str) {
+        let mut snapshot: Option<ActiveMatch> = None;
+        if self
+            .update_active_match(match_id, |m| {
+                m.settlement_tx_hash = tx_hash.to_string();
+                snapshot = Some(m.clone());
+            })
+            .is_some()
+            && let Some(m) = snapshot
+        {
+            self.persist_match(match_id, &m).await;
+        }
+    }
+
     pub async fn persist_player(&self, id: &str, profile: &StoredPlayerProfile) {
         if let Some(ref p) = self.persistence
             && let Err(e) = p.save("players", id, profile).await
@@ -511,7 +570,7 @@ impl InnerState {
     pub fn add_event_sender(
         &self,
         match_id: &str,
-        tx: tokio::sync::mpsc::UnboundedSender<MatchSettledEvent>,
+        tx: tokio::sync::mpsc::UnboundedSender<MatchEvent>,
     ) {
         self.match_event_senders
             .entry(match_id.to_string())
@@ -530,12 +589,29 @@ impl InnerState {
     }
 
     pub fn notify_subscribers(&self, match_id: &str, event: MatchSettledEvent) {
+        // Settled is terminal: drain and clear the subscriber list.
         if let Some((_, senders)) = self.match_event_senders.remove(match_id) {
             for tx in senders {
-                if let Err(e) = tx.send(event.clone()) {
+                if let Err(e) = tx.send(MatchEvent::Settled(event.clone())) {
                     warn!(target: "events", "Failed to send settled event to subscriber for match {}: {}", match_id, e);
                 }
             }
+        }
+    }
+
+    /// Notify a match's subscribers that a participant disconnected. Does NOT
+    /// clear the subscriber list — the remaining player(s) may still interact
+    /// with the match (e.g. claim a forfeit). Drives the schema's
+    /// `MatchListener::onOpponentDisconnected` callback (release Phase 2.3).
+    pub fn notify_opponent_disconnected(&self, match_id: &str, player_id: &str) {
+        if let Some(ref mut entry) = self.match_event_senders.get_mut(match_id) {
+            let senders = entry.value_mut();
+            senders.retain(|tx| {
+                tx.send(MatchEvent::OpponentDisconnected {
+                    player_id: player_id.to_string(),
+                })
+                .is_ok()
+            });
         }
     }
 

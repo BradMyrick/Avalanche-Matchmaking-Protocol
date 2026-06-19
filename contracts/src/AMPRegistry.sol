@@ -5,10 +5,9 @@ import "./AMPTypes.sol";
 import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
-import "openzeppelin-contracts/contracts/metatx/ERC2771Context.sol";
 import "openzeppelin-contracts/contracts/utils/Pausable.sol";
 
-contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
+contract AMPRegistry is Ownable2Step, Pausable {
     using SafeERC20 for IERC20;
 
     error NoReentrancy();
@@ -32,6 +31,8 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     error MatchNotSettlable();
     error NoPendingWithdrawal();
     error MatchAlreadyExists();
+    error InvalidSettlementAddress();
+    error InvalidNewState();
 
     address public settlement;
     uint256 public nextGameId;
@@ -63,11 +64,11 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     event WithdrawalClaimed(address indexed token, address indexed account, uint256 amount);
 
     modifier onlySettlement() {
-        if (_msgSender() != settlement) revert NotSettlement();
+        if (msg.sender != settlement) revert NotSettlement();
         _;
     }
 
-    constructor(address trustedForwarder) ERC2771Context(trustedForwarder) Ownable(_msgSender()) {}
+    constructor() Ownable(msg.sender) {}
 
     function registerGame(
         AMPTypes.SettlementMode mode,
@@ -82,7 +83,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         }
         gameId = nextGameId++;
         games[gameId] = AMPTypes.Game({
-            admin: _msgSender(),
+            admin: msg.sender,
             mode: mode,
             verifiers: verifiers,
             minStake: minStake,
@@ -92,18 +93,18 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         });
         _syncVerifierMapping(gameId, verifiers);
 
-        emit GameRegistered(gameId, _msgSender(), mode);
+        emit GameRegistered(gameId, msg.sender, mode);
     }
 
     function setMatchTimeout(uint256 gameId, uint256 timeoutSeconds) external {
-        if (_msgSender() != games[gameId].admin) revert NotGameAdmin();
+        if (msg.sender != games[gameId].admin) revert NotGameAdmin();
         if (timeoutSeconds < 5 minutes) revert TimeoutTooShort();
         if (timeoutSeconds > 30 days) revert TimeoutTooLong();
         games[gameId].matchTimeout = timeoutSeconds;
     }
 
     function updateGameVerifiers(uint256 gameId, address[] calldata verifiers) external {
-        if (_msgSender() != games[gameId].admin) revert NotGameAdmin();
+        if (msg.sender != games[gameId].admin) revert NotGameAdmin();
         if (verifiers.length > 10) revert TooManyVerifiers();
         _clearVerifierMapping(gameId);
         games[gameId].verifiers = verifiers;
@@ -132,26 +133,26 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
             if (stakeAmount < game.minStake) revert StakeTooLow();
             if (msg.value != 0) revert NativeTokenSentForERC20();
             uint256 balBefore = IERC20(game.stakeToken).balanceOf(address(this));
-            IERC20(game.stakeToken).safeTransferFrom(_msgSender(), address(this), stakeAmount);
+            IERC20(game.stakeToken).safeTransferFrom(msg.sender, address(this), stakeAmount);
             actualStake = IERC20(game.stakeToken).balanceOf(address(this)) - balBefore;
         }
 
         matches[matchId] = AMPTypes.Match({
             gameId: gameId,
-            playerA: _msgSender(),
+            playerA: msg.sender,
             playerB: address(0),
             stakeAmount: actualStake,
             state: AMPTypes.MatchState.OPEN,
             createdAt: uint64(block.timestamp)
         });
 
-        emit MatchCreated(matchId, gameId, _msgSender(), actualStake);
+        emit MatchCreated(matchId, gameId, msg.sender, actualStake);
     }
 
     function joinMatch(uint256 matchId) external payable whenNotPaused nonReentrant {
         AMPTypes.Match storage m = matches[matchId];
         if (m.state != AMPTypes.MatchState.OPEN) revert MatchNotOpen();
-        if (_msgSender() == m.playerA) revert CannotJoinOwnMatch();
+        if (msg.sender == m.playerA) revert CannotJoinOwnMatch();
 
         AMPTypes.Game storage game = games[m.gameId];
 
@@ -160,21 +161,21 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         } else {
             if (msg.value != 0) revert NativeTokenSentForERC20();
             uint256 balBefore = IERC20(game.stakeToken).balanceOf(address(this));
-            IERC20(game.stakeToken).safeTransferFrom(_msgSender(), address(this), m.stakeAmount);
+            IERC20(game.stakeToken).safeTransferFrom(msg.sender, address(this), m.stakeAmount);
             uint256 received = IERC20(game.stakeToken).balanceOf(address(this)) - balBefore;
             if (received != m.stakeAmount) revert StakeMismatch();
         }
 
-        m.playerB = _msgSender();
+        m.playerB = msg.sender;
         m.state = AMPTypes.MatchState.READY;
 
-        emit MatchJoined(matchId, _msgSender());
+        emit MatchJoined(matchId, msg.sender);
     }
 
     function cancelMatch(uint256 matchId) external nonReentrant whenNotPaused {
         AMPTypes.Match storage m = matches[matchId];
         if (m.state != AMPTypes.MatchState.OPEN) revert MatchNotOpen();
-        if (_msgSender() != m.playerA) revert NotPlayerA();
+        if (msg.sender != m.playerA) revert NotPlayerA();
 
         m.state = AMPTypes.MatchState.SETTLED;
 
@@ -227,21 +228,22 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     }
 
     function withdraw(address token) external nonReentrant {
-        uint256 amount = pendingWithdrawals[token][_msgSender()];
+        uint256 amount = pendingWithdrawals[token][msg.sender];
         if (amount == 0) revert NoPendingWithdrawal();
-        pendingWithdrawals[token][_msgSender()] = 0;
+        pendingWithdrawals[token][msg.sender] = 0;
 
         if (token == address(0)) {
-            (bool success,) = _msgSender().call{value: amount}("");
+            (bool success,) = msg.sender.call{value: amount}("");
             if (!success) revert TransferFailed();
         } else {
-            IERC20(token).safeTransfer(_msgSender(), amount);
+            IERC20(token).safeTransfer(msg.sender, amount);
         }
 
-        emit WithdrawalClaimed(token, _msgSender(), amount);
+        emit WithdrawalClaimed(token, msg.sender, amount);
     }
 
     function setSettlement(address settlementAddress) external onlyOwner {
+        if (settlementAddress == address(0)) revert InvalidSettlementAddress();
         settlement = settlementAddress;
         emit SettlementUpdated(settlementAddress);
     }
@@ -249,6 +251,7 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
     function settleMatch(
         uint256 matchId,
         AMPTypes.MatchState newState,
+        address feeRecipient,
         address[] calldata recipients,
         uint256[] calldata amounts,
         uint256 protocolFee
@@ -258,11 +261,29 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
             m.state != AMPTypes.MatchState.READY && m.state != AMPTypes.MatchState.OPEN
                 && m.state != AMPTypes.MatchState.DISPUTED
         ) revert MatchNotSettlable();
+        // Guard against a buggy/compromised settlement rolling a match back to
+        // a pre-terminal state (OPEN/READY). Only SETTLED, EXPIRED, and
+        // DISPUTED are valid terminal transitions here (release Phase 3.2).
+        if (
+            newState != AMPTypes.MatchState.SETTLED && newState != AMPTypes.MatchState.EXPIRED
+                && newState != AMPTypes.MatchState.DISPUTED
+        ) revert InvalidNewState();
         m.state = newState;
 
         AMPTypes.Game storage game = games[m.gameId];
         address token = game.stakeToken;
-        feeBalances[token] += protocolFee;
+
+        // Protocol fees route to the Settlement-configured `feeRecipient` when
+        // set, otherwise accrue to the Registry owner's fee pot (release
+        // Phase 3.1 — previously `protocolFeeRecipient` was dead code and fees
+        // always went to the Registry owner regardless of the documented API).
+        if (protocolFee > 0) {
+            if (feeRecipient != address(0)) {
+                pendingWithdrawals[token][feeRecipient] += protocolFee;
+            } else {
+                feeBalances[token] += protocolFee;
+            }
+        }
 
         for (uint256 i = 0; i < recipients.length; i++) {
             if (amounts[i] > 0) {
@@ -294,17 +315,5 @@ contract AMPRegistry is ERC2771Context, Ownable2Step, Pausable {
         for (uint256 i = 0; i < verifiers.length; i++) {
             gameVerifiers[gameId][verifiers[i]] = true;
         }
-    }
-
-    function _msgSender() internal view virtual override(Context, ERC2771Context) returns (address) {
-        return ERC2771Context._msgSender();
-    }
-
-    function _msgData() internal view virtual override(Context, ERC2771Context) returns (bytes calldata) {
-        return ERC2771Context._msgData();
-    }
-
-    function _contextSuffixLength() internal view virtual override(Context, ERC2771Context) returns (uint256) {
-        return ERC2771Context._contextSuffixLength();
     }
 }

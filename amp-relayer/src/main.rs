@@ -187,6 +187,8 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
                 status: settlement::SettlementStatus::Queued,
                 last_max_fee: None,
                 last_priority_fee: None,
+                tx_hash: String::new(),
+                updated_at_ms: now,
             };
 
             queue
@@ -194,6 +196,45 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
                 .map_err(|e| capnp::Error::failed(format!("Queue error: {:?}", e)))?;
 
             results.get().set_tx_hash(b"queued");
+            Ok(())
+        })
+    }
+
+    fn get_settlement_status(
+        &mut self,
+        params: relayer_capnp::relayer_service::GetSettlementStatusParams,
+        mut results: relayer_capnp::relayer_service::GetSettlementStatusResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        if !self.authenticated.get() && !self.api_keys.is_empty() {
+            return capnp::capability::Promise::err(capnp::Error::failed(
+                "unauthorized: call authenticate() first".to_string(),
+            ));
+        }
+
+        let params_reader = capnp_rpc::pry!(params.get());
+        let match_id_bytes = capnp_rpc::pry!(params_reader.get_match_id()).to_vec();
+        let queue = self.queue.clone();
+
+        capnp::capability::Promise::from_future(async move {
+            let mut info = results.get().init_info();
+            match queue.get_status(&match_id_bytes) {
+                Ok(Some((status, tx_hash, retry_count, updated_at))) => {
+                    info.set_status(status.wire_code());
+                    info.set_retry_count(retry_count);
+                    info.set_updated_at_ms(updated_at);
+                    info.set_tx_hash(tx_hash.as_bytes());
+                }
+                Ok(None) => {
+                    // Unknown: leave status at the default 0.
+                    info.set_status(0);
+                }
+                Err(e) => {
+                    return Err(capnp::Error::failed(format!(
+                        "status lookup failed: {:?}",
+                        e
+                    )));
+                }
+            }
             Ok(())
         })
     }

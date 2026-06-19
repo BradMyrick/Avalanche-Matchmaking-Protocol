@@ -362,6 +362,103 @@ class AMPClient:
 
         return bytes(result.signature)
 
+    # ------------------------------------------------------------------ #
+    # Reconnect, in-match events, telemetry, subscription
+    # ------------------------------------------------------------------ #
+    async def reconnect(self, match_id: str) -> None:
+        """Reconnect to an existing active match by id (e.g. after a process
+        restart). Raises :class:`MatchError` if the match is not found or is
+        already settled."""
+        if self._user_session is None:
+            raise AuthError("Not authenticated, call connect() first")
+        if not match_id:
+            raise ValueError("match_id is required")
+        req = self._user_session.reconnect_request()
+        req.matchId = match_id.encode("utf-8")
+        try:
+            result = await req.send()
+        except Exception as e:
+            raise MatchError(f"Reconnect failed: {e}") from e
+        self._match_session = result.session
+
+    async def emit_game_event(self, event_type: str, data: bytes = b"") -> None:
+        """Emit an in-game event during an active match (fire-and-forget)."""
+        if self._match_session is None:
+            raise MatchError("No active match session")
+        import time as _time
+        req = self._match_session.emitGameEvent_request()
+        evt = req.init("event")
+        evt.eventType = event_type
+        evt.eventData = bytes(data)
+        evt.timestamp = _time.time_ns()
+        try:
+            await req.send()
+        except Exception:
+            # Fire-and-forget; surface nothing to the caller.
+            pass
+
+    async def emit_telemetry(self, event_type_enum: int, data: bytes = b"") -> None:
+        """Emit a typed telemetry event during an active match (fire-and-forget)."""
+        if self._match_session is None:
+            raise MatchError("No active match session")
+        import time as _time
+        req = self._match_session.emitTelemetry_request()
+        evt = req.init("event")
+        evt.eventType = int(event_type_enum)
+        evt.eventData = bytes(data)
+        evt.timestamp = _time.time_ns()
+        try:
+            await req.send()
+        except Exception:
+            pass
+
+    async def subscribe_to_events(
+        self,
+        on_settled: Optional[Callable[[int, list], None]] = None,
+        on_opponent_disconnected: Optional[Callable[[], None]] = None,
+    ) -> None:
+        """Subscribe to server-pushed match events.
+
+        ``on_settled(victor, scores)`` fires when the match is settled;
+        ``on_opponent_disconnected()`` fires when an opponent drops (server
+        release Phase 2.3). The callbacks are invoked on the capnp dispatch
+        task; keep them short or hand off to an async worker.
+        """
+        if self._match_session is None:
+            raise MatchError("No active match session")
+
+        listener = _MatchListener(on_settled, on_opponent_disconnected)
+        req = self._match_session.subscribeToEvents_request()
+        req.subscriber = listener
+        try:
+            await req.send()
+        except Exception as e:
+            raise MatchError(f"subscribe_to_events failed: {e}") from e
+
+
+class _MatchListener(service_schema.MatchListener.Server):
+    """pycapnp callback host for the MatchListener interface. Adapts the
+    schema's onMatchSettled / onOpponentDisconnected callbacks into plain
+    Python callables."""
+
+    def __init__(self, on_settled, on_disconnected):
+        super().__init__()
+        self._on_settled = on_settled
+        self._on_disconnected = on_disconnected
+
+    def onMatchSettled(self, outcome, **_kwargs):
+        if self._on_settled is not None:
+            scores = []
+            try:
+                scores = [int(s) for s in outcome.scores]
+            except Exception:
+                scores = []
+            self._on_settled(int(outcome.victor), scores)
+
+    def onOpponentDisconnected(self, **_kwargs):
+        if self._on_disconnected is not None:
+            self._on_disconnected()
+
 
 # --------------------------------------------------------------------------- #
 # Helpers

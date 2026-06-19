@@ -258,6 +258,23 @@ public class AmpClient : IDisposable {
     }
 
     /// <summary>
+    /// Reconnect to an existing active match by id (e.g. after a process
+    /// restart). Sets the active match session. Throws if the match is not
+    /// found or is already settled.
+    /// </summary>
+    public async Task ReconnectAsync(string matchId,
+        CancellationToken cancellationToken = default) {
+        if (_userSession == null) throw new InvalidOperationException("Not logged in.");
+        if (string.IsNullOrEmpty(matchId)) throw new ArgumentException("matchId is required.", nameof(matchId));
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+        _matchSession = await _userSession.Reconnect(
+            System.Text.Encoding.UTF8.GetBytes(matchId), cts.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Emits a typed game event during an active match.
     /// </summary>
     public async Task EmitGameEventAsync(string eventType,

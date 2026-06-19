@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(AmpCppSDK)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Cap'n Proto detection: CMake package first, then pkg-config fallback ---
@@ -34,6 +34,8 @@ set(SCHEMA_FILES
 
 capnp_generate_cpp(SCHEMA_SRCS SCHEMA_HDRS ${SCHEMA_FILES})
 
+option(AMP_USE_COROUTINES "Enable kj coroutine-based async API (requires a KJ built with coroutine support)" OFF)
+
 add_library(amp_sdk STATIC
     ${SCHEMA_SRCS}
     ${SDK_ROOT}/cpp/src/client.cpp
@@ -41,6 +43,9 @@ add_library(amp_sdk STATIC
 
 target_link_libraries(amp_sdk PUBLIC CapnProto::capnp-rpc CapnProto::capnp CapnProto::kj-async CapnProto::kj)
 target_include_directories(amp_sdk PUBLIC ${SDK_ROOT}/cpp/include)
+if(AMP_USE_COROUTINES)
+    target_compile_definitions(amp_sdk PUBLIC AMP_USE_COROUTINES=1)
+endif()
 
 add_executable(amp_test src/main.cpp)
 target_link_libraries(amp_test PRIVATE amp_sdk)

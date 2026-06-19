@@ -106,7 +106,7 @@ AMP/
 | **AMPRegistry** | `0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34` |
 | **AMPSettlement** | `0xecD9C6C1727d610A7C0Aeb3a37A6278049791a24` |
 
-Contracts use OpenZeppelin v5.6.1 with `Ownable2Step`, `Pausable`, and `ERC2771Context` (meta-transactions).
+Contracts use OpenZeppelin v5.6.1 with `Ownable2Step` and `Pausable`.
 
 ---
 

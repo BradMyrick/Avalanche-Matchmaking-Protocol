@@ -18,8 +18,8 @@ contract AMPSettlementTest is Test {
     address public verifierPubKey;
 
     function setUp() public {
-        registry = new AMPRegistry(address(0));
-        settlement = new AMPSettlement(address(registry), address(0));
+        registry = new AMPRegistry();
+        settlement = new AMPSettlement(address(registry));
         registry.setSettlement(address(settlement));
         verifierPubKey = vm.addr(verifierPrivKey);
         vm.deal(playerA, 10 ether);
@@ -82,7 +82,11 @@ contract AMPSettlementTest is Test {
         (, AMPTypes.OutcomeCode actualOutcome,,) = settlement.settlements(matchId);
         assertEq(uint256(actualOutcome), uint256(outcome));
         assertEq(registry.pendingWithdrawals(address(0), playerA), 1.98 ether);
-        assertEq(registry.feeBalances(address(0)), 0.02 ether);
+        // Phase 3.1: protocol fees now route to the Settlement's
+        // `protocolFeeRecipient` (defaults to the deployer = address(this))
+        // via `pendingWithdrawals`, not to the Registry's `feeBalances` pot.
+        assertEq(registry.pendingWithdrawals(address(0), address(this)), 0.02 ether);
+        assertEq(registry.feeBalances(address(0)), 0 ether);
         _withdrawNative(playerA, 1.98 ether);
     }
 
@@ -243,6 +247,47 @@ contract AMPSettlementTest is Test {
         });
         vm.expectRevert(abi.encodeWithSelector(Pausable.EnforcedPause.selector));
         settlement.submitAsyncResult(matchId, result);
+    }
+
+    function testPauseBlocksResolveDispute() public {
+        // Phase 3.4: resolveDispute is now whenNotPaused, restoring pause
+        // symmetry (it was previously callable while paused).
+        uint256 matchId = _setupRTGameAndMatch();
+        // Drive the match into DISPUTED via mismatched RT submissions.
+        AMPTypes.RealTimeHashResult memory resultA = AMPTypes.RealTimeHashResult({
+            matchId: matchId, outcome: AMPTypes.OutcomeCode.WIN_A, transcriptHash: bytes32(uint256(1))
+        });
+        AMPTypes.RealTimeHashResult memory resultB = AMPTypes.RealTimeHashResult({
+            matchId: matchId, outcome: AMPTypes.OutcomeCode.WIN_B, transcriptHash: bytes32(uint256(2))
+        });
+        vm.prank(playerA);
+        settlement.submitRealTimeHashResult(matchId, resultA);
+        vm.prank(playerB);
+        settlement.submitRealTimeHashResult(matchId, resultB);
+
+        settlement.pause();
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(Pausable.EnforcedPause.selector));
+        settlement.resolveDispute(matchId, AMPTypes.OutcomeCode.WIN_B);
+    }
+
+    function testSettlementFeeRoutesToRecipient() public {
+        // Phase 3.1: an explicit protocolFeeRecipient receives the fee via
+        // pendingWithdrawals (not the Registry's owner fee pot).
+        address recipient = address(0xFEE);
+        settlement.updateProtocolFeeRecipient(recipient);
+
+        uint256 matchId = _setupAsyncGameAndMatch();
+        AMPTypes.OutcomeCode outcome = AMPTypes.OutcomeCode.WIN_A;
+        bytes32 transcriptHash = bytes32(uint256(0x9999));
+        bytes memory signature = _signResult(matchId, outcome, transcriptHash, verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId, outcome: outcome, transcriptHash: transcriptHash, signature: signature
+        });
+        settlement.submitAsyncResult(matchId, result);
+
+        assertEq(registry.pendingWithdrawals(address(0), recipient), 0.02 ether);
+        assertEq(registry.feeBalances(address(0)), 0 ether);
     }
 
     function testMatchIdMismatch() public {

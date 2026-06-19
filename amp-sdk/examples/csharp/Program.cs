@@ -1,4 +1,5 @@
 using System;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using AmpSdk;
 
@@ -6,24 +7,21 @@ namespace AmpSdkExample
 {
     class Program
     {
-        private static byte[] HexToBytes(string hex) {
-            byte[] bytes = new byte[hex.Length / 2];
-            for (int i = 0; i < bytes.Length; i++) {
-                bytes[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
-            }
-            return bytes;
-        }
+        // Well-known anvil/hardhat test keys (NEVER use in production).
+        private const string PlayerAKey = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+        private const string PlayerBKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
-        static async Task RunOpponent(string serverUrl, string gameIdStr)
+        static async Task RunOpponent(string serverUrl, string gameIdStr, ulong gameId)
         {
             await Task.Delay(500); // Wait half a second for player A to connect
             try
             {
                 using var client = new AmpClient(serverUrl);
-                ulong gameId = 0; // Use game 0 as registered in e2e_verify.sh
                 if (await client.ConnectAsync())
                 {
-                    if (await client.AuthenticateAsync(gameId))
+                    // S2 fix: pass an explicit private key — the SDK no longer
+                    // silently generates an ephemeral wallet.
+                    if (await client.AuthenticateAsync(gameId, PlayerBKey))
                     {
                         Console.WriteLine("[Player B] Connected to Matchmaker. Requesting match...");
                         await client.RequestMatchAsync(new MatchRequest { GameId = gameIdStr, RulesetId = "standard", PlayerId = "p2" });
@@ -39,13 +37,12 @@ namespace AmpSdkExample
         static async Task Main(string[] args)
         {
             var serverUrl = Environment.GetEnvironmentVariable("AMP_ADDR") ?? "127.0.0.1:50051";
-            Console.WriteLine($"Starting AMP C# .NET SDK Test on {serverUrl}...");
+            Console.WriteLine($"Starting AMP C# .NET SDK example on {serverUrl}...");
 
             try
             {
                 using var client = new AmpClient(serverUrl);
 
-                // 1. Connect and login automatically (Custodial Wallet generated automatically)
                 ulong gameId = 0;
                 bool connected = await client.ConnectAsync();
                 if (!connected)
@@ -53,27 +50,27 @@ namespace AmpSdkExample
                     Console.WriteLine("Failed to connect.");
                     Environment.Exit(1);
                 }
-                
-                // Use the new high-level auth which automatically signs challenges
-                bool loggedIn = await client.AuthenticateAsync(gameId);
+
+                // Authenticate with an explicit private key.
+                bool loggedIn = await client.AuthenticateAsync(gameId, PlayerAKey);
                 if (!loggedIn)
                 {
                     Console.WriteLine("Failed to log in.");
                     Environment.Exit(1);
                 }
-                Console.WriteLine("[Player A] Connected & Logged in to AMP matchmaker.");
+                Console.WriteLine("[Player A] Connected & authenticated to the AMP matchmaker.");
 
-                string gameIdStr = "0x6767676767676767";
+                string gameIdStr = "0";
 
-                Console.WriteLine("Spawning Player B thread...");
-                _ = Task.Run(() => RunOpponent(serverUrl, gameIdStr));
+                Console.WriteLine("Spawning Player B...");
+                _ = Task.Run(() => RunOpponent(serverUrl, gameIdStr, gameId));
 
-                // 2. Request a match
+                // Request a match
                 var matchResult = await client.RequestMatchAsync(new MatchRequest { GameId = gameIdStr, RulesetId = "standard", PlayerId = "p1" });
                 string matchId = matchResult.MatchId;
-                Console.WriteLine($"Got MatchAssignment! Match ID: {matchId}");
+                Console.WriteLine($"Matched! Match ID: {matchId}");
 
-                // 3. Simulate gameplay
+                // Simulate gameplay
                 Console.WriteLine("Simulating game...");
                 await client.EmitTelemetryAsync(1, 100);
                 await client.EmitGameEventAsync("MatchStarted");
@@ -83,21 +80,23 @@ namespace AmpSdkExample
                 await client.EmitGameEventAsync("MatchEnded");
                 await client.EmitTelemetryAsync(2, 200);
 
-                // 4. Submit outcome
-                Console.WriteLine("Submitting outcome to verifier...");
-                byte winnerOutcome = 0; // Player0 wins
-                var signatureResult = await client.SubmitOutcomeAsync(matchId, winnerOutcome, Array.Empty<byte>());
+                // Submit outcome. Victor must be 1..=4 (1 = Player A wins) and
+                // transcript hash must be exactly 32 bytes (S1 + S5 fixes).
+                Console.WriteLine("Submitting outcome (Player A wins) to verifier...");
+                byte winnerOutcome = 1;
+                byte[] transcriptHash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(matchId));
+                var signatureResult = await client.SubmitOutcomeAsync(matchId, winnerOutcome, transcriptHash);
                 var signature = signatureResult.Signature;
 
-                Console.WriteLine($"Verifier provided signature: 0x{BitConverter.ToString(signature).Replace("-", "").ToLower()}");
-                Console.WriteLine("C# .NET SDK test successful. Exiting cleanly.");
+                Console.WriteLine($"Verifier countersignature: 0x{BitConverter.ToString(signature).Replace("-", "").ToLower()}");
+                Console.WriteLine("C# .NET SDK example complete.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"AMP Connect Error: {ex.Message}");
-                Console.WriteLine("C# SDK Test Failed!"); 
+                Console.WriteLine($"AMP example error: {ex.Message}");
                 Environment.Exit(1);
             }
         }
     }
 }
+

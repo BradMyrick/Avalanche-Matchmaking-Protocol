@@ -4,12 +4,10 @@
   "description": "Avalanche Matchmaking Protocol SDK for JavaScript/TypeScript",
   "type": "module",
   "main": "dist/index.js",
-  "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.esm.js",
-      "require": "./dist/index.js",
+      "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
   },

@@ -9,9 +9,9 @@ Service, join matchmaking, and submit verified game outcomes.
 | Language | Path | Status | TLS | Outcome Signing |
 |:---|:---|:---|:---:|:---:|
 | **Go** | [`go/`](go/) | Stable | ✅ | via callback |
-| **Rust** | [`rust/`](rust/) | Beta | ✅ (`tls` feature) | via callback |
+| **Rust** | [`rust/`](rust/) | Stable | ✅ (`tls` feature) | ✅ digest helper + callback |
 | **C# (.NET)** | [`csharp/`](csharp/) | Beta (Unity/Godot) | via reverse proxy | ✅ (custodial) |
-| **C++** | [`cpp/`](cpp/) | Beta (Unreal) | TODO (`kj-tls`) | via callback |
+| **C++** | [`cpp/`](cpp/) | Beta (Unreal) | ✅ (`kj-tls`, optional) | via callback |
 | **Python** | [`python/`](python/) | Beta | ✅ (`ssl.SSLContext`) | ✅ (custodial) |
 | **JavaScript / TypeScript** | [`js/`](js/) | Alpha (Node.js) | ✅ | ✅ (custodial) |
 

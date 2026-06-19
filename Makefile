@@ -60,7 +60,7 @@ build-rust:
 
 # ─── Test ────────────────────────────────────────────────────────────────
 
-test: test-rust test-contracts test-sdk-go test-sdk-python test-sdk-js
+test: test-rust test-contracts test-sdk-go test-sdk-python test-sdk-js test-integration
 	@echo "All tests passed"
 
 test-rust:

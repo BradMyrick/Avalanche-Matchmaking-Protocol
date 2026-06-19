@@ -14,7 +14,7 @@ contract AMPRegistryTest is Test {
     address public newOwner = address(0x40);
 
     function setUp() public {
-        registry = new AMPRegistry(address(0));
+        registry = new AMPRegistry();
         vm.deal(playerA, 10 ether);
         vm.deal(playerB, 10 ether);
     }
@@ -106,6 +106,32 @@ contract AMPRegistryTest is Test {
         vm.prank(playerA);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, playerA));
         registry.setSettlement(address(0x999));
+    }
+
+    function testSetSettlementRejectsZeroAddress() public {
+        // Phase 3.3: setting the settlement to the zero address would brick
+        // all settlement callbacks (onlySettlement would never match); refuse.
+        vm.expectRevert(AMPRegistry.InvalidSettlementAddress.selector);
+        registry.setSettlement(address(0));
+    }
+
+    function testSettleMatchRejectsInvalidNewState() public {
+        // Phase 3.2: the settlement callback must not be able to roll a match
+        // back to a pre-terminal state. Here the test acts as the trusted
+        // settlement so it can invoke settleMatch directly.
+        registry.setSettlement(address(this));
+
+        // Create a match so there's something to (attempt to) settle.
+        address[] memory verifiers = new address[](1);
+        verifiers[0] = address(0xBEEF);
+        registry.registerGame(AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 0, address(0), address(0));
+        uint256 matchId = uint256(keccak256("state-test"));
+        registry.createMatch{value: 0}(0, matchId, 0);
+
+        address[] memory recipients = new address[](0);
+        uint256[] memory amounts = new uint256[](0);
+        vm.expectRevert(AMPRegistry.InvalidNewState.selector);
+        registry.settleMatch(matchId, AMPTypes.MatchState.OPEN, address(0), recipients, amounts, 0);
     }
 
     function testCancelMatch() public {

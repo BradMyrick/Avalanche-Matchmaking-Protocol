@@ -4,18 +4,17 @@ title: Contracts Reference
 
 # Contracts Reference
 
-The AMP protocol is powered by two primary smart contracts on the Avalanche Fuji Testnet. Both contracts use OpenZeppelin v5.6.1, pragma `^0.8.33`, and implement `Ownable2Step`, `Pausable`, and `ERC2771Context` (meta-transactions).
+The AMP protocol is powered by two primary smart contracts on the Avalanche Fuji Testnet. Both contracts use OpenZeppelin v5.6.1, pragma `^0.8.33`, and implement `Ownable2Step` and `Pausable`. (Meta-transaction support via `ERC2771Context` was removed for the Developer Beta — the forwarder was hardcoded to the zero address and therefore inert; it can be reintroduced with a real forwarder + tests in a later milestone.)
 
 ## `AMPRegistry`
 
-**Address:** `0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34`
+**Address:** `0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34` *(legacy v0 Fuji deployment — will be replaced by a fresh deployment before the Developer Beta release)*
 
 The Registry manages game metadata, match lifecycle, and verifier authorizations. It is the single source of truth for all on-chain state.
 
 ### Access Control
 - `Ownable2Step`: Two-step ownership transfer for safety.
 - `Pausable`: Owner can pause/unpause all state-mutating functions.
-- `ERC2771Context`: Supports meta-transactions via a trusted forwarder.
 
 ### Match State Machine
 
@@ -58,7 +57,7 @@ EXPIRED  DISPUTED ────┘
 
 ## `AMPSettlement`
 
-**Address:** `0xecD9C6C1727d610A7C0Aeb3a37A6278049791a24`
+**Address:** `0xecD9C6C1727d610A7C0Aeb3a37A6278049791a24` *(legacy v0 Fuji deployment — will be replaced by a fresh deployment before the Developer Beta release)*
 
 The Settlement contract handles attestation verification, dispute resolution, and payouts. It references the Registry as an immutable dependency.
 

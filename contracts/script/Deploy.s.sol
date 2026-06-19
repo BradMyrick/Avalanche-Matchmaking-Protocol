@@ -10,8 +10,8 @@ contract DeployScript is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
-        AMPRegistry registry = new AMPRegistry(address(0));
-        AMPSettlement settlement = new AMPSettlement(address(registry), address(0));
+        AMPRegistry registry = new AMPRegistry();
+        AMPSettlement settlement = new AMPSettlement(address(registry));
 
         registry.setSettlement(address(settlement));
 

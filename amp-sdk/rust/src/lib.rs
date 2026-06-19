@@ -301,6 +301,124 @@ pub fn is_challenge_expired(expires_at_ns: u64) -> bool {
 }
 
 // --------------------------------------------------------------------------- //
+// EIP-712 outcome digest
+// --------------------------------------------------------------------------- //
+/// Compute the canonical EIP-712 digest over `(matchId, outcome, transcriptHash)`
+/// that the AMP server verifies in `submitOutcome` and the verifier signs.
+///
+/// This is byte-identical to `AMP-Server::compute_outcome_eip712_digest`,
+/// `amp-sdk/csharp/.../OutcomeEip712.ComputeDigest`, and the Python/JS helpers
+/// (cross-language KAT in `amp-server/src/main.rs::test_outcome_digest_known_vector_cross_lang`).
+///
+/// - `match_id`: the match id as a UTF-8 string (typically the UUID). If it is
+///   a decimal integer it is parsed as a uint256; otherwise it is keccak256-hashed.
+/// - `outcome`: the victor index (1..=4).
+/// - `transcript_hash`: the 32-byte keccak256 transcript/replay hash.
+/// - `chain_id`: the EIP-712 domain chain id (e.g. 43113 for Fuji).
+/// - `verifying_contract`: the 20-byte AMPSettlement contract address.
+pub fn compute_outcome_eip712_digest(
+    match_id: &str,
+    outcome: u8,
+    transcript_hash: &[u8],
+    chain_id: u64,
+    verifying_contract: &[u8; 20],
+) -> AmpResult<[u8; 32]> {
+    use sha3::{Digest, Keccak256};
+
+    if transcript_hash.len() != 32 {
+        return Err(AmpError::Rpc(capnp::Error::failed(format!(
+            "transcript_hash must be exactly 32 bytes, got {}",
+            transcript_hash.len()
+        ))));
+    }
+
+    let mut keccak = Keccak256::new();
+    keccak.update(b"AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)");
+    let async_result_typehash = keccak.finalize();
+
+    // matchId: decimal → uint256, else keccak256(utf8). Matches the server.
+    let match_id_u256: [u8; 32] = match match_id.parse::<ethnum::U256>() {
+        Ok(v) => v.to_be_bytes(),
+        Err(_) => {
+            let mut k = Keccak256::new();
+            k.update(match_id.as_bytes());
+            let out = k.finalize();
+            let mut buf = [0u8; 32];
+            buf.copy_from_slice(&out);
+            buf
+        }
+    };
+
+    let mut outcome_buf = [0u8; 32];
+    outcome_buf[31] = outcome;
+
+    // structHash = keccak256(abi.encode(typeHash, matchId, outcome, transcriptHash))
+    let mut struct_input = Vec::with_capacity(128);
+    struct_input.extend_from_slice(&async_result_typehash);
+    struct_input.extend_from_slice(&match_id_u256);
+    struct_input.extend_from_slice(&outcome_buf);
+    struct_input.extend_from_slice(transcript_hash);
+    let mut k = Keccak256::new();
+    k.update(&struct_input);
+    let struct_hash = k.finalize();
+
+    let mut k = Keccak256::new();
+    k.update(b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    let domain_typehash = k.finalize();
+
+    let mut k = Keccak256::new();
+    k.update(b"AMPSettlement");
+    let name_hash = k.finalize();
+
+    let mut k = Keccak256::new();
+    k.update(b"1");
+    let version_hash = k.finalize();
+
+    let mut chain_buf = [0u8; 32];
+    chain_buf[24..].copy_from_slice(&chain_id.to_be_bytes());
+
+    let mut addr_buf = [0u8; 32];
+    addr_buf[12..].copy_from_slice(verifying_contract);
+
+    let mut domain_input = Vec::with_capacity(160);
+    domain_input.extend_from_slice(&domain_typehash);
+    domain_input.extend_from_slice(&name_hash);
+    domain_input.extend_from_slice(&version_hash);
+    domain_input.extend_from_slice(&chain_buf);
+    domain_input.extend_from_slice(&addr_buf);
+    let mut k = Keccak256::new();
+    k.update(&domain_input);
+    let domain_separator = k.finalize();
+
+    let mut digest_input = vec![0x19u8, 0x01];
+    digest_input.extend_from_slice(&domain_separator);
+    digest_input.extend_from_slice(&struct_hash);
+    let mut k = Keccak256::new();
+    k.update(&digest_input);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&k.finalize());
+    Ok(out)
+}
+
+// --------------------------------------------------------------------------- //
+// Match events (subscribeToEvents)
+// --------------------------------------------------------------------------- //
+/// A server-pushed match event delivered to a [`MatchSession::subscribe_to_events`]
+/// receiver.
+#[derive(Debug, Clone)]
+pub enum MatchEvent {
+    /// The match was settled. `victor` is the 1-based winning-player index;
+    /// `scores` are the per-player final scores.
+    Settled {
+        victor: u8,
+        outcome_type: match_capnp::OutcomeType,
+        scores: Vec<u64>,
+    },
+    /// An opponent disconnected mid-match (release Phase 2.3 server hook).
+    OpponentDisconnected,
+}
+
+// --------------------------------------------------------------------------- //
 // AmpClient
 // --------------------------------------------------------------------------- //
 /// Handle to an AMP server connection.
@@ -549,6 +667,28 @@ impl MatchSession {
         Ok(sig.to_vec())
     }
 
+    /// Subscribe to server-pushed match events (`onMatchSettled`,
+    /// `onOpponentDisconnected`).
+    ///
+    /// Returns a receiver that yields [`MatchEvent`]s as the server pushes
+    /// them. Drop the receiver (or the [`MatchSession`]) to unsubscribe. The
+    /// callback capability is dispatched on the RPC task spawned by
+    /// [`AmpClient::connect`], so this must be called within a
+    /// [`run_in_localset`] context (like the rest of the client).
+    pub fn subscribe_to_events(
+        &self,
+    ) -> AmpResult<tokio::sync::mpsc::UnboundedReceiver<MatchEvent>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let listener_client: service_capnp::match_listener::Client =
+            capnp_rpc::new_client(MatchListenerImpl { tx });
+        let mut request = self.inner.subscribe_to_events_request();
+        request.get().set_subscriber(listener_client);
+        // Fire the registration. The server holds its own reference to the
+        // capability; callbacks are dispatched on the RpcSystem task.
+        let _ = request.send();
+        Ok(rx)
+    }
+
     /// Emit a telemetry event.
     ///
     /// `data` is an opaque payload forwarded to the telemetry service.
@@ -600,6 +740,52 @@ impl MatchSession {
 }
 
 // --------------------------------------------------------------------------- //
+// MatchListener callback host
+// --------------------------------------------------------------------------- //
+/// Cap'n Proto server impl that adapts the schema's `MatchListener` callback
+/// interface into an [`mpsc::UnboundedReceiver<MatchEvent>`]. Hosted on the
+/// client so the server can push `onMatchSettled` / `onOpponentDisconnected`.
+struct MatchListenerImpl {
+    tx: tokio::sync::mpsc::UnboundedSender<MatchEvent>,
+}
+
+impl service_capnp::match_listener::Server for MatchListenerImpl {
+    fn on_match_settled(
+        &mut self,
+        params: service_capnp::match_listener::OnMatchSettledParams,
+        _results: service_capnp::match_listener::OnMatchSettledResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let reader = capnp_rpc::pry!(capnp_rpc::pry!(params.get()).get_outcome());
+        let victor = reader.get_victor();
+        let outcome_type = reader
+            .get_type()
+            .unwrap_or(match_capnp::OutcomeType::Unknown);
+        let scores = reader
+            .get_scores()
+            .ok()
+            .map(|s| s.iter().collect())
+            .unwrap_or_default();
+        // Channel send only fails if the caller dropped the receiver — that
+        // effectively unsubscribes, so ignore the error.
+        let _ = self.tx.send(MatchEvent::Settled {
+            victor,
+            outcome_type,
+            scores,
+        });
+        capnp::capability::Promise::ok(())
+    }
+
+    fn on_opponent_disconnected(
+        &mut self,
+        _params: service_capnp::match_listener::OnOpponentDisconnectedParams,
+        _results: service_capnp::match_listener::OnOpponentDisconnectedResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let _ = self.tx.send(MatchEvent::OpponentDisconnected);
+        capnp::capability::Promise::ok(())
+    }
+}
+
+// --------------------------------------------------------------------------- //
 // Tests
 // --------------------------------------------------------------------------- //
 #[cfg(test)]
@@ -633,5 +819,24 @@ mod tests {
             quality: 0.5,
         };
         assert_eq!(a.match_id_string(), "abc-123");
+    }
+
+    /// Cross-language KAT: must match the C#/Python/JS digest helpers and the
+    /// server's `compute_outcome_eip712_digest`
+    /// (`amp-server/src/main.rs::test_outcome_digest_known_vector_cross_lang`).
+    #[test]
+    fn outcome_digest_known_vector_cross_lang() {
+        let d = compute_outcome_eip712_digest("1", 1, &[0u8; 32], 43113, &[0u8; 20]).unwrap();
+        assert_eq!(
+            hex::encode(d),
+            "2d2525ad5098ca8f82a2a6cabc6775c40a55df96dfa2fbb46d7c0e372b99096c",
+            "Rust SDK digest must match C# / Python / JS output for cross-lang interop"
+        );
+    }
+
+    #[test]
+    fn outcome_digest_rejects_short_transcript() {
+        let err = compute_outcome_eip712_digest("1", 1, &[0u8; 16], 43113, &[0u8; 20]).unwrap_err();
+        assert!(err.to_string().contains("32 bytes"));
     }
 }

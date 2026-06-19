@@ -5,7 +5,6 @@ import "./AMPTypes.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/MessageHashUtils.sol";
 import "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
-import "openzeppelin-contracts/contracts/metatx/ERC2771Context.sol";
 import "openzeppelin-contracts/contracts/utils/Pausable.sol";
 
 interface IAMPRegistry {
@@ -30,13 +29,14 @@ interface IAMPRegistry {
     function settleMatch(
         uint256 matchId,
         AMPTypes.MatchState newState,
+        address feeRecipient,
         address[] calldata recipients,
         uint256[] calldata amounts,
         uint256 protocolFee
     ) external;
 }
 
-contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
+contract AMPSettlement is Ownable2Step, Pausable {
     error FeeExceedsMax();
     error InvalidRecipient();
     error MatchIdMismatch();
@@ -44,7 +44,6 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
     error MatchNotSettlable();
     error NoOpponent();
     error InvalidVerifierSignature();
-    error MatchAlreadySettled();
     error NotArbiter();
     error NotDisputed();
     error NotAPlayer();
@@ -69,10 +68,10 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
     event ProtocolFeeRecipientUpdated(address indexed recipient);
     event MatchDisputeResolved(uint256 indexed matchId, AMPTypes.OutcomeCode enforcedOutcome);
 
-    constructor(address _registry, address trustedForwarder) ERC2771Context(trustedForwarder) Ownable(_msgSender()) {
+    constructor(address _registry) Ownable(msg.sender) {
         registry = _registry;
         protocolFeeBps = 100;
-        protocolFeeRecipient = _msgSender();
+        protocolFeeRecipient = msg.sender;
         _cachedChainId = block.chainid;
         _cachedDomainSeparator = _buildDomainSeparator();
     }
@@ -143,11 +142,11 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
 
         if (mode != AMPTypes.SettlementMode.RT_HASH_AGREE) revert WrongMode();
         if (state != AMPTypes.MatchState.READY) revert MatchNotSettlable();
-        if (_msgSender() != playerA && _msgSender() != playerB) revert NotAPlayer();
+        if (msg.sender != playerA && msg.sender != playerB) revert NotAPlayer();
 
-        rtResults[matchId][_msgSender()] = result;
+        rtResults[matchId][msg.sender] = result;
 
-        address otherPlayer = _msgSender() == playerA ? playerB : playerA;
+        address otherPlayer = msg.sender == playerA ? playerB : playerA;
         AMPTypes.RealTimeHashResult memory otherResult = rtResults[matchId][otherPlayer];
 
         if (otherResult.outcome != AMPTypes.OutcomeCode.NONE) {
@@ -164,13 +163,14 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
             } else {
                 address[] memory recipients = new address[](0);
                 uint256[] memory amounts = new uint256[](0);
-                IAMPRegistry(registry).settleMatch(matchId, AMPTypes.MatchState.DISPUTED, recipients, amounts, 0);
+                IAMPRegistry(registry)
+                    .settleMatch(matchId, AMPTypes.MatchState.DISPUTED, address(0), recipients, amounts, 0);
                 emit MatchDisputed(matchId);
             }
         }
     }
 
-    function resolveDispute(uint256 matchId, AMPTypes.OutcomeCode enforcedOutcome) external {
+    function resolveDispute(uint256 matchId, AMPTypes.OutcomeCode enforcedOutcome) external whenNotPaused {
         (
             uint256 gameId,
             address playerA,
@@ -183,7 +183,7 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
         (,,,, address arbiter,) = IAMPRegistry(registry).games(gameId);
 
         if (state != AMPTypes.MatchState.DISPUTED) revert NotDisputed();
-        if (_msgSender() != arbiter) revert NotArbiter();
+        if (msg.sender != arbiter) revert NotArbiter();
         if (playerB == address(0)) revert NoOpponent();
 
         settlements[matchId] = AMPTypes.Settlement({
@@ -238,7 +238,8 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
             amounts[1] = playerB == address(0) ? 0 : stakeAmount;
         }
 
-        IAMPRegistry(registry).settleMatch(matchId, AMPTypes.MatchState.SETTLED, recipients, amounts, protocolFee);
+        IAMPRegistry(registry)
+            .settleMatch(matchId, AMPTypes.MatchState.SETTLED, protocolFeeRecipient, recipients, amounts, protocolFee);
     }
 
     function _buildDomainSeparator() internal view returns (bytes32) {
@@ -260,17 +261,5 @@ contract AMPSettlement is ERC2771Context, Ownable2Step, Pausable {
             _cachedDomainSeparator = _buildDomainSeparator();
         }
         return _cachedDomainSeparator;
-    }
-
-    function _msgSender() internal view virtual override(Context, ERC2771Context) returns (address) {
-        return ERC2771Context._msgSender();
-    }
-
-    function _msgData() internal view virtual override(Context, ERC2771Context) returns (bytes calldata) {
-        return ERC2771Context._msgData();
-    }
-
-    function _contextSuffixLength() internal view virtual override(Context, ERC2771Context) returns (uint256) {
-        return ERC2771Context._contextSuffixLength();
     }
 }
