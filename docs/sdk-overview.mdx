@@ -11,11 +11,11 @@ AMP provides lightweight, high-performance SDKs for multiple languages. These SD
 | Language | Typical Use Case | Status | Directory |
 | :--- | :--- | :--- | :--- |
 | **Go** | Server-side / CLI | Stable | `amp-sdk/go` |
-| **Rust** | Performance Tools | Beta | `amp-sdk/rust` |
+| **Rust** | Performance Tools | Stable | `amp-sdk/rust` |
 | **C#** | Unity / Godot | Beta | `amp-sdk/csharp` |
 | **C++** | Unreal / Custom Engines | Beta | `amp-sdk/cpp` |
 | **Python** | Data / AI / Research | Beta | `amp-sdk/python` |
-| **JavaScript / TypeScript** | Node.js tooling | Alpha | `amp-sdk/js` |
+| **JavaScript / TypeScript** | Node.js (native, napi-rs) | Beta | `amp-sdk/js` |
 
 All SDKs produce byte-identical EIP-712 outcome signatures — see
 [Signing Schemes](/signing) for the cross-language known-answer test vector.
@@ -31,17 +31,17 @@ All SDKs use an EIP-191 challenge/response authentication flow:
 3. **Login**: Client calls `login(gameId, signature, challengePayload)` — passing back the ORIGINAL challenge bytes so the server can locate its outstanding nonce.
 4. **Session**: Server recovers the signer's Ethereum address, uses it as the player identity, and returns a `UserSession` capability.
 
-<Warning>
+<Callout type="warning">
 The `requestChallenge` RPC must be called before `login()`. Challenges are single-use and expire after 5 minutes. SDKs validate `expiresAt` client-side before signing to avoid burning a one-time nonce on a stale attempt.
-</Warning>
+</Callout>
 
-<Info>
+<Callout type="info">
 SDKs that accept a `privateKeyHex` (custodial mode) will automatically use the
 same wallet to sign match outcomes later. Wallet-integrated SDKs accept a
 `signCallback` for auth and a separate `signDigestCallback` / `signOutcome`
 for outcome signing. **No SDK silently generates an ephemeral identity** — see
 the [Security Review](/security-review) S2.
-</Info>
+</Callout>
 
 ---
 
@@ -72,13 +72,13 @@ let outcome = amp_sdk::OutcomeSubmission {
 let verifier_sig = assigned.session.submit_outcome(outcome).await?;
 ```
 
-<Warning>
+<Callout type="warning">
 The server rejects submissions where:
 - `signature.len() != 65`
 - `transcriptHash.len() != 32`
 - `outcome < 1` or `outcome > 4` (victor index, NOT `OutcomeType`)
 - The recovered address does not match the caller's `player_id`
-</Warning>
+</Callout>
 
 ---
 
