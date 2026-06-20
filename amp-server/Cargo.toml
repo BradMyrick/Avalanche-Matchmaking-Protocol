@@ -8,12 +8,16 @@ license.workspace = true
 tokio = { version = "1.0", features = ["full"] }
 capnp = "0.19"
 capnp-rpc = "0.19"
-ethers-core = "2.0"
+# Phase 3.4: ethers (unmaintained) replaced by alloy. The server only needs
+# primitives + a local ECDSA signer for EIP-712/EIP-191. (Note: alloy subcrates
+# version independently — primitives is 1.x while signer/provider are 2.x.)
+alloy-primitives = "1"
+alloy-signer = "2"
+alloy-signer-local = "2"
 tokio-util = { version = "0.7", features = ["compat", "rt"] }
 anyhow = "1.0"
 uuid = { version = "1.20.0", features = ["v4"] }
 futures-util = "0.3.32"
-ethers-signers = "2.0"
 amp-telemetry = { path = "../amp-telemetry" }
 tracing = "0.1.44"
 tracing-subscriber = "0.3"

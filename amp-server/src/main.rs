@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use capnp::capability::Promise;
 use capnp_rpc::{RpcSystem, pry, rpc_twoparty_capnp, twoparty};
-use ethers_core::types::{Address, H256, U256};
-use ethers_signers::LocalWallet;
+use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_signer::SignerSync;
+use alloy_signer_local::PrivateKeySigner;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -511,7 +512,7 @@ fn start_cleanup_loop(
 }
 
 pub(crate) struct SigningConfig {
-    wallet: LocalWallet,
+    wallet: PrivateKeySigner,
     chain_id: u64,
     settlement_addr: Address,
 }
@@ -527,7 +528,7 @@ pub(crate) fn compute_outcome_eip712_digest(
     transcript_hash: &[u8],
     chain_id: u64,
     settlement_addr: Address,
-) -> Result<H256> {
+) -> Result<B256> {
     if transcript_hash.len() != 32 {
         anyhow::bail!(
             "transcript_hash must be exactly 32 bytes, got {}",
@@ -535,43 +536,52 @@ pub(crate) fn compute_outcome_eip712_digest(
         );
     }
 
-    let match_id_val = if let Ok(val) = U256::from_dec_str(match_id) {
-        val
-    } else {
-        U256::from_big_endian(&ethers_core::utils::keccak256(match_id.as_bytes()))
+    // matchId: decimal string -> uint256; otherwise keccak256 of the raw id bytes.
+    let match_id_val = match U256::from_str_radix(match_id, 10) {
+        Ok(v) => v,
+        Err(_) => U256::from_be_bytes::<32>(keccak256(match_id.as_bytes()).into()),
     };
-    let t_hash = H256::from_slice(transcript_hash);
 
-    let async_result_typehash: [u8; 32] = ethers_core::utils::keccak256(
+    let async_result_typehash = keccak256(
         "AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)".as_bytes(),
     );
-    let struct_hash = ethers_core::utils::keccak256(ethers_core::abi::encode(&[
-        ethers_core::abi::Token::FixedBytes(async_result_typehash.to_vec()),
-        ethers_core::abi::Token::Uint(match_id_val),
-        ethers_core::abi::Token::Uint(U256::from(outcome)),
-        ethers_core::abi::Token::FixedBytes(t_hash.as_bytes().to_vec()),
-    ]));
+    let t_hash: [u8; 32] = transcript_hash.try_into().expect("checked 32 bytes");
 
-    let eip712_domain_typehash: [u8; 32] = ethers_core::utils::keccak256(
+    // struct_hash = keccak256(abi.encode(bytes32 typeHash, uint256 matchId,
+    //   uint256 outcome, bytes32 transcriptHash)) — four ABI words (128 bytes).
+    // Built manually so the encoding is provably byte-identical to ethers'
+    // Token::FixedBytes + Token::Uint and to Solidity's abi.encode (cross-SDK KAT).
+    let mut struct_input = [0u8; 128];
+    struct_input[0..32].copy_from_slice(async_result_typehash.as_slice());
+    struct_input[32..64].copy_from_slice(&match_id_val.to_be_bytes::<32>());
+    struct_input[64..96].copy_from_slice(&U256::from(outcome).to_be_bytes::<32>());
+    struct_input[96..128].copy_from_slice(&t_hash);
+    let struct_hash = keccak256(struct_input);
+
+    let eip712_domain_typehash = keccak256(
         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
             .as_bytes(),
     );
-    let name_hash = ethers_core::utils::keccak256("AMPSettlement".as_bytes());
-    let version_hash = ethers_core::utils::keccak256("1".as_bytes());
-    let domain_separator = ethers_core::utils::keccak256(ethers_core::abi::encode(&[
-        ethers_core::abi::Token::FixedBytes(eip712_domain_typehash.to_vec()),
-        ethers_core::abi::Token::FixedBytes(name_hash.to_vec()),
-        ethers_core::abi::Token::FixedBytes(version_hash.to_vec()),
-        ethers_core::abi::Token::Uint(U256::from(chain_id)),
-        ethers_core::abi::Token::Address(settlement_addr),
-    ]));
+    let name_hash = keccak256("AMPSettlement".as_bytes());
+    let version_hash = keccak256("1".as_bytes());
 
-    let mut digest_input = vec![0x19, 0x01];
-    digest_input.extend_from_slice(&domain_separator);
-    digest_input.extend_from_slice(&struct_hash);
-    Ok(H256::from_slice(&ethers_core::utils::keccak256(
-        &digest_input,
-    )))
+    // domain_separator = keccak256(abi.encode(bytes32, bytes32, bytes32, uint256, address)).
+    let mut domain_input = [0u8; 160];
+    domain_input[0..32].copy_from_slice(eip712_domain_typehash.as_slice());
+    domain_input[32..64].copy_from_slice(name_hash.as_slice());
+    domain_input[64..96].copy_from_slice(version_hash.as_slice());
+    domain_input[96..128].copy_from_slice(&U256::from(chain_id).to_be_bytes::<32>());
+    // Address is right-aligned in its 32-byte word (left-padded with zeros).
+    domain_input[140..160].copy_from_slice(settlement_addr.as_slice());
+    let domain_separator = keccak256(domain_input);
+
+    // digest = keccak256(0x1901 || domain_separator || struct_hash)
+    let mut digest_input = [0u8; 66];
+    digest_input[0] = 0x19;
+    digest_input[1] = 0x01;
+    digest_input[2..34].copy_from_slice(domain_separator.as_slice());
+    digest_input[34..66].copy_from_slice(struct_hash.as_slice());
+    Ok(keccak256(digest_input))
 }
 
 async fn sign_match_outcome(
@@ -588,11 +598,14 @@ async fn sign_match_outcome(
         config.settlement_addr,
     )?;
 
-    let signature = tokio::task::spawn_blocking(move || config.wallet.sign_hash(digest))
-        .await
-        .map_err(|e| anyhow::anyhow!("Spawn blocking failed: {}", e))??;
+    // alloy's `Signer` trait exposes a sync `sign_hash_sync` for local keys
+    // (non-async ECDSA); a single signature is sub-millisecond CPU work.
+    let signature = config
+        .wallet
+        .sign_hash_sync(&digest)
+        .map_err(|e| anyhow::anyhow!("verifier sign_hash failed: {e}"))?;
 
-    Ok(signature.to_vec())
+    Ok(signature.as_bytes().to_vec())
 }
 
 /// Verify a submitter's EIP-712 signature over `(matchId, outcome, transcriptHash)`.
@@ -626,10 +639,13 @@ pub(crate) async fn verify_outcome_signature(
 
     let sig_vec = signature_bytes.to_vec();
     let recovered = tokio::task::spawn_blocking(move || {
-        ethers_core::types::Signature::try_from(&sig_vec[..65])
-            .map_err(|e| anyhow::anyhow!("invalid signature format: {:?}", e))?
-            .recover(digest)
-            .map_err(|e| anyhow::anyhow!("recovery failed: {:?}", e))
+        let sig_arr: [u8; 65] = sig_vec[..65]
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("submitter signature slice not 65 bytes"))?;
+        let sig = alloy_primitives::Signature::from_raw_array(&sig_arr)
+            .map_err(|e| anyhow::anyhow!("invalid signature: {e}"))?;
+        sig.recover_address_from_prehash(&digest)
+            .map_err(|e| anyhow::anyhow!("recovery failed: {e}"))
     })
     .await
     .context("submitter signature verification panicked")??;
@@ -637,8 +653,8 @@ pub(crate) async fn verify_outcome_signature(
     if recovered != expected_address {
         anyhow::bail!(
             "submitter signature does not match participant address (expected 0x{}, recovered 0x{})",
-            hex::encode(expected_address.as_bytes()),
-            hex::encode(recovered.as_bytes())
+            hex::encode(expected_address.as_slice()),
+            hex::encode(recovered.as_slice())
         );
     }
     Ok(())
@@ -838,12 +854,10 @@ async fn process_relayer_task(
         if let Some(client) = client_opt.as_ref() {
             let mut req = client.submit_outcome_request();
 
-            let match_id_val = if let Ok(val) = U256::from_dec_str(&task.match_id) {
-                let mut b = [0u8; 32];
-                val.to_big_endian(&mut b);
-                b.to_vec()
+            let match_id_val = if let Ok(val) = U256::from_str_radix(&task.match_id, 10) {
+                val.to_be_bytes::<32>().to_vec()
             } else {
-                let hash = ethers_core::utils::keccak256(task.match_id.as_bytes());
+                let hash = keccak256(task.match_id.as_bytes());
                 hash.to_vec()
             };
 
@@ -1576,11 +1590,11 @@ impl game_session_service::Server for GameSessionServiceImpl {
                 .await
             {
                 Ok(address) => {
-                    let player_id = format!("0x{}", hex::encode(address.as_bytes()));
+                    let player_id = format!("0x{}", hex::encode(address.as_slice()));
 
                     {
                         let mut profile = state.players.entry(player_id.clone()).or_default();
-                        profile.wallet_address = address.as_bytes().to_vec();
+                        profile.wallet_address = address.as_slice().to_vec();
                         profile.is_online = true;
                         profile.last_login = state::now_ns();
                         let profile_clone = profile.clone();
@@ -2086,7 +2100,6 @@ async fn cleanup_on_disconnect(player_id: &str, state: AppState, queue: MatchQue
 mod tests {
     use super::*;
     use crate::state::{InnerState, StoredRuleSet};
-    use ethers_signers::Signer;
     use std::sync::Arc;
     use tokio::sync::oneshot;
 
@@ -2216,7 +2229,7 @@ mod tests {
     /// End-to-end: a wallet signs the digest, the server recovers the right address.
     #[tokio::test]
     async fn test_verify_outcome_signature_round_trip() {
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let expected_address = wallet.address();
         let settlement = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
             .parse::<Address>()
@@ -2225,7 +2238,7 @@ mod tests {
 
         let digest =
             compute_outcome_eip712_digest("42", 1, &transcript, 43113, settlement).unwrap();
-        let sig = wallet.sign_hash(digest).unwrap().to_vec();
+        let sig = wallet.sign_hash_sync(&digest).unwrap().as_bytes().to_vec();
 
         verify_outcome_signature(
             &sig,
@@ -2240,7 +2253,7 @@ mod tests {
         .expect("self-signed signature must verify");
 
         // Wrong expected address must fail.
-        let other = LocalWallet::new(&mut rand::thread_rng()).address();
+        let other = PrivateKeySigner::random().address();
         let err = verify_outcome_signature(&sig, "42", 1, &transcript, other, 43113, settlement)
             .await
             .unwrap_err();
@@ -2258,7 +2271,7 @@ mod tests {
             "1",
             1,
             &[0u8; 32],
-            Address::zero(),
+            Address::ZERO,
             43113,
             settlement,
         )

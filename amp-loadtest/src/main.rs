@@ -174,8 +174,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::Parser;
-use ethers_core::types::H256;
-use ethers_signers::{LocalWallet, Signer};
+use alloy_primitives::{eip191_hash_message, keccak256, B256};
+use alloy_signer::SignerSync;
+use alloy_signer_local::PrivateKeySigner;
 use hdrhistogram::Histogram;
 use tokio::net::TcpStream;
 use tokio::task::LocalSet;
@@ -222,8 +223,8 @@ async fn run_client(
     let total_start = Instant::now();
 
     let key_input = format!("amp-loadtest-client-{}", client_id);
-    let key_bytes = ethers_core::utils::keccak256(key_input);
-    let wallet = LocalWallet::from_bytes(&key_bytes).expect("valid loadtest wallet key");
+    let key_bytes = keccak256(key_input);
+    let wallet = PrivateKeySigner::from_slice(key_bytes.as_slice()).expect("valid loadtest wallet key");
 
     let connect_start = Instant::now();
     let stream = match TcpStream::connect(addr).await {
@@ -316,15 +317,15 @@ async fn run_client(
 async fn login(
     service: &service_capnp::game_session_service::Client,
     game_id: u64,
-    wallet: &LocalWallet,
+    wallet: &PrivateKeySigner,
 ) -> Result<service_capnp::user_session::Client> {
     let mut challenge_req = service.request_challenge_request();
     challenge_req.get().set_game_id(game_id);
     let challenge_resp = challenge_req.send().promise.await?;
     let challenge_bytes = challenge_resp.get()?.get_challenge()?.to_vec();
 
-    let msg_hash: H256 = ethers_core::utils::hash_message(&challenge_bytes);
-    let sig = wallet.sign_hash(msg_hash)?;
+    let msg_hash: B256 = eip191_hash_message(&challenge_bytes);
+    let sig = wallet.sign_hash_sync(&msg_hash)?.as_bytes().to_vec();
     let sig_bytes = sig.to_vec();
 
     let mut req = service.login_request();
@@ -340,7 +341,7 @@ async fn request_match(
     session: &service_capnp::user_session::Client,
     client_id: u64,
     deadline: Instant,
-    wallet: &LocalWallet,
+    wallet: &PrivateKeySigner,
 ) -> Result<(service_capnp::match_session::Client, Vec<u8>)> {
     let mut req = session.request_match_request();
     {
@@ -360,7 +361,7 @@ async fn request_match(
             pi.set_display_name(format!("Player {client_id}"));
             // Phase 2.6: bind the match to the client's real wallet so the
             // submit_outcome signature recovers to this player (post-S1).
-            pi.set_player_wallet(wallet.address().as_ref());
+            pi.set_player_wallet(wallet.address().as_slice());
         }
     }
 
@@ -377,7 +378,7 @@ async fn submit_outcome(
     match_session: &service_capnp::match_session::Client,
     match_id: &[u8],
     client_id: u64,
-    wallet: &LocalWallet,
+    wallet: &PrivateKeySigner,
 ) -> Result<()> {
     // Phase 2.6: compute a REAL EIP-712 outcome signature so the post-S1
     // verifier accepts it (previously sent [0u8;65], which the server now
@@ -392,11 +393,11 @@ async fn submit_outcome(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(43113u64);
-    let verifying_contract: [u8; 20] = std::env::var("AMP_SETTLEMENT_ADDRESS")
+    let verifying_contract: alloy_primitives::Address = std::env::var("AMP_SETTLEMENT_ADDRESS")
         .ok()
-        .and_then(|v| v.parse::<ethers_core::types::H160>().ok())
-        .unwrap_or_default()
-        .0;
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_default();
+    let verifying_contract: [u8; 20] = verifying_contract.into();
     let match_id_str = String::from_utf8_lossy(match_id);
     let digest = amp_sdk::compute_outcome_eip712_digest(
         &match_id_str,
@@ -405,8 +406,8 @@ async fn submit_outcome(
         chain_id,
         &verifying_contract,
     )?;
-    let sig = wallet.sign_hash(ethers_core::types::H256::from(digest))?;
-    let sig_bytes = sig.to_vec();
+    let sig = wallet.sign_hash_sync(&B256::from(digest))?.as_bytes().to_vec();
+    let sig_bytes = sig;
 
     let mut req = match_session.submit_outcome_request();
     {

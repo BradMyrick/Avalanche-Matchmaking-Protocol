@@ -1,7 +1,6 @@
 use crate::state::now_ns;
+use alloy_primitives::{eip191_hash_message, Address, B256, Signature};
 use anyhow::{Context, Result, bail};
-use ethers_core::types::{Address, H256, Signature};
-use ethers_core::utils::hash_message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -88,7 +87,7 @@ impl AuthService {
                 .context("signature recovery panicked")?
                 .context("failed to recover address from signature")?;
 
-        let address_hex = hex::encode(address.as_bytes());
+        let address_hex = hex::encode(address.as_slice());
         info!(target: "auth", "Recovered address: 0x{}", address_hex);
 
         let challenge_text = String::from_utf8_lossy(challenge_payload);
@@ -121,11 +120,15 @@ impl AuthService {
         let msg = entry.message.clone();
         let sig_65 = sig_bytes[..65].to_vec();
         let recovered = tokio::task::spawn_blocking(move || {
-            let expected_hash: H256 = hash_message(&msg);
-            Signature::try_from(&sig_65[..])
-                .map_err(|e| anyhow::anyhow!("invalid signature: {:?}", e))?
-                .recover(expected_hash)
-                .map_err(|e| anyhow::anyhow!("recovery failed: {:?}", e))
+            let arr: [u8; 65] = sig_65
+                .as_slice()
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("signature slice not 65 bytes"))?;
+            let sig = Signature::from_raw_array(&arr)
+                .map_err(|e| anyhow::anyhow!("invalid signature: {e}"))?;
+            let expected_hash: B256 = eip191_hash_message(&msg);
+            sig.recover_address_from_prehash(&expected_hash)
+                .map_err(|e| anyhow::anyhow!("recovery failed: {e}"))
         })
         .await
         .context("signature verification panicked")??;
@@ -166,8 +169,11 @@ fn recover_address_from_sig(sig_bytes: &[u8], payload: &[u8]) -> Result<Address>
         bail!("signature too short: {} bytes", sig_bytes.len());
     }
 
-    let sig = Signature::try_from(&sig_bytes[..65])
-        .map_err(|e| anyhow::anyhow!("invalid signature format: {:?}", e))?;
+    let arr: [u8; 65] = sig_bytes[..65]
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("signature slice not 65 bytes"))?;
+    let sig = Signature::from_raw_array(&arr)
+        .map_err(|e| anyhow::anyhow!("invalid signature format: {e}"))?;
 
     let payload = if payload.is_empty() {
         b"AMP_LOGIN"
@@ -175,10 +181,10 @@ fn recover_address_from_sig(sig_bytes: &[u8], payload: &[u8]) -> Result<Address>
         payload
     };
 
-    let msg_hash: H256 = hash_message(payload);
+    let msg_hash: B256 = eip191_hash_message(payload);
     let address = sig
-        .recover(msg_hash)
-        .map_err(|e| anyhow::anyhow!("address recovery failed: {:?}", e))?;
+        .recover_address_from_prehash(&msg_hash)
+        .map_err(|e| anyhow::anyhow!("address recovery failed: {e}"))?;
 
     Ok(address)
 }
@@ -220,18 +226,19 @@ mod tests {
     // the real challenge lifecycle (unknown/expired nonce, wrong game, sig
     // mismatch, valid round-trip) using a real ECDSA wallet.
 
-    use ethers_core::utils::hash_message;
-    use ethers_signers::{LocalWallet, Signer};
+    use alloy_primitives::{eip191_hash_message, keccak256};
+    use alloy_signer::SignerSync;
+    use alloy_signer_local::PrivateKeySigner;
 
-    fn test_wallet() -> LocalWallet {
+    fn test_wallet() -> PrivateKeySigner {
         // Deterministic key for reproducible tests.
-        LocalWallet::from_bytes(&ethers_core::utils::keccak256(b"amp-auth-test-wallet-key"))
+        PrivateKeySigner::from_slice(keccak256(b"amp-auth-test-wallet-key").as_slice())
             .expect("valid wallet")
     }
 
-    async fn sign(wallet: &LocalWallet, msg: &[u8]) -> Vec<u8> {
-        let h: ethers_core::types::H256 = hash_message(msg);
-        wallet.sign_hash(h).expect("sign").to_vec()
+    async fn sign(wallet: &PrivateKeySigner, msg: &[u8]) -> Vec<u8> {
+        let h: B256 = eip191_hash_message(msg);
+        wallet.sign_hash_sync(&h).expect("sign").as_bytes().to_vec()
     }
 
     #[tokio::test]
