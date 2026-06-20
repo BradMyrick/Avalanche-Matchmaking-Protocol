@@ -271,7 +271,9 @@ impl SettlementQueue {
         state: &RelayerState,
         nonce_manager: &NonceManager,
     ) -> Result<(), RelayerError> {
-        let (game_id, _, _, _, _, _) = state
+        // 7-tuple: (gameId, playerA, state, playerB, createdAt, stakeAmount, stakeAmountB).
+        // stakeAmountB was added in Phase 1.5 for fee-on-transfer support.
+        let (game_id, _, _, _, _, _, _) = state
             .registry
             .matches(match_id)
             .call()

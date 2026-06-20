@@ -35,7 +35,7 @@ contract AMPRegistryTest is Test {
         vm.prank(playerA);
         uint256 matchId = 0;
         registry.createMatch{value: 0.1 ether}(gameId, matchId, 0.1 ether);
-        (, address pA, AMPTypes.MatchState state, address pB,, uint256 stake) = registry.matches(matchId);
+        (, address pA, AMPTypes.MatchState state, address pB,, uint256 stake,) = registry.matches(matchId);
         assertEq(pA, playerA);
         assertEq(pB, address(0));
         assertEq(stake, 0.1 ether);
@@ -51,7 +51,7 @@ contract AMPRegistryTest is Test {
         registry.createMatch{value: 0.1 ether}(gameId, matchId, 0.1 ether);
         vm.prank(playerB);
         registry.joinMatch{value: 0.1 ether}(matchId);
-        (, address pA, AMPTypes.MatchState state, address pB,,) = registry.matches(matchId);
+        (, address pA, AMPTypes.MatchState state, address pB,,,) = registry.matches(matchId);
         assertEq(pA, playerA);
         assertEq(pB, playerB);
         assertEq(uint256(state), uint256(AMPTypes.MatchState.READY));
@@ -148,7 +148,7 @@ contract AMPRegistryTest is Test {
         vm.prank(playerA);
         registry.withdraw(address(0));
         assertEq(playerA.balance, balanceBefore + 0.1 ether);
-        (,, AMPTypes.MatchState state,,,) = registry.matches(matchId);
+        (,, AMPTypes.MatchState state,,,,) = registry.matches(matchId);
         assertEq(uint256(state), uint256(AMPTypes.MatchState.SETTLED));
     }
 
@@ -185,7 +185,7 @@ contract AMPRegistryTest is Test {
         registry.withdraw(address(0));
         assertEq(playerA.balance, balanceA + 0.1 ether);
         assertEq(playerB.balance, balanceB + 0.1 ether);
-        (,, AMPTypes.MatchState state,,,) = registry.matches(matchId);
+        (,, AMPTypes.MatchState state,,,,) = registry.matches(matchId);
         assertEq(uint256(state), uint256(AMPTypes.MatchState.EXPIRED));
     }
 

@@ -52,6 +52,31 @@ signing, transport, or RPC-boundary validation code.
 | **S14** | Go SDK returned a `MatchID` slice backed by the released capnp answer buffer (use-after-free risk). | **FIXED** | `RequestMatch` and `Reconnect` now defensively copy `matchID` into an owned `[]byte`. |
 | **S15** | Login signature verification used `sig_bytes[..65]` and ignored trailing bytes; no canonical-s check. | **DOCUMENTED** | ethers' `Signature::try_from` accepts the canonical form; trailing bytes are now length-checked up front (must be exactly 65). Strict canonical-s enforcement is left to the ethers library. |
 
+## Smart Contract Findings (Phase 1 hardening)
+
+The original `SECURITY_REVIEW.md` covered only the SDK and Rust server. The
+investor due-diligence audit found the Solidity contracts had **never been
+reviewed** here. Phase 1 closes the HIGH-severity custody bug and adds the
+hardening below; a third-party audit is scoped for Phase 6.5.
+
+| ID | Finding | Severity | Status | Resolution / Test |
+|:---|:---|:---|:---|:---|
+| **C1** | `_payout` silently trapped ~99% of the pool when `outcome == NONE` (no if-branch → 0 credits, match marked SETTLED). | **HIGH** | **FIXED** | `AMPSettlement._payout` reverts `InvalidOutcome` on NONE and any unhandled enum value. Tests: `testSubmitAsyncRevertsOnNoneOutcome`, `testResolveDisputeRevertsOnNoneOutcome`, `testFuzz_SettlementConservesValue`. |
+| **C2** | `joinMatch` reverted for fee-on-transfer tokens (`received != stakeAmount`). | MEDIUM | **FIXED** | Per-player actual-stake tracking (`stakeAmountB`); balance-delta measurement in `joinMatch`. Test: `testFeeOnTransferTokenSettlesAndRefundsActual`. |
+| **C3** | Hand-rolled reentrancy guard; `AMPSettlement` had none. | MEDIUM | **FIXED** | OpenZeppelin `ReentrancyGuard` on both contracts. |
+| **C4** | Owner economic controls (fee bps, fee recipient) had no timelock — a compromised key could extract in the same block. | MEDIUM | **FIXED** | Governance via `TimelockController` documented + tested. Tests: `AMPGovernance.t.sol` (3 tests). |
+| **C5** | Hand-rolled EIP-712 domain separator bypassed audited OZ `EIP712`. | LOW | **FIXED** | Switched to OpenZeppelin `EIP712`; Solidity-side KAT pins the cross-language digest vector. Test: `testEIP712DigestMatchesCrossLangVector`. |
+| **C6** | No value-conservation invariant / fuzz coverage. | MEDIUM | **FIXED** | `testFuzz_SettlementConservesValue` (outcome+stake fuzz) + `invariant_registryNativeBacksAllCredits` (256-run handler invariant). |
+| **C7** | No Slither config, no coverage profile. | LOW | **FIXED** | `contracts/slither.config.json` + `[profile.coverage]`; CI gate lands in Phase 5. |
+
+### Trust model (unchanged by Phase 1 — operational, documented)
+- A single whitelisted verifier key per game can settle any match in that game;
+  key hygiene is enforced off-chain. Phase 6 + Phase 7 add multisig/timelock
+  ownership and a third-party audit.
+- The deployer of `AMPRegistry`/`AMPSettlement` is the initial owner and fee
+  recipient; the Phase 7 deploy runbook transfers ownership to a
+  `TimelockController`-gated multisig before mainnet.
+
 ## Performance fixes
 
 | ID | Finding | Status |

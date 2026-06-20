@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import "../src/AMPSettlement.sol";
 import "../src/AMPRegistry.sol";
 import "../src/AMPTypes.sol";
+import "./mocks/FeeOnTransferToken.sol";
 import "openzeppelin-contracts/contracts/utils/Pausable.sol";
 
 contract AMPSettlementTest is Test {
@@ -306,5 +307,113 @@ contract AMPSettlementTest is Test {
         vm.prank(playerA);
         vm.expectRevert(AMPRegistry.NoPendingWithdrawal.selector);
         registry.withdraw(address(0));
+    }
+
+    // ---- Phase 1.1: F1 fix — OutcomeCode.NONE must never settle. ----
+    // A verifier (or arbiter) supplying outcome NONE previously caused _payout
+    // to fall through its if-chain, marking the match SETTLED while crediting
+    // both players 0 and permanently trapping ~99% of the pool.
+
+    function testSubmitAsyncRevertsOnNoneOutcome() public {
+        uint256 matchId = _setupAsyncGameAndMatch();
+        bytes32 transcriptHash = bytes32(uint256(0x5678));
+        bytes memory signature = _signResult(matchId, AMPTypes.OutcomeCode.NONE, transcriptHash, verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId, outcome: AMPTypes.OutcomeCode.NONE, transcriptHash: transcriptHash, signature: signature
+        });
+        vm.expectRevert(AMPSettlement.InvalidOutcome.selector);
+        settlement.submitAsyncResult(matchId, result);
+    }
+
+    function testResolveDisputeRevertsOnNoneOutcome() public {
+        uint256 matchId = _setupRTGameAndMatch();
+        AMPTypes.RealTimeHashResult memory resultA = AMPTypes.RealTimeHashResult({
+            matchId: matchId, outcome: AMPTypes.OutcomeCode.WIN_A, transcriptHash: bytes32(uint256(1))
+        });
+        AMPTypes.RealTimeHashResult memory resultB = AMPTypes.RealTimeHashResult({
+            matchId: matchId, outcome: AMPTypes.OutcomeCode.WIN_B, transcriptHash: bytes32(uint256(2))
+        });
+        vm.prank(playerA);
+        settlement.submitRealTimeHashResult(matchId, resultA);
+        vm.prank(playerB);
+        settlement.submitRealTimeHashResult(matchId, resultB);
+        // Match is now DISPUTED. Arbiter may NOT resolve to NONE.
+        vm.prank(admin);
+        vm.expectRevert(AMPSettlement.InvalidOutcome.selector);
+        settlement.resolveDispute(matchId, AMPTypes.OutcomeCode.NONE);
+    }
+
+    // ---- Phase 1.6: Solidity-side EIP-712 KAT vs the cross-language vector. ----
+    // Pins the contract's domain/struct hashing to the same digest the Rust,
+    // Go, C#, Python, and JS SDKs produce for the shared vector:
+    //   matchId=1, outcome=1(WIN_A), transcript=zero[32],
+    //   chainId=43113, verifyingContract=0x0
+    //   -> 0x2d2525ad5098ca8f82a2a6cabc6775c40a55df96dfa2fbb46d7c0e372b99096c
+    function testEIP712DigestMatchesCrossLangVector() public view {
+        bytes32 eip712DomainTypehash =
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+        bytes32 domain = keccak256(
+            abi.encode(
+                eip712DomainTypehash,
+                keccak256(bytes("AMPSettlement")),
+                keccak256(bytes("1")),
+                uint256(43113),
+                address(0)
+            )
+        );
+        bytes32 structHash = keccak256(abi.encode(settlement.ASYNC_RESULT_TYPEHASH(), uint256(1), uint8(1), bytes32(0)));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domain, structHash));
+        assertEq(
+            digest,
+            bytes32(0x2d2525ad5098ca8f82a2a6cabc6775c40a55df96dfa2fbb46d7c0e372b99096c),
+            "Solidity digest must match the cross-language SDK KAT vector"
+        );
+    }
+
+    // ---- Phase 1.5: fee-on-transfer token support (joined stakes tracked). ----
+    // After the fix, a 1% fee token lets both players join and settle; each
+    // player's payout reflects the actual received (post-fee) stake rather than
+    // reverting on the stale `received != stakeAmount` equality check.
+    function testFeeOnTransferTokenSettlesAndRefundsActual() public {
+        FeeOnTransferToken token = new FeeOnTransferToken();
+        token.transfer(playerA, 10 ether);
+        token.transfer(playerB, 10 ether);
+
+        address[] memory verifiers = new address[](1);
+        verifiers[0] = verifierPubKey;
+        vm.prank(admin);
+        uint256 gameId = registry.registerGame(
+            AMPTypes.SettlementMode.ASYNC_VERIFIER, verifiers, 1 ether, address(token), address(0)
+        );
+
+        uint256 matchId = 777;
+        vm.startPrank(playerA);
+        token.approve(address(registry), 1 ether);
+        registry.createMatch(gameId, matchId, 1 ether);
+        vm.stopPrank();
+
+        vm.startPrank(playerB);
+        token.approve(address(registry), 1 ether);
+        registry.joinMatch(matchId);
+        vm.stopPrank();
+
+        // Each player sent 1e18; A's actual received stake is 0.99e18 (1% fee),
+        // and B transfers that 0.99e18 and receives 0.99*0.99 = 0.9801e18.
+        (,,,,,, uint256 stakeB) = registry.matches(matchId);
+        assertEq(stakeB, 0.9801 ether, "player B actual stake must be post-fee (compounded)");
+
+        // Settle CANCELLED — each player refunds exactly what they staked.
+        bytes32 transcriptHash = bytes32(uint256(0xC0FFEE));
+        bytes memory signature = _signResult(matchId, AMPTypes.OutcomeCode.CANCELLED, transcriptHash, verifierPrivKey);
+        AMPTypes.AsyncResult memory result = AMPTypes.AsyncResult({
+            matchId: matchId,
+            outcome: AMPTypes.OutcomeCode.CANCELLED,
+            transcriptHash: transcriptHash,
+            signature: signature
+        });
+        settlement.submitAsyncResult(matchId, result);
+
+        assertEq(registry.pendingWithdrawals(address(token), playerA), 0.99 ether);
+        assertEq(registry.pendingWithdrawals(address(token), playerB), 0.9801 ether);
     }
 }

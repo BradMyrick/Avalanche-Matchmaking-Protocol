@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.33;
 
 library AMPTypes {
@@ -39,7 +39,11 @@ library AMPTypes {
         AMPTypes.MatchState state;
         address playerB;
         uint64 createdAt;
+        // Player A's actual received stake (balance-delta, fee-on-transfer safe).
         uint256 stakeAmount;
+        // Player B's actual received stake (balance-delta, fee-on-transfer safe).
+        // Zero until joinMatch. For standard tokens this equals `stakeAmount`.
+        uint256 stakeAmountB;
     }
 
     struct Settlement {

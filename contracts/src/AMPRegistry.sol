@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.33;
 
 import "./AMPTypes.sol";
@@ -6,11 +6,11 @@ import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 import "openzeppelin-contracts/contracts/utils/Pausable.sol";
+import "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
-contract AMPRegistry is Ownable2Step, Pausable {
+contract AMPRegistry is Ownable2Step, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    error NoReentrancy();
     error NotSettlement();
     error TooManyVerifiers();
     error RTModeRequiresArbiter();
@@ -39,15 +39,6 @@ contract AMPRegistry is Ownable2Step, Pausable {
 
     mapping(address => uint256) public feeBalances;
     mapping(address => mapping(address => uint256)) public pendingWithdrawals;
-
-    bool private locked;
-
-    modifier nonReentrant() {
-        if (locked) revert NoReentrancy();
-        locked = true;
-        _;
-        locked = false;
-    }
 
     mapping(uint256 => AMPTypes.Game) public games;
     mapping(uint256 => AMPTypes.Match) public matches;
@@ -142,6 +133,7 @@ contract AMPRegistry is Ownable2Step, Pausable {
             playerA: msg.sender,
             playerB: address(0),
             stakeAmount: actualStake,
+            stakeAmountB: 0,
             state: AMPTypes.MatchState.OPEN,
             createdAt: uint64(block.timestamp)
         });
@@ -158,12 +150,17 @@ contract AMPRegistry is Ownable2Step, Pausable {
 
         if (game.stakeToken == address(0)) {
             if (msg.value != m.stakeAmount) revert StakeMismatch();
+            m.stakeAmountB = msg.value;
         } else {
             if (msg.value != 0) revert NativeTokenSentForERC20();
+            // Fee-on-transfer safe: record what actually arrived (release Phase 1.5).
+            // For standard tokens `received == m.stakeAmount`; for fee-on-transfer
+            // tokens `received < m.stakeAmount` and payouts use the actual totals.
             uint256 balBefore = IERC20(game.stakeToken).balanceOf(address(this));
             IERC20(game.stakeToken).safeTransferFrom(msg.sender, address(this), m.stakeAmount);
             uint256 received = IERC20(game.stakeToken).balanceOf(address(this)) - balBefore;
-            if (received != m.stakeAmount) revert StakeMismatch();
+            if (received == 0) revert StakeMismatch();
+            m.stakeAmountB = received;
         }
 
         m.playerB = msg.sender;
@@ -206,7 +203,8 @@ contract AMPRegistry is Ownable2Step, Pausable {
         uint256 amount = m.stakeAmount;
         pendingWithdrawals[token][m.playerA] += amount;
         if (m.playerB != address(0)) {
-            pendingWithdrawals[token][m.playerB] += amount;
+            // Refund player B their actual received stake (fee-on-transfer safe).
+            pendingWithdrawals[token][m.playerB] += m.stakeAmountB;
         }
 
         emit MatchExpired(matchId);
