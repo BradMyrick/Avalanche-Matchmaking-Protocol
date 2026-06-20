@@ -10,6 +10,7 @@ members = [
     "amp-sdk/js/native",
     "amp-loadtest",
     "amp-integration-tests",
+    "amp-benches",
 ]
 
 # Single source of truth for package metadata. All workspace members inherit

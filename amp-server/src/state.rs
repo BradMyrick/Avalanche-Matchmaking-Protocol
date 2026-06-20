@@ -436,8 +436,14 @@ pub const SETTLED_ARCHIVE_TREE: &str = "settled_matches";
 
 pub struct InnerState {
     pub players: DashMap<AmpId, StoredPlayerProfile>,
+    /// Read-heavy / write-rare → `ArcSwap` snapshot is the right structure.
     pub rulesets: Arc<ArcSwap<HashMap<AmpId, Arc<StoredRuleSet>>>>,
-    pub active_matches: Arc<ArcSwap<HashMap<String, ActiveMatch>>>,
+    /// Read+write hot path → `DashMap` (shard-locked, O(1), no clone).
+    ///
+    /// Phase 2.1: previously `Arc<ArcSwap<HashMap<…>>>`, which cloned the
+    /// entire map on every insert/update/archive (~1.5–2 MB at 10k matches),
+    /// dominating matchmaking latency. `DashMap` mutates in place.
+    pub active_matches: DashMap<String, ActiveMatch>,
     pub match_event_senders: DashMap<String, Vec<tokio::sync::mpsc::UnboundedSender<MatchEvent>>>,
     persistence: Option<Persistence>,
 }
@@ -447,7 +453,7 @@ impl InnerState {
         let state = Self {
             players: DashMap::new(),
             rulesets: Arc::new(ArcSwap::from_pointee(HashMap::new())),
-            active_matches: Arc::new(ArcSwap::from_pointee(HashMap::new())),
+            active_matches: DashMap::new(),
             match_event_senders: DashMap::new(),
             persistence,
         };
@@ -465,40 +471,50 @@ impl InnerState {
                 state.rulesets.store(Arc::new(rs));
             }
             if let Ok(matches) = p.load_all::<ActiveMatch>("matches") {
-                let mut am = HashMap::new();
                 for (id, m) in matches {
-                    am.insert(id, m);
+                    state.active_matches.insert(id, m);
                 }
-                state.active_matches.store(Arc::new(am));
             }
         }
         state
     }
 
+    /// Number of matches currently in the active store. O(1)-ish (sums shard
+    /// len counters). Used by metrics + matchmaker backpressure.
+    pub fn active_match_count(&self) -> usize {
+        self.active_matches.len()
+    }
+
+    /// Clone a match out of the store (guard dropped before return). Used by
+    /// call sites that need the fields but must not hold a shard lock across
+    /// an `await` or a long scope.
+    pub fn get_active_match(&self, match_id: &str) -> Option<ActiveMatch> {
+        self.active_matches.get(match_id).map(|r| r.clone())
+    }
+
+    /// Snapshot every active match as owned `(id, match)` pairs. Only call from
+    /// rare paths (player disconnect fan-out, shutdown drain) — it walks + clones.
+    pub fn active_matches_snapshot(&self) -> Vec<(String, ActiveMatch)> {
+        self.active_matches
+            .iter()
+            .map(|r| (r.key().clone(), r.value().clone()))
+            .collect()
+    }
+
     pub fn insert_active_match(&self, match_id: String, active: ActiveMatch) {
-        self.active_matches.rcu(|am| {
-            let mut matches = (**am).clone();
-            matches.insert(match_id.clone(), active.clone());
-            matches
-        });
+        self.active_matches.insert(match_id, active);
     }
 
     pub fn update_active_match<F>(&self, match_id: &str, mut f: F) -> Option<()>
     where
         F: FnMut(&mut ActiveMatch),
     {
-        let mut updated = false;
-        self.active_matches.rcu(|am| {
-            let mut matches = (**am).clone();
-            if let Some(m) = matches.get_mut(match_id) {
-                f(m);
-                updated = true;
-            } else {
-                updated = false;
-            }
-            matches
-        });
-        if updated { Some(()) } else { None }
+        if let Some(mut m) = self.active_matches.get_mut(match_id) {
+            f(m.value_mut());
+            Some(())
+        } else {
+            None
+        }
     }
 
     /// Called by the settlement-reconciliation loop when the relayer reports a
@@ -625,11 +641,10 @@ impl InnerState {
         {
             warn!(target: "persist", "Failed to archive settled match {}: {}", id, e);
         }
-        self.active_matches.rcu(|am| {
-            let mut matches = (**am).clone();
-            matches.remove(id);
-            matches
-        });
+        // O(1) shard removal (Phase 2.1: was a full-map clone via `rcu`).
+        if self.active_matches.remove(id).is_none() {
+            warn!(target: "cleanup", "archive_settled_match: match {} absent from active store", id);
+        }
         if let Some(ref p) = self.persistence
             && let Err(e) = p.delete("matches", id).await
         {
@@ -639,60 +654,45 @@ impl InnerState {
 
     pub async fn cleanup_expired_matches(&self) -> usize {
         let now = now_ms();
-        let expired: Vec<String> = {
-            let matches = self.active_matches.load();
-            matches
-                .iter()
-                .filter(|(_, m)| {
-                    if m.settled
-                        && let Some(settled_at) = m.settled_at_ms
-                    {
-                        return now.saturating_sub(settled_at) > MATCH_TTL_MS;
-                    }
-                    if let Some(expires_at) = m.expires_at_ms {
-                        return now > expires_at && !m.settled;
-                    }
-                    false
-                })
-                .map(|(id, _)| id.clone())
-                .collect()
-        };
+        // Single pass: collect owned snapshots of expired matches. Iteration
+        // takes shard read-locks only briefly per shard (DashMap iter does not
+        // hold all shards at once), and we never mutate during iteration.
+        let expired: Vec<(String, ActiveMatch)> = self
+            .active_matches
+            .iter()
+            .filter(|r| {
+                let m = r.value();
+                if m.settled
+                    && let Some(settled_at) = m.settled_at_ms
+                {
+                    return now.saturating_sub(settled_at) > MATCH_TTL_MS;
+                }
+                if let Some(expires_at) = m.expires_at_ms {
+                    return now > expires_at && !m.settled;
+                }
+                false
+            })
+            .map(|r| (r.key().clone(), r.value().clone()))
+            .collect();
 
         let count = expired.len();
-        if count > 0 {
-            // First collect the matches we are going to remove
-            let mut to_persist = Vec::new();
-            {
-                let am = self.active_matches.load();
-                for id in &expired {
-                    if let Some(m) = am.get(id) {
-                        to_persist.push((id.clone(), m.clone()));
-                    }
+        for (id, m) in &expired {
+            if let Some(ref p) = self.persistence {
+                if let Err(e) = p.save(SETTLED_ARCHIVE_TREE, id, m).await {
+                    error!(target: "cleanup", "Failed to archive expired match {}: {}", id, e);
+                }
+                if let Err(e) = p.delete("matches", id).await {
+                    error!(target: "cleanup", "Failed to delete expired match {}: {}", id, e);
                 }
             }
-
-            // Do persistence (async)
-            for (id, m) in to_persist {
-                if let Some(ref p) = self.persistence {
-                    if let Err(e) = p.save(SETTLED_ARCHIVE_TREE, &id, &m).await {
-                        error!(target: "cleanup", "Failed to archive expired match {}: {}", id, e);
-                    }
-                    if let Err(e) = p.delete("matches", &id).await {
-                        error!(target: "cleanup", "Failed to delete expired match {}: {}", id, e);
-                    }
-                }
-                self.remove_event_senders(&id);
-                warn!(target: "cleanup", "Expired match {} (settled={}, created={}ms ago)", id, m.settled, now.saturating_sub(m.created_at_ms));
-            }
-
-            // Finally, reliably remove them from the map via rcu
-            self.active_matches.rcu(|am| {
-                let mut matches = (**am).clone();
-                for id in &expired {
-                    matches.remove(id);
-                }
-                matches
-            });
+            self.remove_event_senders(id);
+            warn!(
+                target: "cleanup",
+                "Expired match {} (settled={}, created={}ms ago)",
+                id, m.settled, now.saturating_sub(m.created_at_ms)
+            );
+            // O(1) removal per expired id (Phase 2.1: was a second full-map clone).
+            self.active_matches.remove(id);
         }
         count
     }

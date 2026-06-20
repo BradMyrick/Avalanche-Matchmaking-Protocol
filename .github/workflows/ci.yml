@@ -2,9 +2,9 @@ name: AMP CI
 
 on:
   push:
-    branches: [main, mvp]
+    branches: [main, prodpath]
   pull_request:
-    branches: [main, mvp]
+    branches: [main, prodpath]
 
 env:
   CARGO_TERM_COLOR: always
@@ -71,6 +71,30 @@ jobs:
 
       - name: Run all workspace tests
         run: cargo test --workspace
+
+  perf-gate:
+    # Phase 2.7 — latency regression gate. Fails if the matchstore hot path
+    # regresses past the sub-100µs budget (e.g. a reversion to the
+    # clone-on-write ArcSwap design that took ~1.4ms at 10k entries).
+    name: Perf Gate (matchstore latency)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: perf-gate
+
+      - name: Latency gate test
+        run: cargo test -p amp-benches --tests -- --nocapture
+
+      - name: Informational criterion bench
+        run: cargo bench -p amp-benches --bench matchstore || true
+
 
   test-contracts:
     name: Foundry Contracts

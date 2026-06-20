@@ -175,7 +175,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use clap::Parser;
 use ethers_core::types::H256;
-use ethers_signers::LocalWallet;
+use ethers_signers::{LocalWallet, Signer};
 use hdrhistogram::Histogram;
 use tokio::net::TcpStream;
 use tokio::task::LocalSet;
@@ -261,7 +261,10 @@ async fn run_client(
     });
 
     let login_start = Instant::now();
-    let session = match login(&service, client_id, &wallet).await {
+    // Bucket clients into a small game pool so the matchmaker can pair them
+    // (request_match uses the SESSION game_id from login, so the shared bucket
+    // must be established here, not in the request payload).
+    let session = match login(&service, client_id % 8, &wallet).await {
         Ok(s) => s,
         Err(e) => {
             error!(client_id, "login failed: {e}");
@@ -278,14 +281,15 @@ async fn run_client(
     }
 
     let match_start = Instant::now();
-    let (match_session, match_id) = match request_match(&session, client_id, deadline).await {
-        Ok(r) => r,
-        Err(e) => {
-            warn!(client_id, "match request failed: {e}");
-            stats.errors.fetch_add(1, Ordering::Relaxed);
-            return;
-        }
-    };
+    let (match_session, match_id) =
+        match request_match(&session, client_id, deadline, &wallet).await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(client_id, "match request failed: {e}");
+                stats.errors.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+        };
     let match_ns = match_start.elapsed().as_nanos() as u64;
     stats.match_found.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut h) = match_hist.lock() {
@@ -294,7 +298,7 @@ async fn run_client(
             .map_err(|e| tracing::warn!("Histogram record failed: {}", e));
     }
 
-    if let Err(e) = submit_outcome(&match_session, &match_id, client_id).await {
+    if let Err(e) = submit_outcome(&match_session, &match_id, client_id, &wallet).await {
         warn!(client_id, "outcome submission failed: {e}");
         stats.errors.fetch_add(1, Ordering::Relaxed);
     } else {
@@ -311,11 +315,11 @@ async fn run_client(
 
 async fn login(
     service: &service_capnp::game_session_service::Client,
-    client_id: u64,
+    game_id: u64,
     wallet: &LocalWallet,
 ) -> Result<service_capnp::user_session::Client> {
     let mut challenge_req = service.request_challenge_request();
-    challenge_req.get().set_game_id(client_id);
+    challenge_req.get().set_game_id(game_id);
     let challenge_resp = challenge_req.send().promise.await?;
     let challenge_bytes = challenge_resp.get()?.get_challenge()?.to_vec();
 
@@ -324,7 +328,7 @@ async fn login(
     let sig_bytes = sig.to_vec();
 
     let mut req = service.login_request();
-    req.get().set_game_id(client_id);
+    req.get().set_game_id(game_id);
     req.get().set_signature(&sig_bytes);
     req.get().set_challenge_payload(&challenge_bytes);
     let response = req.send().promise.await?;
@@ -336,11 +340,14 @@ async fn request_match(
     session: &service_capnp::user_session::Client,
     client_id: u64,
     deadline: Instant,
+    wallet: &LocalWallet,
 ) -> Result<(service_capnp::match_session::Client, Vec<u8>)> {
     let mut req = session.request_match_request();
     {
         let mut builder = req.get().init_req();
-        let game_id = format!("loadtest-{client_id}");
+        // Bucket clients into a small pool of games so the matchmaker can
+        // actually pair them (a unique game_id per client = 0 matches found).
+        let game_id = format!("loadtest-{}", client_id % 8);
         builder.set_game_id(game_id.as_bytes());
         builder.set_rules_type("standard");
         builder.set_match_type(match_capnp::MatchType::TurnBased);
@@ -351,8 +358,9 @@ async fn request_match(
             let player_id = format!("player-{client_id}");
             pi.set_player_id(player_id.as_bytes());
             pi.set_display_name(format!("Player {client_id}"));
-            let wallet = vec![0u8; 20];
-            pi.set_player_wallet(&wallet);
+            // Phase 2.6: bind the match to the client's real wallet so the
+            // submit_outcome signature recovers to this player (post-S1).
+            pi.set_player_wallet(wallet.address().as_ref());
         }
     }
 
@@ -369,17 +377,47 @@ async fn submit_outcome(
     match_session: &service_capnp::match_session::Client,
     match_id: &[u8],
     client_id: u64,
+    wallet: &LocalWallet,
 ) -> Result<()> {
+    // Phase 2.6: compute a REAL EIP-712 outcome signature so the post-S1
+    // verifier accepts it (previously sent [0u8;65], which the server now
+    // rejects — silently zeroing the outcome counter and inflating errors).
+    // The server maps the submission's `victor` field directly to the on-chain
+    // outcome code (1=WIN_A, 2=WIN_B, 3=DRAW, 4=CANCELLED). Send 1/2 and sign
+    // the EIP-712 digest with the same value so the verifier accepts it.
+    let victor: u8 = if client_id.is_multiple_of(2) { 1 } else { 2 };
+    let outcome_code = victor;
+    let transcript_hash = [0u8; 32];
+    let chain_id = std::env::var("AMP_CHAIN_ID")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(43113u64);
+    let verifying_contract: [u8; 20] = std::env::var("AMP_SETTLEMENT_ADDRESS")
+        .ok()
+        .and_then(|v| v.parse::<ethers_core::types::H160>().ok())
+        .unwrap_or_default()
+        .0;
+    let match_id_str = String::from_utf8_lossy(match_id);
+    let digest = amp_sdk::compute_outcome_eip712_digest(
+        &match_id_str,
+        outcome_code,
+        &transcript_hash,
+        chain_id,
+        &verifying_contract,
+    )?;
+    let sig = wallet.sign_hash(ethers_core::types::H256::from(digest))?;
+    let sig_bytes = sig.to_vec();
+
     let mut req = match_session.submit_outcome_request();
     {
         let mut sub = req.get().init_submission();
         sub.set_match_id(match_id);
-        sub.set_replay_hash(&[0u8; 32]);
-        sub.set_signature(&[0u8; 65]);
+        sub.set_replay_hash(&transcript_hash);
+        sub.set_signature(&sig_bytes);
         {
             let mut outcome = sub.reborrow().init_outcome();
             outcome.set_type(match_capnp::OutcomeType::Win);
-            outcome.set_victor(if client_id.is_multiple_of(2) { 0 } else { 1 });
+            outcome.set_victor(victor);
             let mut scores = outcome.init_scores(2);
             scores.set(0, 1);
             scores.set(1, 0);

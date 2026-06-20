@@ -285,7 +285,6 @@ async fn start_matchmaker_loop(
     tokio::spawn(async move {
         let mut q = match_queue::IndexedQueue::new();
         let mut rulesets_cache = arc_swap::cache::Cache::new(state.rulesets.clone());
-        let mut active_matches_cache = arc_swap::cache::Cache::new(state.active_matches.clone());
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => {
@@ -316,10 +315,10 @@ async fn start_matchmaker_loop(
                 }
             }
             metrics::gauge!("amp_queue_depth").set(q.len() as f64);
-            metrics::gauge!("amp_active_matches").set(active_matches_cache.load().len() as f64);
+            metrics::gauge!("amp_active_matches").set(state.active_match_count() as f64);
 
             let rulesets_snapshot = rulesets_cache.load();
-            let mut active_count = active_matches_cache.load().len();
+            let mut active_count = state.active_match_count();
 
             if q.len() < 2 {
                 continue;
@@ -1405,8 +1404,10 @@ impl user_session::Server for UserSessionImpl {
         let relayer_tx = self.relayer_tx.clone();
 
         Promise::from_future(async move {
-            let matches = state.active_matches.load();
-            match matches.get(&match_id) {
+            // Clone the match out of the DashMap (guard dropped immediately) so no
+            // shard lock is held across the session construction (Phase 2.1).
+            let m_opt = state.get_active_match(&match_id);
+            match m_opt {
                 Some(m) if !m.settled => {
                     if !m.players.contains(&player_id) {
                         return Err(::capnp::Error::failed(format!(
@@ -1425,7 +1426,6 @@ impl user_session::Server for UserSessionImpl {
                         telemetry_tx: telemetry_tx.clone(),
                         relayer_tx: relayer_tx.clone(),
                     });
-                    drop(matches);
                     results.get().set_session(session);
                     info!("Player {} reconnected to match {}", player_id, match_id);
                     Ok(())
@@ -1761,7 +1761,7 @@ fn main() -> Result<()> {
         info!("Received shutdown signal, draining...");
         cancel.cancel();
 
-        let matches = ctx.state.active_matches.load();
+        let matches = ctx.state.active_matches_snapshot();
         let active = matches.iter().filter(|(_, m)| !m.settled).count();
         info!("Active unsettled matches: {}", active);
 
@@ -2001,13 +2001,12 @@ async fn cleanup_on_disconnect(player_id: &str, state: AppState, queue: MatchQue
     }
 
     // (3) Notify opponents in any live (unsettled) match.
-    let matches = state.active_matches.load();
-    for (match_id, m) in matches.iter() {
+    for (match_id, m) in state.active_matches_snapshot() {
         if m.settled {
             continue;
         }
         if m.players.iter().any(|p| p == player_id) {
-            state.notify_opponent_disconnected(match_id, player_id);
+            state.notify_opponent_disconnected(&match_id, player_id);
         }
     }
 }
@@ -2080,8 +2079,7 @@ mod tests {
 
         assert_eq!(m1.match_id, m2.match_id);
 
-        let active = app_state.active_matches.load();
-        assert!(active.contains_key(&m1.match_id));
+        assert!(app_state.active_matches.contains_key(&m1.match_id));
         cancel.cancel();
     }
 

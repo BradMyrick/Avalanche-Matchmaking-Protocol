@@ -298,23 +298,87 @@ async fn run_settlement_processor(
     cancel: tokio_util::sync::CancellationToken,
 ) {
     let nonce_manager = Arc::new(nonce::NonceManager::new());
-    let poll_interval = std::time::Duration::from_millis(cfg.base_retry_delay_ms);
+    // Fallback idle poll in case a Notify signal races with the worker reaching
+    // the idle wait (defensive; the Notify path wakes instantly on enqueue).
+    let idle_fallback = std::time::Duration::from_secs(1);
 
+    // Phase 2.3: run N concurrent settlement workers. Claims are serialized by
+    // `SettlementQueue::claim_lock`, but the slow chain submission (the `await`
+    // in `process_next`) runs concurrently, which helps multi-game throughput
+    // (different games settle from different custodial addresses).
+    let concurrency = cfg.settlement_concurrency.max(1);
+    let notify = queue.notify().clone();
+    let mut handles = Vec::new();
+    for worker_id in 0..concurrency {
+        let state = state.clone();
+        let queue = queue.clone();
+        let nonce_manager = nonce_manager.clone();
+        let cancel = cancel.clone();
+        let notify = notify.clone();
+        handles.push(tokio::spawn(async move {
+            settlement_worker(
+                worker_id,
+                state,
+                queue,
+                nonce_manager,
+                cancel,
+                notify,
+                idle_fallback,
+            )
+            .await;
+        }));
+    }
+    for h in handles {
+        let _ = h.await;
+    }
+}
+
+async fn settlement_worker(
+    worker_id: usize,
+    state: RelayerState,
+    queue: Arc<settlement::SettlementQueue>,
+    nonce_manager: Arc<nonce::NonceManager>,
+    cancel: tokio_util::sync::CancellationToken,
+    notify: Arc<tokio::sync::Notify>,
+    idle_fallback: std::time::Duration,
+) {
     loop {
-        tokio::select! {
-            _ = cancel.cancelled() => {
-                info!("Settlement processor shutting down...");
+        // Drain all ready work back-to-back while the queue is non-empty
+        // (Phase 2.2: previously slept `poll_interval` — default 1 s — on EVERY
+        // iteration, even when work was queued, hard-capping throughput at
+        // ~1 settlement/s per relayer instance).
+        loop {
+            if cancel.is_cancelled() {
+                info!("Settlement worker {worker_id} shutting down...");
                 return;
             }
-            _ = tokio::time::sleep(poll_interval) => {}
+            match queue.process_next(&state, &nonce_manager).await {
+                Ok(true) => {
+                    // Processed one; immediately try the next without sleeping.
+                    continue;
+                }
+                Ok(false) => break, // nothing ready right now; fall through to idle wait
+                Err(e) => {
+                    error!("Settlement worker {worker_id} error: {:?}", e);
+                    // Brief backoff on error to avoid a hot spin.
+                    tokio::select! {
+                        _ = cancel.cancelled() => return,
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+                    }
+                    break;
+                }
+            }
         }
 
-        match queue.process_next(&state, &nonce_manager).await {
-            Ok(true) => {}
-            Ok(false) => {}
-            Err(e) => {
-                error!("Settlement processor error: {:?}", e);
+        // Idle: wake instantly on new enqueue (Notify), or on the fallback
+        // poll, or on shutdown.
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                info!("Settlement worker {worker_id} shutting down...");
+                return;
             }
+            _ = notify.notified() => {}
+            _ = tokio::time::sleep(idle_fallback) => {}
         }
     }
 }
@@ -392,7 +456,7 @@ async fn main() -> Result<()> {
     };
 
     let db = sled::open(&cfg.db_path)?;
-    let gas_manager = gas::GasManager::new(cfg.gas_bump_percent, cfg.gas_bump_timeout_secs);
+    let gas_manager = gas::GasManager::new(cfg.gas_bump_percent);
     let queue = Arc::new(settlement::SettlementQueue::new(
         Arc::new(db),
         cfg.max_retries,
@@ -525,9 +589,11 @@ async fn accept_loop(
 
         // Per-IP cap to prevent a single compromised server from saturating
         // the relayer's connection pool. Lifted when the connection closes.
+        // Phase 2.4: recover from Mutex poisoning (every other lock in the
+        // codebase does); a poisoned per-IP lock must not crash the accept loop.
         let ip = peer.ip();
         let over_ip = {
-            let mut m = per_ip.lock().unwrap();
+            let mut m = per_ip.lock().unwrap_or_else(|e| e.into_inner());
             let e = m.entry(ip).or_insert(0);
             if *e >= max_per_ip {
                 true
@@ -541,7 +607,7 @@ async fn accept_loop(
                 "Relayer per-IP cap reached for {} ({}/{}), rejecting",
                 ip,
                 {
-                    let m = per_ip.lock().unwrap();
+                    let m = per_ip.lock().unwrap_or_else(|e| e.into_inner());
                     m.get(&ip).copied().unwrap_or(0)
                 },
                 max_per_ip
@@ -584,8 +650,8 @@ async fn accept_loop(
                 run_rpc(reader, writer, client).await;
             }
             counter.fetch_sub(1, Ordering::Relaxed);
-            // Release the per-IP slot.
-            let mut guard = per_ip_clone.lock().unwrap();
+            // Release the per-IP slot (poison-recovering, Phase 2.4).
+            let mut guard = per_ip_clone.lock().unwrap_or_else(|e| e.into_inner());
             let should_remove = guard.get_mut(&ip).map(|c| {
                 if *c > 0 {
                     *c -= 1;

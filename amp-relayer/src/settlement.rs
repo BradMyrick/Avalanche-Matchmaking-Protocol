@@ -3,7 +3,8 @@ use ethers::prelude::*;
 use ethers::types::transaction::eip2718::TypedTransaction;
 use serde::{Deserialize, Serialize};
 use sled::Db;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 use tracing::{info, warn};
 
 use super::AsyncResult;
@@ -80,6 +81,16 @@ pub struct SettlementQueue {
     max_retries: u32,
     base_retry_delay_ms: u64,
     gas_manager: GasManager,
+    /// Signaled by `enqueue` so the settlement processor wakes instantly when
+    /// new work arrives instead of waiting on a fixed poll interval (Phase 2.2:
+    /// previously the processor slept `base_retry_delay_ms` — default 1000 ms —
+    /// on every iteration, hard-capping throughput at ~1 settlement/s).
+    notify: Arc<Notify>,
+    /// Serializes the claim read-modify-write in `mark_in_flight` so multiple
+    /// concurrent workers (RELAYER_CONCURRENCY) cannot double-claim the same
+    /// task (Phase 2.3). Held only across the (sync) claim, never across an
+    /// `await`, so the slow chain submission still parallelizes across workers.
+    claim_lock: Mutex<()>,
 }
 
 impl SettlementQueue {
@@ -94,7 +105,14 @@ impl SettlementQueue {
             max_retries,
             base_retry_delay_ms,
             gas_manager,
+            notify: Arc::new(Notify::new()),
+            claim_lock: Mutex::new(()),
         }
+    }
+
+    /// Handle used by the settlement processor to await newly-enqueued work.
+    pub fn notify(&self) -> &Arc<Notify> {
+        &self.notify
     }
 
     pub fn enqueue(&self, settlement: PendingSettlement) -> Result<(), RelayerError> {
@@ -109,11 +127,19 @@ impl SettlementQueue {
         }
         let value = bincode::serialize(&settlement)?;
         cf.insert(&key, &value as &[u8])?;
+        // Wake any idle settlement worker so new work is picked up immediately
+        // rather than after the idle-poll fallback (Phase 2.2).
+        self.notify.notify_one();
         info!("Enqueued settlement for match {:?}", hex::encode(&key));
         Ok(())
     }
 
     pub fn mark_in_flight(&self) -> Result<Option<PendingSettlement>, RelayerError> {
+        // Serialize the claim across concurrent workers so two workers can't
+        // both read the same Queued task and both mark it InFlight (Phase 2.3).
+        // The lock is released before returning, i.e. well before any `await`
+        // in the caller, so the chain submission still runs concurrently.
+        let _guard = self.claim_lock.lock().unwrap_or_else(|e| e.into_inner());
         let cf = self.db.open_tree(CF_PENDING)?;
         for item in cf.iter() {
             let (key, value) = item?;

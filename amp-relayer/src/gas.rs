@@ -2,16 +2,11 @@ use ethers::prelude::*;
 
 pub struct GasManager {
     pub bump_percent: u64,
-    #[allow(dead_code)]
-    pub bump_timeout_secs: u64,
 }
 
 impl GasManager {
-    pub fn new(bump_percent: u64, bump_timeout_secs: u64) -> Self {
-        Self {
-            bump_percent,
-            bump_timeout_secs,
-        }
+    pub fn new(bump_percent: u64) -> Self {
+        Self { bump_percent }
     }
 
     /// Estimate current EIP-1559 fees from the network.
@@ -65,7 +60,7 @@ mod tests {
 
     #[test]
     fn test_bump_fees_no_retry() {
-        let gm = GasManager::new(10, 30);
+        let gm = GasManager::new(10);
         let max = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
         let prio = U256::from(1_000_000_000u128); // 1 gwei
 
@@ -78,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_bump_fees_cumulative() {
-        let gm = GasManager::new(10, 30);
+        let gm = GasManager::new(10);
         let max = U256::from(1_000_000_000_000_000_000u128);
         let prio = U256::from(1_000_000_000u128);
 

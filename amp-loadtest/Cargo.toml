@@ -16,6 +16,7 @@ anyhow = "1"
 hdrhistogram = "7"
 ethers-core = "2.0"
 ethers-signers = "2.0"
+amp-sdk = { path = "../amp-sdk/rust" }
 
 [build-dependencies]
 capnpc = "0.19"

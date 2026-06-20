@@ -13,7 +13,11 @@ pub struct Config {
     pub max_retries: u32,
     pub base_retry_delay_ms: u64,
     pub gas_bump_percent: u64,
-    pub gas_bump_timeout_secs: u64,
+    /// Phase 2.3: number of concurrent settlement workers. Claims are
+    /// serialized by `SettlementQueue::claim_lock`; the slow chain submission
+    /// runs concurrently, aiding multi-game throughput (each game settles from
+    /// a distinct custodial address). Default 1 = behavior-preserving.
+    pub settlement_concurrency: usize,
     pub tls_cert_file: Option<String>,
     pub tls_key_file: Option<String>,
     pub api_keys: HashSet<String>,
@@ -76,10 +80,11 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(10),
-            gas_bump_timeout_secs: env::var("RELAYER_GAS_BUMP_TIMEOUT_SECS")
+            settlement_concurrency: env::var("RELAYER_SETTLEMENT_CONCURRENCY")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(30),
+                .filter(|&v: &usize| (1..=64).contains(&v))
+                .unwrap_or(1),
             tls_cert_file,
             tls_key_file,
             api_keys: load_api_keys(),
