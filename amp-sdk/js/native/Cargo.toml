@@ -1,9 +1,9 @@
 [package]
 name = "amp-sdk-native"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Node.js native bindings for the AMP Rust SDK (napi-rs)."
-license = "Apache-2.0"
 publish = false
 
 [lib]

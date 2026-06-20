@@ -40,7 +40,7 @@ Full documentation including architecture deep-dives, integration guides, SDK re
 ## Architecture
 
 ```
-                   AMP v0.0.1 Architecture
+                    AMP v0.1.0 Architecture
 
 ┌─────────────────────────────────────────────────────────────┐
 │                 Main OS Thread (Coordinator)                │
@@ -240,7 +240,11 @@ See [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for the full threat model and remed
 
 ## License
 
-AMP is licensed under the **AMP Non-Commercial Source License**.
-Personal and educational use is permitted for free. **Commercial use requires a separate license agreement.**
+AMP is licensed under the **Apache License, Version 2.0**.
 
-See the [LICENSE](LICENSE) file for the full terms or contact the repository owner for commercial inquiries.
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software for both personal and **commercial** use, subject to the conditions
+of Apache-2.0 (attribution, notice of changes, and the trademark/patent terms).
+
+See the [LICENSE](LICENSE) file for the full terms.

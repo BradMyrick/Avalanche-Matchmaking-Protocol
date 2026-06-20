@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "AMP-Server"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "amp-telemetry",
  "amp-tls",
@@ -91,7 +91,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "amp-integration-tests"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "amp-loadtest"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "capnp",
@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "amp-relayer"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "amp-tls",
  "anyhow",
@@ -190,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "amp-telemetry"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "capnp",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "amp-tls"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "rustls 0.21.12",
  "rustls-pemfile",
@@ -4367,7 +4367,7 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "trace-viewer"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "capnp",
  "capnpc",

@@ -12,3 +12,12 @@ members = [
     "amp-integration-tests",
 ]
 
+# Single source of truth for package metadata. All workspace members inherit
+# these via `version.workspace = true` / `edition.workspace = true` /
+# `license.workspace = true`. Bump the version here once to release.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol"
+
