@@ -1,5 +1,6 @@
 use crate::error::RelayerError;
-use ethers::prelude::*;
+use alloy_primitives::{Address, U256};
+use alloy_provider::Provider;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -23,10 +24,10 @@ impl NonceManager {
     /// a single lock hold (see `reserve_cached`). The cold-start path still
     /// awaits the provider, but re-checks the cache under the lock before
     /// inserting so a racing cold start cannot clobber a higher nonce.
-    pub async fn next_nonce(
+    pub async fn next_nonce<P: Provider>(
         &self,
         addr: &Address,
-        provider: &Provider<Http>,
+        provider: &P,
     ) -> Result<U256, RelayerError> {
         // Hot path: cached nonce present → atomically reserve it under one lock.
         if let Some(n) = self.reserve_cached(addr) {
@@ -36,7 +37,11 @@ impl NonceManager {
         // Cold path: no cached nonce for this address. Query the chain (await
         // outside the lock), then insert under the lock, keeping the larger of
         // the racing values if another task inserted meanwhile.
-        let chain_nonce = provider.get_transaction_count(*addr, None).await?.as_u64();
+        let chain_nonce: u64 = provider
+            .get_transaction_count(*addr)
+            .pending()
+            .await
+            .map_err(RelayerError::Network)?;
         let allocated = {
             let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
             let existing = cache.get(addr).copied();
@@ -85,7 +90,7 @@ mod tests {
         use std::thread;
 
         let nm = Arc::new(NonceManager::new());
-        let addr = Address::random();
+        let addr = alloy_primitives::address!("0000000000000000000000000000000000001234");
         // Seed the cache so every caller takes the (concurrency-sensitive) hot path.
         {
             let mut cache = nm.cache.lock().unwrap();

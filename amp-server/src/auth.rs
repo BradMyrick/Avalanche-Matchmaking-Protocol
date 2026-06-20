@@ -1,5 +1,5 @@
 use crate::state::now_ns;
-use alloy_primitives::{eip191_hash_message, Address, B256, Signature};
+use alloy_primitives::{Address, B256, Signature, eip191_hash_message};
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::sync::Arc;

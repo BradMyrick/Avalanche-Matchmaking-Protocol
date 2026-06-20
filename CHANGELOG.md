@@ -111,6 +111,43 @@ A running summary of the production-readiness path lives in [`prodpath.md`](prod
   (`active_match_count`, `get_active_match`, `active_matches_snapshot`); no shard lock
   is held across an `await`.
 
+## [Unreleased] — Phase 3.4: ethers → alloy migration
+
+The unmaintained `ethers-rs 2.0.14` is **fully removed** from the workspace and
+replaced by `alloy`. This is the foundation under Foundry/modern EVM Rust tooling.
+
+### Changed — all 4 Rust EVM consumers migrated
+- **amp-server**: signing + primitives only. `LocalWallet` → `PrivateKeySigner`;
+  `ethers_core::types::{Address,H256,U256}` → `alloy_primitives::{Address,B256,U256}`;
+  `Signature::try_from` + `recover` → `Signature::from_raw_array` + `recover_address_from_prehash`;
+  `SignerSync::sign_hash_sync`. The EIP-712 digest now builds ABI words manually —
+  provably byte-identical to ethers' `Token::FixedBytes`/`Uint` and to Solidity's
+  `abi.encode`. The cross-language KAT `test_outcome_digest_known_vector_cross_lang`
+  still pins `2d2525ad…b99096c`.
+- **amp-loadtest**: same primitives/signer swap; real EIP-712 outcome signatures preserved.
+- **amp-integration-tests**: `Provider<Http>` + `SignerMiddleware` + `abigen!` →
+  `ProviderBuilder` (wallet-fillable) + `sol!` contract bindings. The duplicate
+  inline digest is replaced by a reuse of `amp_sdk::compute_outcome_eip712_digest`.
+- **amp-relayer** (heaviest): `SignerMiddleware`/`TypedTransaction`/`Eip1559TransactionRequest`
+  → a wallet-fillable provider per custodial signer + alloy's call builder
+  (`.max_fee_per_gas`/`.max_priority_fee_per_gas`/`.nonce` directly — no Legacy→EIP1559
+  enum rewrite). `RelayerState` now holds `DynProvider`s + addresses + the master signer.
+  `ProviderError` → `alloy_transport::TransportError`. Custodial HKDF/HMAC-keccak
+  preserved exactly; the pinned KAT address (`0x70d8a…736a`) is unchanged.
+
+### Dependency hygiene wins
+- `ethers 2.0.14` (+ its transitive closure) removed from `Cargo.lock`.
+- `h2` deduped (0.3 + 0.4 → 0.4.15); `hyper` deduped (0.14 + 1.10 → 1.10.1).
+- 33 maintained `alloy` crates pulled in. (`rustls 0.21` remains — it comes from
+  `amp-tls`, a separate modernization; not ethers-related.)
+
+### Verification
+- 63 Rust unit tests (incl. EIP-712 KAT, nonce-concurrency, custodial KAT, auth
+  negative paths, skill-pairing proptest) + 46 Forge tests green.
+- Full E2E (anvil → deploy → matchmaking → submitOutcome → on-chain settlement →
+  MMR) passes through the alloy stack end-to-end.
+
+
 ## [Unreleased] — Phase 5: Test & CI infrastructure
 
 ### Added — failure-path coverage (audit: "1 E2E happy path, no negative tests")

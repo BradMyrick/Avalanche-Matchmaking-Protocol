@@ -1,4 +1,5 @@
-use ethers::prelude::*;
+use alloy_primitives::U256;
+use alloy_provider::Provider;
 
 pub struct GasManager {
     pub bump_percent: u64,
@@ -12,12 +13,15 @@ impl GasManager {
     /// Estimate current EIP-1559 fees from the network.
     ///
     /// Returns `(max_fee_per_gas, max_priority_fee_per_gas)`.
-    pub async fn estimate_eip1559_fees(
+    pub async fn estimate_eip1559_fees<P: Provider>(
         &self,
-        provider: &Provider<Http>,
+        provider: &P,
     ) -> anyhow::Result<(U256, U256)> {
-        let (max_fee, priority_fee) = provider.estimate_eip1559_fees(None).await?;
-        Ok((max_fee, priority_fee))
+        let est = provider.estimate_eip1559_fees().await?;
+        Ok((
+            U256::from(est.max_fee_per_gas),
+            U256::from(est.max_priority_fee_per_gas),
+        ))
     }
 
     /// Bump EIP-1559 fees on retry.
@@ -36,19 +40,11 @@ impl GasManager {
         prev_prio: U256,
     ) -> (U256, U256) {
         let bump_factor = (100 + self.bump_percent) as u128;
-        let bumped_prev_max = prev_max * U256::from(bump_factor) / U256::from(100);
-        let bumped_prev_prio = prev_prio * U256::from(bump_factor) / U256::from(100);
+        let bumped_prev_max = prev_max.saturating_mul(U256::from(bump_factor)) / U256::from(100);
+        let bumped_prev_prio = prev_prio.saturating_mul(U256::from(bump_factor)) / U256::from(100);
 
-        let new_max = if bumped_prev_max > network_max {
-            bumped_prev_max
-        } else {
-            network_max
-        };
-        let new_prio = if bumped_prev_prio > network_prio {
-            bumped_prev_prio
-        } else {
-            network_prio
-        };
+        let new_max = bumped_prev_max.max(network_max);
+        let new_prio = bumped_prev_prio.max(network_prio);
 
         (new_max, new_prio)
     }

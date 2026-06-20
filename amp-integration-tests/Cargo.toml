@@ -12,9 +12,17 @@ tokio-util = { version = "0.7", features = ["compat", "rt"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
-ethers = { version = "2.0", features = ["rustls", "ws"] }
-ethers-core = "2.0"
-ethers-signers = "2.0"
+# Phase 3.4: ethers (unmaintained) replaced by alloy. Provider + sol! bindings
+# + a local signer; the EIP-712 digest is reused from amp-sdk (byte-identical).
+alloy-primitives = "1"
+alloy-sol-types = "1"
+alloy-contract = "2"
+alloy-signer = "2"
+alloy-signer-local = "2"
+alloy-provider = "2"
+alloy-network = "2"
+url = "2"
+amp-sdk = { path = "../amp-sdk/rust" }
 uuid = { version = "1.20", features = ["v4"] }
 hex = "0.4"
 futures-util = "0.3"

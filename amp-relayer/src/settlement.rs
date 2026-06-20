@@ -1,13 +1,14 @@
+use crate::IAMPRegistry;
+use crate::IAMPSettlement;
 use crate::error::RelayerError;
-use ethers::prelude::*;
-use ethers::types::transaction::eip2718::TypedTransaction;
+use alloy_primitives::U256;
+use alloy_provider::{DynProvider, Provider, ProviderBuilder};
 use serde::{Deserialize, Serialize};
 use sled::Db;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 use tracing::{info, warn};
 
-use super::AsyncResult;
 use super::RelayerState;
 use super::custodial;
 use super::gas::GasManager;
@@ -244,11 +245,17 @@ impl SettlementQueue {
         };
 
         let match_id_parsed = if settlement.match_id.len() == 32 {
-            U256::from_big_endian(&settlement.match_id)
+            U256::from_be_bytes::<32>(
+                settlement
+                    .match_id
+                    .as_slice()
+                    .try_into()
+                    .unwrap_or([0u8; 32]),
+            )
         } else {
             let s = std::str::from_utf8(&settlement.match_id)
                 .map_err(|e| RelayerError::Transaction(format!("invalid match_id UTF-8: {}", e)))?;
-            U256::from_dec_str(s).map_err(|e| {
+            U256::from_str_radix(s, 10).map_err(|e| {
                 RelayerError::Transaction(format!("invalid match_id '{}': {}", s, e))
             })?
         };
@@ -299,29 +306,38 @@ impl SettlementQueue {
     ) -> Result<(), RelayerError> {
         // 7-tuple: (gameId, playerA, state, playerB, createdAt, stakeAmount, stakeAmountB).
         // stakeAmountB was added in Phase 1.5 for fee-on-transfer support.
-        let (game_id, _, _, _, _, _, _) = state
-            .registry
+        let registry = IAMPRegistry::new(state.registry_addr, state.read_provider.clone());
+        let returned = registry
             .matches(match_id)
             .call()
             .await
             .map_err(|e| RelayerError::Contract(e.to_string()))?;
+        let game_id = returned.gameId;
 
-        let chain_id = state.master_client.signer().chain_id();
         let custodial_wallet = custodial::derive_custodial_signer(
-            state.master_client.signer(),
+            &state.master_signer,
             "settlement",
-            game_id.as_u64(),
-            chain_id,
+            game_id.to::<u64>(),
+            state.chain_id,
         )
         .map_err(|e| RelayerError::Transaction(format!("custodial derivation failed: {}", e)))?;
         let custodial_addr = custodial_wallet.address();
 
         custodial::ensure_gas(custodial_addr, state).await?;
 
-        let provider = state.master_client.provider().clone();
-        let custodial_client = SignerMiddleware::new(provider.clone(), custodial_wallet);
+        // One wallet-fillable provider per custodial signer (the signer is
+        // game-scoped, so a fresh provider per submission is correct).
+        let custodial_provider = DynProvider::new(
+            ProviderBuilder::new()
+                .wallet(custodial_wallet)
+                .connect(&state.rpc_url)
+                .await
+                .map_err(|e| RelayerError::Transaction(e.to_string()))?,
+        );
 
-        let nonce = nonce_manager.next_nonce(&custodial_addr, &provider).await?;
+        let nonce = nonce_manager
+            .next_nonce(&custodial_addr, &custodial_provider)
+            .await?;
 
         if settlement.transcript_hash.len() != 32 {
             return Err(RelayerError::Transaction(format!(
@@ -332,32 +348,30 @@ impl SettlementQueue {
         let mut t_hash = [0u8; 32];
         t_hash.copy_from_slice(&settlement.transcript_hash);
 
-        let async_result = AsyncResult {
-            match_id,
+        let async_result = IAMPSettlement::AsyncResult {
+            matchId: match_id,
             outcome: settlement.outcome,
-            transcript_hash: t_hash,
-            signature: Bytes::from(settlement.signature.clone()),
+            transcriptHash: t_hash.into(),
+            signature: settlement.signature.clone().into(),
         };
 
-        let settlement_custodial = crate::AMPSettlementContract::new(
-            state.settlement.address(),
-            Arc::new(custodial_client),
-        );
+        let settlement_contract =
+            IAMPSettlement::new(state.settlement_addr, custodial_provider.clone());
 
         let (network_max_fee, network_priority_fee) = self
             .gas_manager
-            .estimate_eip1559_fees(&provider)
+            .estimate_eip1559_fees(&custodial_provider)
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;
 
         let prev_max = settlement
             .last_max_fee
             .as_ref()
-            .and_then(|s| U256::from_dec_str(s).ok());
+            .and_then(|s| U256::from_str_radix(s, 10).ok());
         let prev_prio = settlement
             .last_priority_fee
             .as_ref()
-            .and_then(|s| U256::from_dec_str(s).ok());
+            .and_then(|s| U256::from_str_radix(s, 10).ok());
 
         let (effective_max_fee, effective_priority_fee) =
             if let (true, Some(pm), Some(pp)) = (settlement.retry_count > 0, prev_max, prev_prio) {
@@ -366,24 +380,6 @@ impl SettlementQueue {
             } else {
                 (network_max_fee, network_priority_fee)
             };
-
-        let mut call = settlement_custodial.submit_async_result(match_id, async_result);
-
-        if let TypedTransaction::Legacy(ref legacy) = call.tx {
-            let eip1559 = ethers::prelude::Eip1559TransactionRequest {
-                from: legacy.from,
-                to: legacy.to.clone(),
-                gas: legacy.gas,
-                max_fee_per_gas: Some(effective_max_fee),
-                max_priority_fee_per_gas: Some(effective_priority_fee),
-                value: legacy.value,
-                data: legacy.data.clone(),
-                nonce: Some(nonce),
-                chain_id: None,
-                access_list: Default::default(),
-            };
-            call.tx = TypedTransaction::Eip1559(eip1559);
-        }
 
         let cf = self
             .db
@@ -396,20 +392,26 @@ impl SettlementQueue {
             let _ = cf.insert(&s.match_id, &updated as &[u8]);
         }
 
-        let pending = call
+        // Phase 3.4: alloy's call builder sets EIP-1559 fields directly (no
+        // Legacy→EIP1559 enum rewrite needed, unlike ethers' TypedTransaction).
+        // Gas fields take u128 on this alloy version.
+        let pending = settlement_contract
+            .submitAsyncResult(match_id, async_result)
+            .max_fee_per_gas(effective_max_fee.to::<u128>())
+            .max_priority_fee_per_gas(effective_priority_fee.to::<u128>())
+            .nonce(nonce.to::<u64>())
             .send()
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?;
-        info!("Submitted tx {} for match {}", pending.tx_hash(), match_id);
+        let tx_hash = *pending.tx_hash();
+        let tx_hash_str = format!("{:?}", tx_hash);
+        info!("Submitted tx {} for match {}", tx_hash_str, match_id);
         metrics::counter!("amp_settlements_submitted_total").increment(1);
 
         let db_clone = self.db.clone();
         let match_id_clone = s.match_id.clone();
         let match_id_parsed_clone = match_id;
         let max_retries = self.max_retries;
-
-        let tx_hash = pending.tx_hash();
-        let tx_hash_str = format!("{:?}", tx_hash);
 
         // Record the broadcast tx hash so getSettlementStatus can report it
         // while the entry is InFlight (release Phase 2.1).
@@ -426,12 +428,13 @@ impl SettlementQueue {
             }
         }
 
+        let provider_clone = custodial_provider.clone();
         tokio::spawn(async move {
             let mut attempts = 0;
             loop {
-                match provider.get_transaction_receipt(tx_hash).await {
+                match provider_clone.get_transaction_receipt(tx_hash).await {
                     Ok(Some(receipt)) => {
-                        if receipt.status == Some(1.into()) {
+                        if receipt.status() {
                             info!(
                                 "Settlement for match {} successfully mined",
                                 match_id_parsed_clone
@@ -447,7 +450,7 @@ impl SettlementQueue {
                         } else {
                             warn!(
                                 "Settlement tx {} for match {} reverted on-chain",
-                                tx_hash, match_id_parsed_clone
+                                tx_hash_str, match_id_parsed_clone
                             );
                             if let Err(e) = handle_failure(
                                 &db_clone,
@@ -469,7 +472,7 @@ impl SettlementQueue {
                             // ~2 mins timeout
                             warn!(
                                 "Settlement tx {} for match {} timed out waiting for receipt",
-                                tx_hash, match_id_parsed_clone
+                                tx_hash_str, match_id_parsed_clone
                             );
                             if let Err(e) = handle_failure(
                                 &db_clone,
@@ -487,7 +490,7 @@ impl SettlementQueue {
                         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     }
                     Err(e) => {
-                        warn!("RPC error polling receipt for {}: {:?}", tx_hash, e);
+                        warn!("RPC error polling receipt for {}: {:?}", tx_hash_str, e);
                         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     }
                 }

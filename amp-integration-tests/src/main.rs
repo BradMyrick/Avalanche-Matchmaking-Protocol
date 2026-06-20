@@ -52,22 +52,34 @@ mod rust_capnp {
     include!(concat!(env!("OUT_DIR"), "/rust_capnp.rs"));
 }
 
+use alloy_primitives::{Address, U256, address, keccak256};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_signer::SignerSync;
+use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::sol;
 use anyhow::{Context, Result};
-use ethers::prelude::*;
 use std::process::Command;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-abigen!(
-    AMPRegistryContract,
-    "../contracts/out/AMPRegistry.sol/AMPRegistry.json"
-);
-abigen!(
-    AMPSettlementContract,
-    "../contracts/out/AMPSettlement.sol/AMPSettlement.json"
-);
+// Phase 3.4: ethers `abigen!` → alloy `sol!`. The deployed selectors match:
+// Solidity enums ABI-encode as uint8, so `registerGame(uint8 mode, ...)` lines
+// up with the contract's `registerGame(AMPTypes.SettlementMode mode, ...)`.
+sol! {
+    #[sol(rpc)]
+    interface IAMPRegistry {
+        function registerGame(uint8 mode, address[] calldata verifiers, uint256 minStake, address stakeToken, address arbiter) external returns (uint256 gameId);
+        function createMatch(uint256 gameId, uint256 matchId, uint256 stakeAmount) external payable;
+        function joinMatch(uint256 matchId) external payable;
+        function pendingWithdrawals(address token, address user) external view returns (uint256);
+        function feeBalances(address token) external view returns (uint256);
+    }
+    #[sol(rpc)]
+    interface IAMPSettlement {
+        function settlements(uint256 matchId) external view returns (uint256 matchId_, uint8 outcome, bytes32 transcriptHash, uint256 settledAt);
+    }
+}
 
 // Structs to read from server database
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -160,20 +172,19 @@ where
 
 async fn login_player(
     service: &service_capnp::game_session_service::Client,
-    wallet: &LocalWallet,
+    wallet: &PrivateKeySigner,
 ) -> Result<service_capnp::user_session::Client> {
     let mut chal_req = service.request_challenge_request();
     chal_req.get().set_game_id(0);
     let chal_resp = chal_req.send().promise.await?;
     let challenge = chal_resp.get()?.get_challenge()?.to_vec();
 
-    let msg_hash = ethers::utils::hash_message(&challenge);
-    let sig = wallet.sign_hash(msg_hash)?;
-    let sig_bytes = sig.to_vec();
+    let msg_hash = alloy_primitives::eip191_hash_message(&challenge);
+    let sig = wallet.sign_hash_sync(&msg_hash)?.as_bytes().to_vec();
 
     let mut login_req = service.login_request();
     login_req.get().set_game_id(0);
-    login_req.get().set_signature(&sig_bytes);
+    login_req.get().set_signature(&sig);
     login_req.get().set_challenge_payload(&challenge);
     let login_resp = login_req.send().promise.await?;
     let session = login_resp.get()?.get_session()?;
@@ -197,7 +208,7 @@ async fn request_match(
             let mut pi = builder.reborrow().init_player_info();
             pi.set_player_id(player_id.as_bytes());
             pi.set_display_name(player_id);
-            pi.set_player_wallet(player_wallet.as_bytes());
+            pi.set_player_wallet(player_wallet.as_slice());
         }
     }
     let resp = req.send().promise.await?;
@@ -381,35 +392,45 @@ async fn run_test() -> Result<()> {
     let server_guard = KillOnDrop(server_child);
     wait_for_tcp(server_port, "Server", 10).await?;
 
-    // Setup wallets for players
-    // Player A uses anvil key 1, Player B uses anvil key 2
-    let wallet_a: LocalWallet = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-        .parse::<LocalWallet>()?
-        .with_chain_id(43113u64);
-    let wallet_b: LocalWallet = "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-        .parse::<LocalWallet>()?
-        .with_chain_id(43113u64);
+    // Setup wallets for players (anvil keys 1 & 2), each backing an alloy provider.
+    let wallet_a: PrivateKeySigner =
+        "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d".parse()?;
+    let wallet_b: PrivateKeySigner =
+        "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a".parse()?;
 
-    let provider = Provider::<Http>::try_from(&format!("http://127.0.0.1:{}", anvil_port))?;
-    let client_a = Arc::new(SignerMiddleware::new(provider.clone(), wallet_a.clone()));
-    let client_b = Arc::new(SignerMiddleware::new(provider.clone(), wallet_b.clone()));
+    let rpc_url = format!("http://127.0.0.1:{}", anvil_port);
+    // Wallet-fillable providers sign + broadcast from wallet_a / wallet_b.
+    let provider_a = ProviderBuilder::new()
+        .wallet(wallet_a.clone())
+        .connect(&rpc_url)
+        .await?;
+    let provider_b = ProviderBuilder::new()
+        .wallet(wallet_b.clone())
+        .connect(&rpc_url)
+        .await?;
+    // Read-only provider (no signer) for settlement/balance lookups.
+    let read_provider = ProviderBuilder::new().connect(&rpc_url).await?;
 
-    let registry_contract_a = AMPRegistryContract::new(registry_addr.parse::<Address>()?, client_a);
-    let registry_contract_b = AMPRegistryContract::new(registry_addr.parse::<Address>()?, client_b);
+    let registry_addr_parsed: Address = registry_addr.parse()?;
+    let settlement_addr_parsed: Address = settlement_addr.parse()?;
+    let registry_a = IAMPRegistry::new(registry_addr_parsed, provider_a.clone());
+    let registry_b = IAMPRegistry::new(registry_addr_parsed, provider_b.clone());
 
     // 8. Register game on-chain
     println!("[TEST] Registering game on-chain...");
-    let verifier_address =
-        Address::from_slice(&hex::decode("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266")?);
-    let tx = registry_contract_a.register_game(
-        0, // ASYNC_VERIFIER
-        vec![verifier_address],
-        U256::from(1_000_000_000_000_000_000u64), // 1 ether
-        Address::zero(),                          // Native stake token
-        Address::zero(),                          // Arbiter
-    );
-    let pending_tx = tx.send().await?;
-    pending_tx.await?;
+    let verifier_address: Address = "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266".parse()?;
+    let one_ether = U256::from(1_000_000_000_000_000_000u64);
+    let pending = registry_a
+        .registerGame(
+            0u8,
+            vec![verifier_address],
+            one_ether,
+            Address::ZERO,
+            Address::ZERO,
+        )
+        .send()
+        .await?;
+    pending.watch().await?;
     println!("[TEST] Game registered successfully on-chain.");
 
     // 9. Login players to Matchmaking Server
@@ -442,75 +463,53 @@ async fn run_test() -> Result<()> {
     println!("[TEST] Match found! UUID: {}", match_id_uuid);
 
     // Calculate on-chain match ID
-    let match_id_val = U256::from_big_endian(&ethers::utils::keccak256(match_id_uuid.as_bytes()));
+    let match_id_val = U256::from_be_bytes::<32>(keccak256(match_id_uuid.as_bytes()).into());
     println!("[TEST] On-chain match ID hash: {}", match_id_val);
 
     // 11. Create and Join Match on-chain
     println!("[TEST] Player A creating match on-chain with 1 ether stake...");
-    let tx = registry_contract_a
-        .create_match(
-            U256::from(0), // gameId = 0
-            match_id_val,
-            U256::from(1_000_000_000_000_000_000u64),
-        )
-        .value(U256::from(1_000_000_000_000_000_000u64));
-    let pending_tx = tx.send().await?;
-    pending_tx.await?;
+    let pending = registry_a
+        .createMatch(U256::from(0), match_id_val, one_ether)
+        .value(one_ether)
+        .send()
+        .await?;
+    pending.watch().await?;
     println!("[TEST] Match created on-chain.");
 
     println!("[TEST] Player B joining match on-chain with 1 ether stake...");
-    let tx = registry_contract_b
-        .join_match(match_id_val)
-        .value(U256::from(1_000_000_000_000_000_000u64));
-    let pending_tx = tx.send().await?;
-    pending_tx.await?;
+    let pending = registry_b
+        .joinMatch(match_id_val)
+        .value(one_ether)
+        .send()
+        .await?;
+    pending.watch().await?;
     println!("[TEST] Match joined on-chain. State transitioned to READY.");
 
     // 12. Submit match outcome
     println!("[TEST] Submitting outcome (Player A wins) to verifier...");
 
     // Compute the submitter's EIP-712 signature over (matchId, outcome,
-    // transcriptHash). Must match AMP-Server's `compute_outcome_eip712_digest`
-    // exactly or the S1 verification gate rejects it.
-    let transcript_hash = ethers::utils::keccak256(match_id_uuid.as_bytes());
+    // transcriptHash). Reuse amp-sdk's canonical helper (byte-identical to
+    // AMP-Server's compute_outcome_eip712_digest + the cross-language KAT).
+    let transcript_hash = keccak256(match_id_uuid.as_bytes());
     let outcome_val: u8 = 1; // Player A wins
-    let match_id_val_for_digest =
-        U256::from_big_endian(&ethers::utils::keccak256(match_id_uuid.as_bytes()));
-    let async_result_typehash = ethers::utils::keccak256(
-        "AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)".as_bytes(),
-    );
-    let struct_hash = ethers::utils::keccak256(ethers::abi::encode(&[
-        ethers::abi::Token::FixedBytes(async_result_typehash.to_vec()),
-        ethers::abi::Token::Uint(match_id_val_for_digest),
-        ethers::abi::Token::Uint(U256::from(outcome_val)),
-        ethers::abi::Token::FixedBytes(transcript_hash.to_vec()),
-    ]));
-    let eip712_domain_typehash = ethers::utils::keccak256(
-        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
-            .as_bytes(),
-    );
-    let name_hash = ethers::utils::keccak256("AMPSettlement".as_bytes());
-    let version_hash = ethers::utils::keccak256("1".as_bytes());
-    let settlement_address: Address = settlement_addr.parse()?;
-    let domain_separator = ethers::utils::keccak256(ethers::abi::encode(&[
-        ethers::abi::Token::FixedBytes(eip712_domain_typehash.to_vec()),
-        ethers::abi::Token::FixedBytes(name_hash.to_vec()),
-        ethers::abi::Token::FixedBytes(version_hash.to_vec()),
-        ethers::abi::Token::Uint(U256::from(43113u64)),
-        ethers::abi::Token::Address(settlement_address),
-    ]));
-    let mut digest_input = vec![0x19u8, 0x01];
-    digest_input.extend_from_slice(&domain_separator);
-    digest_input.extend_from_slice(&struct_hash);
-    let digest = H256::from_slice(&ethers::utils::keccak256(&digest_input));
-    let submitter_sig = wallet_a.sign_hash(digest)?;
-    let submitter_sig_bytes = submitter_sig.to_vec();
+    let digest = amp_sdk::compute_outcome_eip712_digest(
+        &match_id_uuid,
+        outcome_val,
+        transcript_hash.as_slice(),
+        43113,
+        &settlement_addr_parsed.into(),
+    )?;
+    let submitter_sig_bytes = wallet_a
+        .sign_hash_sync(&alloy_primitives::B256::from(digest))?
+        .as_bytes()
+        .to_vec();
 
     let mut submit_req = match_session_a.submit_outcome_request();
     {
         let mut sub = submit_req.get().init_submission();
         sub.set_match_id(match_id_uuid.as_bytes());
-        sub.set_replay_hash(&transcript_hash);
+        sub.set_replay_hash(transcript_hash.as_slice());
         sub.set_signature(&submitter_sig_bytes);
         {
             let mut outcome = sub.reborrow().init_outcome();
@@ -530,30 +529,28 @@ async fn run_test() -> Result<()> {
 
     // 13. Poll on-chain settlement
     println!("[TEST] Polling on-chain Settlement contract state...");
-    let settlement_contract = AMPSettlementContract::new(
-        settlement_addr.parse::<Address>()?,
-        Arc::new(provider.clone()),
-    );
+    let settlement_contract = IAMPSettlement::new(settlement_addr_parsed, read_provider.clone());
     let start_poll = Instant::now();
     let mut settled = false;
 
     while start_poll.elapsed().as_secs() < 30 {
-        if let Ok((_match_id, 1, _t_hash, _settled_at)) =
-            settlement_contract.settlements(match_id_val).call().await
-        {
-            // WIN_A
-            println!("[TEST] Outcome verified on-chain: WIN_A");
-            settled = true;
-            break;
+        if let Ok(returned) = settlement_contract.settlements(match_id_val).call().await {
+            if returned.outcome == 1 {
+                // WIN_A
+                println!("[TEST] Outcome verified on-chain: WIN_A");
+                settled = true;
+                break;
+            }
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     assert!(settled, "Match failed to settle on-chain within timeout");
 
-    // 14. Verify balances
-    let pending_withdrawal_a = registry_contract_a
-        .pending_withdrawals(Address::zero(), wallet_a.address())
+    // 14. Verify balances (reads via the read-only provider).
+    let registry_read = IAMPRegistry::new(registry_addr_parsed, read_provider.clone());
+    let pending_withdrawal_a = registry_read
+        .pendingWithdrawals(Address::ZERO, wallet_a.address())
         .call()
         .await?;
     println!(
@@ -566,10 +563,7 @@ async fn run_test() -> Result<()> {
         U256::from(1_980_000_000_000_000_000u64)
     );
 
-    let protocol_fee = registry_contract_a
-        .fee_balances(Address::zero())
-        .call()
-        .await?;
+    let protocol_fee = registry_read.feeBalances(Address::ZERO).call().await?;
     println!(
         "[TEST] Protocol fee pot (fee_balances): {} Wei (expected 0)",
         protocol_fee
@@ -577,13 +571,11 @@ async fn run_test() -> Result<()> {
     // Phase 3.1: fees now route to the Settlement's `protocolFeeRecipient`
     // (the deployer, anvil account 0) via pendingWithdrawals instead of the
     // Registry's owner fee pot.
-    assert_eq!(protocol_fee, U256::zero());
+    assert_eq!(protocol_fee, U256::ZERO);
 
-    let deployer: Address = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-        .parse()
-        .expect("anvil account 0 address");
-    let fee_recipient_balance = registry_contract_a
-        .pending_withdrawals(Address::zero(), deployer)
+    let deployer: Address = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+    let fee_recipient_balance = registry_read
+        .pendingWithdrawals(Address::ZERO, deployer)
         .call()
         .await?;
     println!(
@@ -601,7 +593,7 @@ async fn run_test() -> Result<()> {
     {
         let mut sub = dup_req.get().init_submission();
         sub.set_match_id(match_id_uuid.as_bytes());
-        sub.set_replay_hash(&transcript_hash);
+        sub.set_replay_hash(transcript_hash.as_slice());
         sub.set_signature(&submitter_sig_bytes);
         let mut outcome = sub.reborrow().init_outcome();
         outcome.set_type(match_capnp::OutcomeType::Win);
@@ -625,8 +617,8 @@ async fn run_test() -> Result<()> {
     let db = sled::open(&server_db)?;
     let players_tree = db.open_tree("players")?;
 
-    let player_id_a = format!("0x{}", hex::encode(wallet_a.address().as_bytes()));
-    let player_id_b = format!("0x{}", hex::encode(wallet_b.address().as_bytes()));
+    let player_id_a = format!("0x{}", hex::encode(wallet_a.address().as_slice()));
+    let player_id_b = format!("0x{}", hex::encode(wallet_b.address().as_slice()));
 
     let profile_bytes_a = players_tree
         .get(player_id_a.as_bytes())?

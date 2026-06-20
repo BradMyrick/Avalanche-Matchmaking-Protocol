@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
-use ethers::prelude::*;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{error, info};
 
@@ -29,24 +28,41 @@ pub mod relayer_capnp {
     include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs"));
 }
 
-abigen!(
-    AMPSettlementContract,
-    "../contracts/out/AMPSettlement.sol/AMPSettlement.json"
-);
+// Phase 3.4: ethers `abigen!` → alloy `sol!`. `#[sol(rpc)]` enables the
+// provider-bound contract instance + call builders.
+alloy_sol_types::sol! {
+    #[sol(rpc)]
+    interface IAMPRegistry {
+        function matches(uint256 matchId) external view returns (uint256 gameId, address playerA, uint8 state, address playerB, uint64 createdAt, uint256 stakeAmount, uint256 stakeAmountB);
+        function games(uint256 gameId) external view returns (address admin, uint8 mode, uint256 minStake, address stakeToken, address arbiter, uint256 matchTimeout);
+    }
+    #[sol(rpc)]
+    interface IAMPSettlement {
+        struct AsyncResult { uint256 matchId; uint8 outcome; bytes32 transcriptHash; bytes signature; }
+        function submitAsyncResult(uint256 matchId, AsyncResult calldata result) external;
+        function settlements(uint256 matchId) external view returns (uint256 matchId_, uint8 outcome, bytes32 transcriptHash, uint256 settledAt);
+    }
+}
 
+use alloy_primitives::{Address, U256};
+use alloy_provider::{DynProvider, Provider, ProviderBuilder};
+use alloy_signer_local::PrivateKeySigner;
 use dashmap::DashSet;
-
-abigen!(
-    AMPRegistryContract,
-    "../contracts/out/AMPRegistry.sol/AMPRegistry.json"
-);
 
 #[derive(Clone)]
 pub struct RelayerState {
-    settlement: AMPSettlementContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
-    registry: AMPRegistryContract<SignerMiddleware<Provider<Http>, LocalWallet>>,
-    master_client: Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
-    pending_topups: Arc<DashSet<Address>>,
+    /// Read-only provider for chain reads (balances, contract view calls).
+    pub read_provider: DynProvider,
+    /// Master wallet-fillable provider (gas top-ups from the master key).
+    pub master_provider: DynProvider,
+    /// Master signing key — used to derive per-game custodial signers.
+    pub master_signer: PrivateKeySigner,
+    /// RPC URL — used to build a wallet-fillable provider per custodial signer.
+    pub rpc_url: String,
+    pub chain_id: u64,
+    pub settlement_addr: Address,
+    pub registry_addr: Address,
+    pub pending_topups: Arc<DashSet<Address>>,
 }
 
 struct RelayerImpl {
@@ -87,9 +103,10 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
         let state = self.state.clone();
 
         capnp::capability::Promise::from_future(async move {
-            match state.registry.games(U256::from(game_id)).call().await {
+            let registry = IAMPRegistry::new(state.registry_addr, state.read_provider.clone());
+            match registry.games(U256::from(game_id)).call().await {
                 Ok(game_data) => {
-                    results.get().set_admin(game_data.0.as_bytes());
+                    results.get().set_admin(game_data.admin.as_slice());
                     Ok(())
                 }
                 Err(e) => Err(capnp::Error::failed(format!(
@@ -112,10 +129,10 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
         }
 
         let game_id = capnp_rpc::pry!(params.get()).get_game_id();
-        let chain_id = self.state.master_client.signer().chain_id();
+        let chain_id = self.state.chain_id;
         let wallet = capnp_rpc::pry!(
             custodial::derive_custodial_signer(
-                self.state.master_client.signer(),
+                &self.state.master_signer,
                 "settlement",
                 game_id,
                 chain_id,
@@ -123,7 +140,7 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
             .map_err(|e| capnp::Error::failed(format!("custodial derivation failed: {}", e)))
         );
 
-        results.get().set_address(wallet.address().as_bytes());
+        results.get().set_address(wallet.address().as_slice());
         capnp::capability::Promise::ok(())
     }
 
@@ -435,22 +452,29 @@ async fn main() -> Result<()> {
         );
     }
 
-    let provider = Provider::<Http>::try_from(&cfg.fuji_rpc_url)?;
-    let wallet: LocalWallet = cfg.relayer_private_key.parse()?;
-    let chain_id = provider.get_chainid().await?.as_u64();
-    let wallet = wallet.with_chain_id(chain_id);
+    let rpc_url = cfg.fuji_rpc_url.clone();
+    let read_provider = DynProvider::new(ProviderBuilder::new().connect(&rpc_url).await?);
+    let chain_id = read_provider.get_chain_id().await?;
 
-    let master_client = Arc::new(SignerMiddleware::new(provider.clone(), wallet));
-    let settlement_address: Address = cfg.contract_settlement.parse()?;
-    let registry_address: Address = cfg.contract_registry.parse()?;
+    let master_signer: PrivateKeySigner = cfg.relayer_private_key.parse()?;
+    let master_provider = DynProvider::new(
+        ProviderBuilder::new()
+            .wallet(master_signer.clone())
+            .connect(&rpc_url)
+            .await?,
+    );
 
-    let settlement = AMPSettlementContract::new(settlement_address, master_client.clone());
-    let registry = AMPRegistryContract::new(registry_address, master_client.clone());
+    let settlement_addr: Address = cfg.contract_settlement.parse()?;
+    let registry_addr: Address = cfg.contract_registry.parse()?;
 
     let state = RelayerState {
-        settlement,
-        registry,
-        master_client,
+        read_provider,
+        master_provider,
+        master_signer,
+        rpc_url,
+        chain_id,
+        settlement_addr,
+        registry_addr,
         pending_topups: Arc::new(DashSet::new()),
     };
 

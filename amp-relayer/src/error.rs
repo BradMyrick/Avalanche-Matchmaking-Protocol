@@ -1,10 +1,10 @@
-use ethers::providers::ProviderError;
+use alloy_transport::TransportError;
 use std::time::SystemTimeError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum RelayerError {
     #[error("Network request failed: {0}")]
-    Network(#[from] ProviderError),
+    Network(#[from] TransportError),
 
     #[error("Contract call failed: {0}")]
     Contract(String),

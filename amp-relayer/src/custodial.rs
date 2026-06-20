@@ -1,11 +1,20 @@
 use crate::error::RelayerError;
-use ethers::prelude::*;
+use alloy_primitives::{Address, U256, keccak256 as alloy_keccak};
+use alloy_provider::Provider;
+use alloy_signer_local::PrivateKeySigner;
 use tracing::info;
 
 use super::RelayerState;
 
 const DERIVATION_DOMAIN: &[u8] = b"AMP-custodial-v1";
 const KECCAK256_BLOCK_SIZE: usize = 136; // keccak-256 rate in bytes (r = (1600 - 2*256) / 8)
+
+/// Local keccak256 helper returning a fixed `[u8; 32]` (alloy's `keccak256`
+/// returns `B256`; the HKDF/HMAC internals here operate on raw 32-byte arrays).
+fn keccak256(b: &[u8]) -> [u8; 32] {
+    let h = alloy_keccak(b);
+    h.into()
+}
 
 /// HMAC construction using keccak256 as the underlying hash function.
 ///
@@ -16,7 +25,7 @@ fn hmac_keccak256(key: &[u8], message: &[u8]) -> [u8; 32] {
     // If key > block size, hash it first
     let mut key_padded = [0u8; KECCAK256_BLOCK_SIZE];
     if key.len() > KECCAK256_BLOCK_SIZE {
-        key_padded[..32].copy_from_slice(&ethers::utils::keccak256(key));
+        key_padded[..32].copy_from_slice(&keccak256(key));
     } else {
         key_padded[..key.len()].copy_from_slice(key);
     }
@@ -32,13 +41,13 @@ fn hmac_keccak256(key: &[u8], message: &[u8]) -> [u8; 32] {
     let mut inner_input = Vec::with_capacity(KECCAK256_BLOCK_SIZE + message.len());
     inner_input.extend_from_slice(&ipad);
     inner_input.extend_from_slice(message);
-    let inner_hash = ethers::utils::keccak256(&inner_input);
+    let inner_hash = keccak256(&inner_input);
 
     // Outer hash: H((key ⊕ opad) || inner_hash)
     let mut outer_input = Vec::with_capacity(KECCAK256_BLOCK_SIZE + 32);
     outer_input.extend_from_slice(&opad);
     outer_input.extend_from_slice(&inner_hash);
-    ethers::utils::keccak256(&outer_input)
+    keccak256(&outer_input)
 }
 
 /// HKDF-Extract: PRK = HMAC-Hash(salt, IKM)
@@ -89,12 +98,12 @@ fn hkdf_expand(prk: &[u8], info: &[u8], length: usize) -> Vec<u8> {
 /// - **Proper KDF properties**: HKDF is a proven, standardized construction
 ///   (RFC 5869, adapted here with keccak256 as the PRF).
 pub fn derive_custodial_signer(
-    master_key: &LocalWallet,
+    master_key: &PrivateKeySigner,
     purpose: &str,
     game_id: u64,
-    chain_id: u64,
-) -> anyhow::Result<LocalWallet> {
-    let master_bytes = master_key.signer().to_bytes();
+    _chain_id: u64,
+) -> anyhow::Result<PrivateKeySigner> {
+    let master_bytes: [u8; 32] = master_key.to_bytes().into();
 
     // Build info binding for HKDF-Expand: purpose || 0x00 || gameId (big-endian)
     let mut info = Vec::with_capacity(purpose.len() + 1 + 8);
@@ -110,9 +119,8 @@ pub fn derive_custodial_signer(
     let mut derived_key = [0u8; 32];
     derived_key.copy_from_slice(&derived_key_bytes);
 
-    Ok(LocalWallet::from_bytes(&derived_key)
-        .map_err(|e| anyhow::anyhow!("HKDF derived invalid key: {}", e))?
-        .with_chain_id(chain_id))
+    PrivateKeySigner::from_slice(&derived_key)
+        .map_err(|e| anyhow::anyhow!("HKDF derived invalid key: {}", e))
 }
 
 /// Ensure the custodial wallet has sufficient gas to submit transactions.
@@ -126,28 +134,32 @@ pub async fn ensure_gas(custodial_addr: Address, state: &RelayerState) -> Result
     }
 
     let balance = state
-        .master_client
-        .provider()
-        .get_balance(custodial_addr, None)
-        .await?;
-    let threshold =
-        ethers::utils::parse_ether(0.05).map_err(|e| RelayerError::Transaction(e.to_string()))?;
+        .read_provider
+        .get_balance(custodial_addr)
+        .await
+        .map_err(|e| RelayerError::Transaction(e.to_string()))?;
+    // 0.05 AVAX threshold, 0.2 AVAX top-up (precomputed wei; alloy has no
+    // `parse_ether`, and these are fixed constants).
+    let threshold = U256::from(50_000_000_000_000_000u128);
 
     if balance < threshold {
         state.pending_topups.insert(custodial_addr);
-        let topup = ethers::utils::parse_ether(0.2)
-            .map_err(|e| RelayerError::Transaction(e.to_string()))?;
+        let topup = U256::from(200_000_000_000_000_000u128);
         info!(
             "Custodial wallet {} low on gas ({:?}). Topping up...",
             custodial_addr, balance
         );
-        let tx = TransactionRequest::new().to(custodial_addr).value(topup);
 
+        use alloy_network::TransactionBuilder;
+        let tx = alloy_rpc_types_eth::TransactionRequest::default()
+            .with_to(custodial_addr)
+            .with_value(topup);
         let result = state
-            .master_client
-            .send_transaction(tx, None)
+            .master_provider
+            .send_transaction(tx)
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()))?
+            .watch()
             .await
             .map_err(|e| RelayerError::Transaction(e.to_string()));
         state.pending_topups.remove(&custodial_addr);
@@ -162,7 +174,7 @@ pub async fn ensure_gas(custodial_addr: Address, state: &RelayerState) -> Result
 mod tests {
     use super::*;
 
-    fn make_test_wallet() -> LocalWallet {
+    fn make_test_wallet() -> PrivateKeySigner {
         "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
             .parse()
             .unwrap()
@@ -212,7 +224,8 @@ mod tests {
         let master = make_test_wallet();
         let derived = derive_custodial_signer(&master, "settlement", 42, 43114).unwrap();
         assert_ne!(derived.address(), master.address());
-        assert_eq!(derived.chain_id(), 43114);
+        // (alloy signers do not carry a chain id; the chain id lives on the
+        // provider/network, so the old `derived.chain_id()` assertion is obsolete.)
     }
 
     #[test]
@@ -247,7 +260,7 @@ mod tests {
         // Verify the HKDF-derived key is NOT the same as the old raw keccak256 approach,
         // confirming the fix is substantive.
         let master = make_test_wallet();
-        let master_bytes = master.signer().to_bytes();
+        let master_bytes: [u8; 32] = master.to_bytes().into();
 
         let mut preimage = Vec::new();
         preimage.extend_from_slice(DERIVATION_DOMAIN);
@@ -256,10 +269,10 @@ mod tests {
         preimage.push(0x00);
         preimage.extend_from_slice(&1u64.to_be_bytes());
         preimage.extend_from_slice(&master_bytes);
-        let raw_hash = ethers::utils::keccak256(preimage);
+        let raw_hash = keccak256(&preimage);
 
         let derived = derive_custodial_signer(&master, "settlement", 1, 43114).unwrap();
-        let derived_bytes = derived.signer().to_bytes();
+        let derived_bytes: [u8; 32] = derived.to_bytes().into();
 
         assert_ne!(
             raw_hash.as_slice(),

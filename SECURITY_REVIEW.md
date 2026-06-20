@@ -87,7 +87,7 @@ hardening below; a third-party audit is scoped for Phase 6.5.
 | **S16** | Relayer API-key check used `HashSet::contains`, whose timing varies with hash buckets. | LOW | **FIXED** | `config::verify_api_key` SHA-256-hashes the candidate and compares against every stored hash with a constant-time `ct_eq` (no short-circuit). Tests: `ct_eq_matches_and_rejects`, `verify_api_key_round_trip_and_reject`. |
 | **C1** | Custodial key derivation is hand-rolled HKDF-HMAC-keccak256 with no published reference vectors. | LOW | **MITIGATED** | keccak256 is not a standard HKDF hash so no vetted crate applies directly; a pinned known-answer vector (`test_custodial_derivation_known_vector`, derived address `0x70d8a…736a` for the canonical inputs) now catches any drift. A future migration to BIP-32-style secp256k1 derivation is tracked. |
 
-### Phase 6 — operational hardening (deployment guidance)
+### Operational hardening (deployment guidance)
 
 - **PROXY-protocol (S10 deployment gap):** when the server/relayer sit behind a
   load balancer, `peer.ip()` resolves to the LB, not the client, defeating per-IP
@@ -95,6 +95,11 @@ hardening below; a third-party audit is scoped for Phase 6.5.
   the LB and terminate it at an edge that forwards the real client IP (e.g. via
   `PROXY-protocol`-aware ingress or a sidecar that rewrites the source). Native
   PROXY-protocol parsing in the AMP accept loop is tracked as future work.
+- **Dependency stack (Phase 3.4):** the unmaintained `ethers-rs 2.0.14` is fully
+  removed and replaced by `alloy` across all four Rust EVM consumers (server,
+  loadtest, integration tests, relayer). `ethers`/`bincode`-era RUSTSEC exposure
+  on the EVM path is eliminated; `h2` and `hyper` duplicate versions collapsed.
+  (Phase 3.1 — `bincode 1.3.3` → `postcard`, and `sled → redb`, remain.)
 - **Third-party audit (Phase 6.5):** an independent Solidity + Rust audit
   (Spearbit / Ackee / Trail of Bits) is scoped before the C-Chain mainnet tag
   (Phase 10). The Phase 1 self-review + fuzz/invariant suite is the pre-audit

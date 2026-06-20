@@ -172,11 +172,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
-use clap::Parser;
-use alloy_primitives::{eip191_hash_message, keccak256, B256};
+use alloy_primitives::{B256, eip191_hash_message, keccak256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
+use anyhow::Result;
+use clap::Parser;
 use hdrhistogram::Histogram;
 use tokio::net::TcpStream;
 use tokio::task::LocalSet;
@@ -224,7 +224,8 @@ async fn run_client(
 
     let key_input = format!("amp-loadtest-client-{}", client_id);
     let key_bytes = keccak256(key_input);
-    let wallet = PrivateKeySigner::from_slice(key_bytes.as_slice()).expect("valid loadtest wallet key");
+    let wallet =
+        PrivateKeySigner::from_slice(key_bytes.as_slice()).expect("valid loadtest wallet key");
 
     let connect_start = Instant::now();
     let stream = match TcpStream::connect(addr).await {
@@ -406,7 +407,10 @@ async fn submit_outcome(
         chain_id,
         &verifying_contract,
     )?;
-    let sig = wallet.sign_hash_sync(&B256::from(digest))?.as_bytes().to_vec();
+    let sig = wallet
+        .sign_hash_sync(&B256::from(digest))?
+        .as_bytes()
+        .to_vec();
     let sig_bytes = sig;
 
     let mut req = match_session.submit_outcome_request();

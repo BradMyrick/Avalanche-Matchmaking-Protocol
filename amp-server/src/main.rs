@@ -1,9 +1,9 @@
+use alloy_primitives::{Address, B256, U256, keccak256};
+use alloy_signer::SignerSync;
+use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result};
 use capnp::capability::Promise;
 use capnp_rpc::{RpcSystem, pry, rpc_twoparty_capnp, twoparty};
-use alloy_primitives::{keccak256, Address, B256, U256};
-use alloy_signer::SignerSync;
-use alloy_signer_local::PrivateKeySigner;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -542,9 +542,8 @@ pub(crate) fn compute_outcome_eip712_digest(
         Err(_) => U256::from_be_bytes::<32>(keccak256(match_id.as_bytes()).into()),
     };
 
-    let async_result_typehash = keccak256(
-        "AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)".as_bytes(),
-    );
+    let async_result_typehash =
+        keccak256("AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)".as_bytes());
     let t_hash: [u8; 32] = transcript_hash.try_into().expect("checked 32 bytes");
 
     // struct_hash = keccak256(abi.encode(bytes32 typeHash, uint256 matchId,
