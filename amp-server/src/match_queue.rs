@@ -295,4 +295,38 @@ mod tests {
         // Removing a non-queued player is a no-op.
         assert!(!q.remove_player("nobody"));
     }
+
+    // Phase 5.2 — property test: with only the default skill rule, two
+    // same-bucket players are paired iff their MMR difference is within the
+    // ruleset's `max_skill_diff`. Run across 1k randomized cases per CI run.
+    use proptest::prelude::*;
+    proptest! {
+        #![proptest_config(proptest::test_runner::Config {
+            cases: 1024, ..proptest::test_runner::Config::default()
+        })]
+        #[test]
+        fn prop_skill_pairing_respects_max_diff(
+            mmr_a in 0f32..3000f32,
+            mmr_b in 0f32..3000f32,
+            max_diff in 1f32..1000f32,
+        ) {
+            let mut q = IndexedQueue::new();
+            q.push(make_entry("pa", "g", "r", mmr_a));
+            q.push(make_entry("pb", "g", "r", mmr_b));
+
+            let ruleset = Arc::new(StoredRuleSet {
+                max_skill_diff: max_diff,
+                ..Default::default()
+            });
+            let matched = q.try_match_bucket(&("g".into(), "r".into()), &ruleset, 10_000, 0);
+
+            let within = (mmr_a - mmr_b).abs() <= max_diff;
+            prop_assert_eq!(matched.is_some(), within, "pairing must follow the skill gate");
+            if let Some(m) = matched {
+                // A successful match must always consume both players.
+                prop_assert!(m.entry_a.player_id == "pa" || m.entry_a.player_id == "pb");
+                prop_assert!(m.entry_a.player_id != m.entry_b.player_id);
+            }
+        }
+    }
 }

@@ -214,4 +214,69 @@ mod tests {
     fn test_extract_nonce_wrong_prefix() {
         assert!(extract_nonce_from_challenge("WRONG_PREFIX:42:nonce").is_none());
     }
+
+    // ---- Phase 5.1: stateful negative-path coverage for AuthService. ----
+    // The audit flagged that auth had only pure-function tests; these exercise
+    // the real challenge lifecycle (unknown/expired nonce, wrong game, sig
+    // mismatch, valid round-trip) using a real ECDSA wallet.
+
+    use ethers_core::utils::hash_message;
+    use ethers_signers::{LocalWallet, Signer};
+
+    fn test_wallet() -> LocalWallet {
+        // Deterministic key for reproducible tests.
+        LocalWallet::from_bytes(&ethers_core::utils::keccak256(b"amp-auth-test-wallet-key"))
+            .expect("valid wallet")
+    }
+
+    async fn sign(wallet: &LocalWallet, msg: &[u8]) -> Vec<u8> {
+        let h: ethers_core::types::H256 = hash_message(msg);
+        wallet.sign_hash(h).expect("sign").to_vec()
+    }
+
+    #[tokio::test]
+    async fn test_verify_login_round_trip_succeeds() {
+        let svc = AuthService::new();
+        let wallet = test_wallet();
+        let (msg, _exp) = svc.create_challenge(7).await.unwrap();
+        let sig = sign(&wallet, &msg).await;
+        let addr = svc.verify_login(7, &sig, &msg).await.unwrap();
+        assert_eq!(addr, wallet.address());
+    }
+
+    #[tokio::test]
+    async fn test_verify_login_rejects_unknown_nonce() {
+        let svc = AuthService::new();
+        let wallet = test_wallet();
+        // Sign a challenge string that was never issued by the service.
+        let bogus = b"AMP_AUTH:7:never-issued-nonce";
+        let sig = sign(&wallet, bogus).await;
+        assert!(svc.verify_login(7, &sig, bogus).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_verify_login_rejects_wrong_game_id() {
+        let svc = AuthService::new();
+        let wallet = test_wallet();
+        let (msg, _) = svc.create_challenge(7).await.unwrap();
+        let sig = sign(&wallet, &msg).await;
+        // Challenge issued for game 7; claim game 99.
+        assert!(svc.verify_login(99, &sig, &msg).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_verify_login_rejects_short_signature() {
+        let svc = AuthService::new();
+        let (msg, _) = svc.create_challenge(7).await.unwrap();
+        let too_short = vec![0u8; 10];
+        assert!(svc.verify_login(7, &too_short, &msg).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_create_challenge_returns_unique_nonces() {
+        let svc = AuthService::new();
+        let (m1, _) = svc.create_challenge(1).await.unwrap();
+        let (m2, _) = svc.create_challenge(1).await.unwrap();
+        assert_ne!(m1, m2, "each challenge must carry a fresh nonce");
+    }
 }

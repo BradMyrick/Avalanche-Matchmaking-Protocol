@@ -45,19 +45,39 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   rust-test:
-    name: Rust Tests
-    runs-on: ubuntu-latest
+    # Phase 5.5 — run workspace unit tests on all three release OSes so the
+    # macOS/Windows binaries are test-executed, not just cross-compiled. The
+    # anvil-dependent integration crate runs in its own Linux-only job below.
+    name: Rust Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Cap'n Proto
+      - name: Install Cap'n Proto (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+
+      - name: Install Cap'n Proto (macOS)
+        if: runner.os == 'macOS'
+        run: brew install capnp
+
+      - name: Install Cap'n Proto (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install capnproto:x64-windows
+          echo "${env:VCPKG_INSTALLATION_ROOT}\installed\x64-windows\tools\capnproto" >> $env:GITHUB_PATH
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
@@ -69,8 +89,46 @@ jobs:
           forge install foundry-rs/forge-std --no-git
           forge build
 
-      - name: Run all workspace tests
-        run: cargo test --workspace
+      - name: Run workspace unit tests (excludes anvil integration crate)
+        run: cargo test --workspace --exclude amp-integration-tests
+
+  coverage:
+    # Phase 5.7 — coverage measurement + upload. Non-blocking until the
+    # baseline is established; the ≥85% Rust-core gate is enforced once stable.
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Cap'n Proto
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Build contracts
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts --no-git
+          forge install foundry-rs/forge-std --no-git
+          forge build
+      - name: Rust coverage (amp-server + amp-relayer core)
+        run: cargo llvm-cov --package AMP-Server --package amp-relayer --lcov --output-path lcov.info
+      - name: Solidity coverage
+        working-directory: contracts
+        run: forge coverage --report lcov --lcov-out forge-lcov.info || true
+      - uses: codecov/codecov-action@v4
+        with:
+          files: ./lcov.info,./contracts/forge-lcov.info
+          fail_ci_if_error: false
+
 
   perf-gate:
     # Phase 2.7 — latency regression gate. Fails if the matchstore hot path
@@ -120,6 +178,8 @@ jobs:
         run: forge test -vvv
 
   sdk-build:
+    # Phase 5.4 — compile-only verification for the C++/C# SDKs (full feature
+    # parity + tests land in Phase 4). The C++ step no longer swallows failures.
     name: SDK Build Verification
     runs-on: ubuntu-latest
     steps:
@@ -133,7 +193,7 @@ jobs:
         run: |
           mkdir -p build && cd build
           cmake .. -DCAPNP_INCLUDE_DIRS=/usr/include
-          make -j$(nproc) 2>&1 || echo "C++ build attempted (may need capnp pkg-config)"
+          make -j$(nproc)
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -143,6 +203,65 @@ jobs:
       - name: Verify C# SDK compiles
         working-directory: amp-sdk/examples/csharp
         run: dotnet build
+
+  sdk-go:
+    # Phase 5.4 — Go SDK tests run in CI (previously absent). Requires the
+    # capnp-generated bindings; produced by the bootstrap step.
+    name: SDK Tests (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Cap'n Proto + capnpc-go
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Generate Go bindings
+        working-directory: amp-sdk
+        run: |
+          capnp compile -o- -I schemas schemas/match.capnp > /dev/null
+          which capnpc-go || (go install capnproto.org/go/capnp/v3/capnpc-go@latest)
+          ./generate_bindings.sh || true
+      - name: Go tests
+        working-directory: amp-sdk/go
+        run: go test ./...
+
+  sdk-python:
+    name: SDK Tests (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install + test
+        working-directory: amp-sdk/python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pycapnp
+          pytest -q
+
+  sdk-js:
+    name: SDK Tests (JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Cap'n Proto (for native build)
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: js-sdk
+      - name: Build + test
+        working-directory: amp-sdk/js
+        run: |
+          npm install
+          npm run build:native
+          npm test
+
 
   integration:
     name: End-to-End Integration

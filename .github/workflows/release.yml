@@ -10,8 +10,43 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # Phase 5.6 — gate every release on the core test suites. A tag push can no
+  # longer bypass CI; binaries/docker/SDKs only build once tests are green.
+  prerelease-tests:
+    name: Pre-release Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Cap'n Proto
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-tests
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Build contracts
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts --no-git
+          forge install foundry-rs/forge-std --no-git
+          forge build
+      - name: Rust fmt + clippy
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+      - name: Rust unit tests
+        run: cargo test --workspace --exclude amp-integration-tests
+      - name: Solidity tests
+        working-directory: contracts
+        run: forge test -vvv
+
   build-binaries:
     name: Build ${{ matrix.target }}
+    needs: prerelease-tests
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -98,13 +133,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: amp-${{ matrix.target }}
-          if-no-files-found: ignore
+          if-no-files-found: error
           path: |
             amp-${{ matrix.target }}.tar.gz
             amp-${{ matrix.target }}.zip
 
   docker:
     name: Docker ${{ matrix.image }}
+    needs: prerelease-tests
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -157,6 +193,7 @@ jobs:
 
   package-sdks:
     name: Package SDKs
+    needs: prerelease-tests
     runs-on: ubuntu-latest
 
     steps:

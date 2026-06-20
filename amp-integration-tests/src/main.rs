@@ -592,6 +592,31 @@ async fn run_test() -> Result<()> {
     );
     assert_eq!(fee_recipient_balance, U256::from(20_000_000_000_000_000u64));
 
+    // Phase 5.1 — negative-path coverage: a duplicate submit on an already-settled
+    // match must be rejected (idempotency / settle-before-sign, audit P4). The
+    // wrong-signature path is covered by amp-server's
+    // test_verify_outcome_signature_round_trip unit test.
+    println!("[TEST] Negative path: duplicate submit on settled match must be rejected...");
+    let mut dup_req = match_session_a.submit_outcome_request();
+    {
+        let mut sub = dup_req.get().init_submission();
+        sub.set_match_id(match_id_uuid.as_bytes());
+        sub.set_replay_hash(&transcript_hash);
+        sub.set_signature(&submitter_sig_bytes);
+        let mut outcome = sub.reborrow().init_outcome();
+        outcome.set_type(match_capnp::OutcomeType::Win);
+        outcome.set_victor(outcome_val);
+        let mut scores = outcome.init_scores(2);
+        scores.set(0, 1);
+        scores.set(1, 0);
+    }
+    let dup_result = dup_req.send().promise.await;
+    assert!(
+        dup_result.is_err(),
+        "duplicate submit on a settled match must be rejected, not silently accepted"
+    );
+    println!("[TEST] Duplicate submit correctly rejected.");
+
     // 15. Verify player profile rating updates
     println!("[TEST] Shutting down matchmaking server to verify database MMR updates...");
     drop(server_guard);

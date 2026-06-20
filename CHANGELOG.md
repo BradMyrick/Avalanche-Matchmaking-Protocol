@@ -111,4 +111,31 @@ A running summary of the production-readiness path lives in [`prodpath.md`](prod
   (`active_match_count`, `get_active_match`, `active_matches_snapshot`); no shard lock
   is held across an `await`.
 
+## [Unreleased] — Phase 5: Test & CI infrastructure
+
+### Added — failure-path coverage (audit: "1 E2E happy path, no negative tests")
+- `amp-server/src/auth.rs`: 6 stateful negative-path tests covering the real
+  challenge lifecycle (round-trip, unknown nonce, wrong game_id, short signature,
+  unique nonces) — previously only pure-function helpers were tested.
+- `amp-server/src/match_queue.rs`: `prop_skill_pairing_respects_max_diff` — 1 024-case
+  `proptest` asserting two same-bucket players pair iff `|mmr_a − mmr_b| ≤ max_skill_diff`.
+- `amp-integration-tests`: duplicate-submit idempotency check — a second submit on a
+  settled match must be rejected (audit P4). Wrong-signature rejection is covered by
+  `amp-server` unit tests (`test_verify_outcome_signature_round_trip`).
+- Phase 1 already added Solidity fuzz + a 256-run value-conservation invariant.
+
+### Changed — CI gating (audit: "3 SDKs untested in CI; C++ build swallow; release untested")
+- `ci.yml`: added `sdk-go`, `sdk-python`, `sdk-js` jobs (previously absent from CI).
+- `ci.yml`: the C++ build step no longer swallows failures (`|| echo` removed).
+- `ci.yml`: `rust-test` now runs on an **ubuntu/macos/windows matrix** so release
+  binaries are test-executed, not just cross-compiled (integration crate excluded —
+  anvil is Linux-only).
+- `ci.yml`: new `coverage` job (cargo-llvm-cov + `forge coverage`, uploaded to Codecov;
+  non-blocking until the baseline stabilizes).
+- `release.yml`: a `prerelease-tests` job now gates every tag — binaries/docker/SDKs
+  only build after fmt + clippy + unit + Solidity tests pass. `if-no-files-found` set
+  to `error` (was `ignore`).
+- `ci.yml`/`release.yml` triggers broadened to the `prodpath` branch.
+
+
 
