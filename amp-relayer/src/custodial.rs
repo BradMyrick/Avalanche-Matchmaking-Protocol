@@ -176,6 +176,21 @@ mod tests {
         assert_eq!(a.address(), b.address());
     }
 
+    /// Phase 6.3 (audit C1): pinned known-answer vector for the hand-rolled
+    /// HKDF-HMAC-keccak256 custodial derivation. keccak256 is not a standard
+    /// HKDF hash, so no published reference vectors exist; this KAT pins the
+    /// output for a fixed (master, purpose, gameId, chainId) so any drift in the
+    /// derivation is caught loudly. Update deliberately if the scheme changes.
+    #[test]
+    fn test_custodial_derivation_known_vector() {
+        let master = make_test_wallet();
+        let derived = derive_custodial_signer(&master, "settlement", 1, 43114).unwrap();
+        let expected: Address = "0x70d8a89c804388efbe66057e6a6b4e5ac71a736a"
+            .parse()
+            .unwrap();
+        assert_eq!(derived.address(), expected);
+    }
+
     #[test]
     fn test_different_games_different_keys() {
         let master = make_test_wallet();

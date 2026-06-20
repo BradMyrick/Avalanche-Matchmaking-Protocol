@@ -79,6 +79,30 @@ hardening below; a third-party audit is scoped for Phase 6.5.
 
 ## Performance fixes
 
+### Phase 6 — hardening
+
+| ID | Finding | Severity | Status | Resolution / Test |
+|:---|:---|:---|:---|:---|
+| **S10** | Server per-IP rate-limiter `HashMap<IpAddr, Vec<Instant>>` was unbounded; a spoofed-source-IP flood grew memory without limit, and the `retain` ran on the accept thread. | MEDIUM | **FIXED** | `ConnectionRateLimiter::check_ip` now runs a `sweep_windows` pass (drop expired windows + empty entries) when the distinct-IP set exceeds `MAX_TRACKED_IPS = 100_000` or on a `SWEEP_EVERY = 2048` cadence. Tests: `sweep_removes_expired_and_empty_windows`, `check_ip_caps_per_ip_and_accepts_until_cap`. |
+| **S15** | Relayer API-key check used `HashSet::contains`, whose timing varies with hash buckets. | LOW | **FIXED** | `config::verify_api_key` SHA-256-hashes the candidate and compares against every stored hash with a constant-time `ct_eq` (no short-circuit). Tests: `ct_eq_matches_and_rejects`, `verify_api_key_round_trip_and_reject`. |
+| **C1** | Custodial key derivation is hand-rolled HKDF-HMAC-keccak256 with no published reference vectors. | LOW | **MITIGATED** | keccak256 is not a standard HKDF hash so no vetted crate applies directly; a pinned known-answer vector (`test_custodial_derivation_known_vector`, derived address `0x70d8a…736a` for the canonical inputs) now catches any drift. A future migration to BIP-32-style secp256k1 derivation is tracked. |
+
+### Phase 6 — operational hardening (deployment guidance)
+
+- **PROXY-protocol (S10 deployment gap):** when the server/relayer sit behind a
+  load balancer, `peer.ip()` resolves to the LB, not the client, defeating per-IP
+  rate limiting. Operators MUST enable PROXY-protocol v2 header preservation at
+  the LB and terminate it at an edge that forwards the real client IP (e.g. via
+  `PROXY-protocol`-aware ingress or a sidecar that rewrites the source). Native
+  PROXY-protocol parsing in the AMP accept loop is tracked as future work.
+- **Third-party audit (Phase 6.5):** an independent Solidity + Rust audit
+  (Spearbit / Ackee / Trail of Bits) is scoped before the C-Chain mainnet tag
+  (Phase 10). The Phase 1 self-review + fuzz/invariant suite is the pre-audit
+  baseline; the audit report will be committed and findings remediated before
+  `v1.0.0`.
+
+## Performance fixes
+
 | ID | Finding | Status |
 |:---|:---|:---|
 | **P4** | `sign_match_outcome` ran BEFORE the idempotency check. Repeat calls on settled matches burned CPU on each retry. | **FIXED** — `submit_outcome` now marks settled FIRST, then signs. |

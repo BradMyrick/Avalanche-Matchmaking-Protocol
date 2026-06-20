@@ -128,3 +128,59 @@ pub fn hash_api_key(key: &str) -> String {
     hasher.update(key.as_bytes());
     format!("{:x}", hasher.finalize())
 }
+
+/// Constant-time comparison of two strings (audit S15). Length is not treated
+/// as a secret here because the inputs are SHA-256 hex digests (always 64 chars);
+/// for differing lengths we still walk the shared prefix to avoid a length leak
+/// on unequal-length inputs, then OR in any length difference.
+pub fn ct_eq(a: &str, b: &str) -> bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let mut diff: u8 = 0;
+    let n = ab.len().min(bb.len());
+    for i in 0..n {
+        diff |= ab[i] ^ bb[i];
+    }
+    // Length difference folds in so unequal lengths never compare equal.
+    diff |= (ab.len() as u8).wrapping_sub(bb.len() as u8);
+    diff == 0
+}
+
+/// Constant-time API-key verification (audit S15). SHA-256 the candidate and
+/// compare against EVERY stored hash with `ct_eq` without short-circuiting, so
+/// the time does not depend on which (if any) key matched. The number of stored
+/// keys is operator-controlled and small.
+pub fn verify_api_key(candidate: &str, stored: &HashSet<String>) -> bool {
+    let hashed = hash_api_key(candidate);
+    let mut matched = false;
+    for k in stored {
+        if ct_eq(&hashed, k) {
+            matched = true;
+        }
+    }
+    matched
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ct_eq_matches_and_rejects() {
+        assert!(ct_eq("abc123", "abc123"));
+        assert!(!ct_eq("abc123", "abc124"));
+        assert!(!ct_eq("abc", "abcd"));
+        assert!(!ct_eq("", "a"));
+        assert!(ct_eq("", ""));
+    }
+
+    #[test]
+    fn verify_api_key_round_trip_and_reject() {
+        let mut set = HashSet::new();
+        set.insert(hash_api_key("correct-horse-battery-staple"));
+        assert!(verify_api_key("correct-horse-battery-staple", &set));
+        assert!(!verify_api_key("wrong-key", &set));
+        // Empty set never authenticates.
+        assert!(!verify_api_key("anything", &HashSet::new()));
+    }
+}

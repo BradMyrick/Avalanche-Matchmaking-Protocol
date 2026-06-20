@@ -137,5 +137,23 @@ A running summary of the production-readiness path lives in [`prodpath.md`](prod
   to `error` (was `ignore`).
 - `ci.yml`/`release.yml` triggers broadened to the `prodpath` branch.
 
+## [Unreleased] — Phase 6: Security hardening
+
+### Fixed
+- **S10:** server per-IP rate limiter now bounds distinct-IP memory (`MAX_TRACKED_IPS`
+  cap + `SWEEP_EVERY` cadence); expired windows and empty entries are swept. Previously
+  the outer `HashMap` grew without limit under a spoofed-source-IP flood.
+- **S15:** relayer API-key verification is now constant-time (`config::ct_eq` /
+  `verify_api_key`); no `HashSet` bucket-timing leak.
+- **C1:** custodial key derivation now has a pinned known-answer vector
+  (`0x70d8a…736a`) so any drift in the hand-rolled HKDF-HMAC-keccak256 path is caught.
+
+### Added
+- `ConnectionRateLimiter::sweep_windows` (testable) + 2 rate-limit tests.
+- `config::ct_eq` / `verify_api_key` + 2 tests; custodial KAT test.
+- `SECURITY_REVIEW.md`: Phase 6 section + PROXY-protocol deployment guidance +
+  third-party audit scoping (pre-`v1.0.0`).
+
+
 
 

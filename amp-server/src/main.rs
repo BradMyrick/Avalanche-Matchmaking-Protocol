@@ -201,6 +201,15 @@ mod rate_limit {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
 
+    /// Hard cap on the number of distinct source IPs tracked. Without this, a
+    /// spoofed-source-IP flood grows the outer HashMap without bound (audit S10).
+    /// When exceeded (or periodically), expired windows and empty entries are
+    /// swept, bounding live-set memory to ~this many IPs.
+    const MAX_TRACKED_IPS: usize = 100_000;
+    /// Sweep amortization: run a maintenance sweep every N calls even when below
+    /// the cap, so benign one-shot IPs don't linger until the cap is hit.
+    const SWEEP_EVERY: usize = 2048;
+
     pub struct ConnectionRateLimiter {
         inner: Mutex<Inner>,
         max_per_ip_per_minute: usize,
@@ -210,6 +219,7 @@ mod rate_limit {
 
     struct Inner {
         ip_windows: HashMap<IpAddr, Vec<Instant>>,
+        calls_since_sweep: usize,
     }
 
     pub struct ConnectionGuard(Arc<ConnectionRateLimiter>);
@@ -225,6 +235,7 @@ mod rate_limit {
             Self {
                 inner: Mutex::new(Inner {
                     ip_windows: HashMap::new(),
+                    calls_since_sweep: 0,
                 }),
                 max_per_ip_per_minute,
                 current_connections: AtomicUsize::new(0),
@@ -235,6 +246,16 @@ mod rate_limit {
         pub fn check_ip(&self, ip: IpAddr) -> bool {
             let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             let now = Instant::now();
+
+            // Phase 6.1 (audit S10): bound distinct-IP memory. Sweep expired
+            // windows + drop empty entries when the tracked set grows large or
+            // on the periodic cadence. The common small-map path skips this.
+            inner.calls_since_sweep = inner.calls_since_sweep.saturating_add(1);
+            if inner.ip_windows.len() > MAX_TRACKED_IPS || inner.calls_since_sweep >= SWEEP_EVERY {
+                sweep_windows(&mut inner.ip_windows, now);
+                inner.calls_since_sweep = 0;
+            }
+
             let window = inner.ip_windows.entry(ip).or_default();
             window.retain(|t| now.duration_since(*t).as_secs() < 60);
             if window.len() >= self.max_per_ip_per_minute {
@@ -263,6 +284,56 @@ mod rate_limit {
                     return Some(ConnectionGuard(self.clone()));
                 }
             }
+        }
+    }
+
+    /// Drop expired timestamps from every IP window and remove IPs whose window
+    /// is now empty. Extracted so the memory-bounding logic is unit-testable.
+    fn sweep_windows(ip_windows: &mut HashMap<IpAddr, Vec<Instant>>, now: Instant) {
+        ip_windows.retain(|_, w| {
+            w.retain(|t| now.duration_since(*t).as_secs() < 60);
+            !w.is_empty()
+        });
+    }
+
+    #[cfg(test)]
+    mod rate_limit_tests {
+        use super::*;
+
+        #[test]
+        fn sweep_removes_expired_and_empty_windows() {
+            // "now" is far enough in the future that older entries are >60s old.
+            let base = Instant::now();
+            let later = base + std::time::Duration::from_secs(120);
+
+            let ip = |a: u8| IpAddr::V4(std::net::Ipv4Addr::new(a, 0, 0, 1));
+            let mut map: HashMap<IpAddr, Vec<Instant>> = HashMap::new();
+            // Fresh window → retained.
+            map.insert(ip(1), vec![later]);
+            // Stale-only window → removed entirely (empty after prune).
+            map.insert(ip(2), vec![base]);
+            // Mixed window → stale pruned, fresh kept.
+            map.insert(ip(3), vec![base, later]);
+
+            sweep_windows(&mut map, later);
+
+            assert!(map.contains_key(&ip(1)));
+            assert!(
+                !map.contains_key(&ip(2)),
+                "empty windows must be dropped (S10 bound)"
+            );
+            assert_eq!(map.get(&ip(3)).map(|w| w.len()), Some(1));
+        }
+
+        #[test]
+        fn check_ip_caps_per_ip_and_accepts_until_cap() {
+            let lim = ConnectionRateLimiter::new(1000, 3);
+            let ip = IpAddr::V4(std::net::Ipv4Addr::new(9, 9, 9, 9));
+            assert!(lim.check_ip(ip));
+            assert!(lim.check_ip(ip));
+            assert!(lim.check_ip(ip));
+            // 4th within the rolling minute is rejected.
+            assert!(!lim.check_ip(ip));
         }
     }
 }

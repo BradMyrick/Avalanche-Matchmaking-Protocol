@@ -66,8 +66,7 @@ impl relayer_capnp::relayer_service::Server for RelayerImpl {
         let api_key_bytes = capnp_rpc::pry!(params_reader.get_api_key());
         let api_key = capnp_rpc::pry!(std::str::from_utf8(api_key_bytes));
 
-        let hashed = config::hash_api_key(api_key);
-        let ok = self.api_keys.contains(&hashed);
+        let ok = config::verify_api_key(api_key, &self.api_keys);
         if ok {
             self.authenticated.set(true);
             info!("Relayer client authenticated successfully");
