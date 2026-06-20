@@ -25,11 +25,11 @@ Full documentation including architecture deep-dives, integration guides, SDK re
 ## Key Features
 
 - **Thread-per-Core Architecture**: `SO_REUSEPORT` worker threads scale across all CPU cores. Each worker runs an independent `LocalSet` for Cap'n Proto RPC — zero contention on the accept path.
-- **Sub-Millisecond Latency**: Cap'n Proto RPC with zero-copy serialization. ECDSA signature verification offloaded to `spawn_blocking` to keep worker event loops responsive.
+- **Sub-Millisecond Matchmaking**: Cap'n Proto RPC with zero-copy serialization, a `DashMap` matchstore (no clone-on-write), and ECDSA verification offloaded to `spawn_blocking`. Measured: matchstore update **72 ns** @ 10k matches (was ~1.4 ms before the `DashMap` migration). See [`docs/benchmarks.md`](docs/benchmarks.md).
 - **Trustless Settlement**: Off-chain verifiers process deterministic match transcripts and commit outcome attestations directly to Avalanche smart contracts.
 - **Challenge-Response Auth**: Server-issued nonces signed by player wallets prevent replay attacks. Authenticated sessions gate all mutating RPCs.
-- **MMR & Glicko-2**: Advanced player skill tracking with binary search matchmaking (50ms tick). Crash-safe settle-before-MMR ordering prevents double-count corruption.
-- **Reliable Settlement Bridge**: Sled-backed persistent queue with EIP-1559 gas management, nonce tracking, exponential backoff retry, and dead-letter queue. Input validation at RPC boundary (match_id, transcript_hash, signature, outcome).
+- **MMR & Glicko-2**: Advanced player skill tracking with binary search matchmaking (50ms tick). Settle-before-MMR ordering + sled schema versioning prevent double-count corruption (durability hardening scheduled with the sled→redb migration).
+- **Reliable Settlement Bridge**: Sled-backed persistent queue with EIP-1559 gas management, nonce tracking, exponential backoff retry, dead-letter queue, and a `Notify`-driven processor (no fixed throughput cap). Input validation at RPC boundary (match_id, transcript_hash, signature, outcome).
 - **TLS Support**: Optional `rustls`-based TLS for all services. Misconfiguration is a hard error (never silent fallback to plaintext).
 - **Graceful Shutdown**: SIGINT and SIGTERM handling across all services. CancellationToken propagation drains active matches and flushes persistence before exit.
 - **Docker-Native**: Network segmentation (internal + frontend), Docker secrets for all private keys, TLS cert mounts, `stop_grace_period`, non-root containers, and `SO_REUSEPORT` compatibility.
@@ -99,14 +99,14 @@ AMP/
 
 ---
 
-## Smart Contracts (Fuji Testnet) (old style, will be updated with new deployment)
+## Smart Contracts
 
-| Contract | Address |
-| :--- | :--- |
-| **AMPRegistry** | `0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34` |
-| **AMPSettlement** | `0xecD9C6C1727d610A7C0Aeb3a37A6278049791a24` |
-
-Contracts use OpenZeppelin v5.6.1 with `Ownable2Step` and `Pausable`.
+The contracts (`AMPRegistry` custodial escrow + `AMPSettlement` verifier) are
+hardened and covered by unit, fuzz, and value-conservation invariant tests
+(Phase 1). They are deployed on the Fuji testnet; a reproducible, verified
+Fuji redeployment + C-Chain mainnet deployment is scoped in
+[`prodpath.md`](prodpath.md) Phases 7 and 10. See
+[`docs/contracts-reference.mdx`](docs/contracts-reference.mdx) for the API.
 
 ---
 
@@ -221,7 +221,7 @@ make test-integration
 
 - All private keys loaded via `*_FILE` env vars or Docker secrets (never inline)
 - `Config::Debug` redacts private keys
-- API keys hashed (SHA-256) before storage; constant-time comparison recommended
+- API keys hashed (SHA-256) before storage; **constant-time comparison** enforced on the relayer (S16)
 - **Inter-service API key required by default** — both server and relayer refuse to start without `RELAYER_API_KEY` unless `AMP_ALLOW_UNAUTHENTICATED_RELAYER=1` is set (see [SECURITY_REVIEW.md](SECURITY_REVIEW.md) S11)
 - TLS is opt-in but enforced when configured (no silent fallback)
 - Non-root containers in all Docker images
@@ -229,10 +229,10 @@ make test-integration
 - **Submitter signature verified on `submitOutcome`** — the recovered address must match the caller's `player_id` (see [SECURITY_REVIEW.md](SECURITY_REVIEW.md) S1 and [docs/signing.mdx](docs/signing.mdx))
 - **`replay_hash` must be exactly 32 bytes**; outcome range aligned to `1..=4` between server and relayer (S5)
 - **Challenge map bounded at 100k entries** with TTL pruning to prevent memory-growth DoS (S9)
-- **Per-IP rate limiting on both server and relayer** (`AMP_MAX_PER_IP_PER_MIN`, `RELAYER_MAX_PER_IP`)
+- **Per-IP rate limiting on both server and relayer** with a memory-bounded distinct-IP set (`AMP_MAX_PER_IP_PER_MIN`, `RELAYER_MAX_PER_IP`; S10)
 - **Subscriber cap per match** — at most 16 `MatchListener` callbacks to prevent task-amplification DoS (P5)
 - Rate limiting with RAII connection guards
-- Settle-before-MMR ordering prevents crash-induced rating corruption
+- Settle-before-MMR ordering + sled schema versioning prevent crash-induced rating corruption; durability hardening (explicit `flush`, transactions) is scheduled with the sled→redb migration (Phase 3)
 
 See [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for the full threat model and remediation status, and [docs/signing.mdx](docs/signing.mdx) for the canonical EIP-191 / EIP-712 signing schemes.
 

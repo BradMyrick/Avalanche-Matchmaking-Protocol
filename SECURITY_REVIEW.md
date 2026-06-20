@@ -40,7 +40,7 @@ signing, transport, or RPC-boundary validation code.
 | ID | Finding | Status | Resolution |
 |:---|:---|:---|:---|
 | **S9** | Server's challenge map was unbounded. Anonymous pre-auth RPC could drive unbounded memory growth. | **FIXED** | `AuthService::create_challenge` now caps at `MAX_OUTSTANDING_CHALLENGES = 100_000`, pruning expired entries before refusing. |
-| **S10** | Rate limiter trusts TCP peer address; per-IP `Vec<Instant>` unbounded; slowloris-susceptible. | **DOCUMENTED** | Existing limiter preserved for backward compatibility. PROXY-protocol support is a deployment concern — document in production checklist. |
+| **S10** | Rate limiter trusts TCP peer address; per-IP `Vec<Instant>` unbounded; slowloris-susceptible. | MEDIUM | **FIXED (memory)** / **DOCUMENTED (PROXY)** | The per-IP store is now memory-bounded (Phase 6: `MAX_TRACKED_IPS` cap + periodic `sweep_windows`). PROXY-protocol for real client-IP behind a load balancer remains a deployment concern — see Phase 6 operational guidance. |
 | **S11** | Inter-service API key defaulted to empty. Server skipped auth; relayer short-circuited to "allow" when no keys configured. | **FIXED** | Both binaries now refuse to start without an API key unless `AMP_ALLOW_UNAUTHENTICATED_RELAYER=1` is set explicitly. |
 | **S12** | C# transitive closure pulled 7-year-old `Portable.BouncyCastle 1.8.2` and `Newtonsoft.Json 11.0.2` (known advisories). | **FIXED** | Direct pins on `Portable.BouncyCastle 1.9.0` and `Newtonsoft.Json 13.0.3` in `AmpSdk.csproj`. |
 | **S13** | Dead admin RPC surface in `player_service.rs` (`apply_restriction`, `record_match_result`, `create_or_update_profile`) — no auth. Any future change exposing the capability would enable unauthenticated tampering. | **MITIGATED** | These methods are intentionally not wired into `serve_rpc`. They're flagged with `#[allow(dead_code)]`. A future admin capability should require operator-issued credentials. |
@@ -84,7 +84,7 @@ hardening below; a third-party audit is scoped for Phase 6.5.
 | ID | Finding | Severity | Status | Resolution / Test |
 |:---|:---|:---|:---|:---|
 | **S10** | Server per-IP rate-limiter `HashMap<IpAddr, Vec<Instant>>` was unbounded; a spoofed-source-IP flood grew memory without limit, and the `retain` ran on the accept thread. | MEDIUM | **FIXED** | `ConnectionRateLimiter::check_ip` now runs a `sweep_windows` pass (drop expired windows + empty entries) when the distinct-IP set exceeds `MAX_TRACKED_IPS = 100_000` or on a `SWEEP_EVERY = 2048` cadence. Tests: `sweep_removes_expired_and_empty_windows`, `check_ip_caps_per_ip_and_accepts_until_cap`. |
-| **S15** | Relayer API-key check used `HashSet::contains`, whose timing varies with hash buckets. | LOW | **FIXED** | `config::verify_api_key` SHA-256-hashes the candidate and compares against every stored hash with a constant-time `ct_eq` (no short-circuit). Tests: `ct_eq_matches_and_rejects`, `verify_api_key_round_trip_and_reject`. |
+| **S16** | Relayer API-key check used `HashSet::contains`, whose timing varies with hash buckets. | LOW | **FIXED** | `config::verify_api_key` SHA-256-hashes the candidate and compares against every stored hash with a constant-time `ct_eq` (no short-circuit). Tests: `ct_eq_matches_and_rejects`, `verify_api_key_round_trip_and_reject`. |
 | **C1** | Custodial key derivation is hand-rolled HKDF-HMAC-keccak256 with no published reference vectors. | LOW | **MITIGATED** | keccak256 is not a standard HKDF hash so no vetted crate applies directly; a pinned known-answer vector (`test_custodial_derivation_known_vector`, derived address `0x70d8a…736a` for the canonical inputs) now catches any drift. A future migration to BIP-32-style secp256k1 derivation is tracked. |
 
 ### Phase 6 — operational hardening (deployment guidance)
@@ -107,7 +107,7 @@ hardening below; a third-party audit is scoped for Phase 6.5.
 |:---|:---|:---|
 | **P4** | `sign_match_outcome` ran BEFORE the idempotency check. Repeat calls on settled matches burned CPU on each retry. | **FIXED** — `submit_outcome` now marks settled FIRST, then signs. |
 | **P5** | `subscribe_to_events` had no subscriber cap; a malicious participant could register unbounded callbacks. | **FIXED** — Capped at `MAX_SUBSCRIBERS_PER_MATCH = 16` via `AppState::subscriber_count`. |
-| **P8** | Go Glicko-2 solver has no iteration cap. | **OPEN** — See TODO in `amp-sdk/go/player/profile.go`. |
+| **P8** | Go Glicko-2 solver has no iteration cap. | **FIXED** — `MaxGlickoIterations = 100` in `amp-sdk/go/player/profile.go`; the solver loop is bounded and a corrupt profile can no longer hang it. (Status row previously stale as OPEN.) |
 | **P9** | Rust SDK shipped 98,531 lines of committed-but-unused `*_capnp.rs`. | **FIXED** — Files deleted; `build.rs` regenerates into `OUT_DIR` only. |
 
 ## Cross-SDK integrity

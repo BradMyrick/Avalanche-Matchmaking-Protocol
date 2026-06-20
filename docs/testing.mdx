@@ -49,7 +49,7 @@ These tests cover matchmaking rule evaluation, Glicko-2 MMR calculations, persis
   ```bash
   cargo test --workspace
   ```
-* **Coverage**: 26 tests in `AMP-Server` (matchmaking, Glicko-2, auth, signature verification, cross-language digest KAT), 10 tests in `amp-integration-tests`, 3 tests in `amp-sdk` (Rust).
+* **Coverage**: 42 tests in `AMP-Server` (matchmaking, Glicko-2, auth incl. negative-path lifecycle tests, signature verification, rate-limiter, cross-language digest KAT, and a skill-pairing `proptest`), 14 in `amp-relayer` (gas, custodial derivation KAT, nonce-concurrency, constant-time API key), 5 in `amp-sdk` (Rust), 1 latency-gate test in `amp-benches`, plus a full-stack `amp-integration-tests` binary (happy path + duplicate-submit idempotency). Counts grow over time — run `cargo test --workspace` for the current number.
 
 ### 3. Go SDK Tests
 These tests verify that game server integrations using the Go SDK compile and execute correctly, including the Glicko-2 NaN/Inf guard.
