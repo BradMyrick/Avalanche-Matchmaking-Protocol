@@ -191,8 +191,13 @@ jobs:
       - name: Verify C++ SDK compiles
         working-directory: amp-sdk/examples/cpp
         run: |
+          # The committed C++ bindings are pinned to the capnp version that
+          # generated them; force regeneration against the runner's installed
+          # capnproto so the generated headers match the library headers
+          # (otherwise capnp's version-mismatch #error fires).
+          rm -rf ../../schemas/generated/cpp && mkdir -p ../../schemas/generated/cpp
           mkdir -p build && cd build
-          cmake .. -DCAPNP_INCLUDE_DIRS=/usr/include
+          cmake ..
           make -j$(nproc)
 
       - name: Setup .NET

@@ -25,10 +25,10 @@ dev = ["pytest>=7", "pytest-asyncio>=0.21"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["amp_sdk"]
-# Force-include the Cap'n Proto schemas into the wheel so that
-# `capnp.load(...)` works after `pip install`. Without this, the wheel only
-# ships amp_sdk/*.py and `import amp_sdk` fails with FileNotFoundError.
-force-include = { "generated" = "amp_sdk/generated" }
+# The Cap'n Proto schemas ship inside the package at `amp_sdk/generated/` and
+# are picked up automatically by `packages = ["amp_sdk"]` (for both wheel and
+# editable installs). A prior `force-include` referenced a non-existent
+# top-level `generated/` source dir and broke `pip install -e` in CI.
 
 [tool.hatch.build.targets.sdist]
-include = ["amp_sdk", "generated", "pyproject.toml"]
+include = ["amp_sdk", "pyproject.toml"]
