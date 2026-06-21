@@ -1,0 +1,19 @@
+{
+    "name": "AmpSdk",
+    "rootNamespace": "AmpSdk",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Capnp.Net.Runtime.dll",
+        "Nethereum.Signer.dll",
+        "Nethereum.Hex.dll",
+        "Nethereum.Util.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

@@ -1,0 +1,19 @@
+{
+  "name": "com.ampprotocol.sdk",
+  "version": "0.1.0",
+  "displayName": "Avalanche Matchmaking Protocol (AMP)",
+  "description": "High-level idiomatic Unity SDK for connecting to the AMP matchmaking network.",
+  "unity": "2021.3",
+  "keywords": [
+    "matchmaking",
+    "web3",
+    "avalanche",
+    "multiplayer",
+    "crypto"
+  ],
+  "author": {
+    "name": "AMP Protocol"
+  },
+  "dependencies": {
+  }
+}

@@ -1,0 +1,23 @@
+[package]
+name = "amp-sdk-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Node.js native bindings for the AMP Rust SDK (napi-rs)."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# napi-rs: `tokio_rt` for the async runtime backing `#[napi] async fn`,
+# `async` for async-method codegen, `napi8` for threadsafe functions.
+napi = { version = "3.9", default-features = false, features = ["tokio_rt", "async", "napi8"] }
+napi-derive = "3.5"
+amp-sdk = { path = "../../rust" }
+# Worker-thread runtime + channels (capnp-rpc client is !Send, so we park it
+# on a dedicated current-thread runtime + LocalSet and bridge via channels).
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+
+[build-dependencies]
+napi-build = "2"

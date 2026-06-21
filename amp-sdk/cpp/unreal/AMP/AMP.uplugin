@@ -1,0 +1,18 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "0.1.0",
+    "FriendlyName": "AMP SDK",
+    "Description": "Avalanche Matchmaking Protocol client for Unreal Engine. Cap'n Proto RPC with optional TLS, async over the AMP event loop, and Blueprint-callable wrappers.",
+    "Category": "Networking",
+    "CreatedBy": "Avalanche Matchmaking Protocol",
+    "CanContainContent": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "AMP",
+            "Type": "Runtime",
+            "LoadingPhase": "PreDefault"
+        }
+    ]
+}
