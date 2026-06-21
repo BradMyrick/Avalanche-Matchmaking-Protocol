@@ -1,0 +1,52 @@
+name: AMP Supply Chain
+
+# Splits supply-chain checks out of `ci.yml` so a single advisory doesn't
+# invalidate the rest of the matrix, and so we can run on a weekly schedule
+# in addition to per-PR. Closes the Phase 3.3 / `prodpath.md` exit-gate
+# "zero RUSTSEC advisories" gap that was previously a paper check.
+#
+# We use `cargo-deny` (rather than `cargo-audit`) as the primary gate because
+# it covers everything cargo-audit does (RUSTSEC advisories) AND adds
+# license-policy enforcement, duplicate-version detection, and source-policy
+# (no-git / no-private-registry) checks from a single config file
+# (`deny.toml`).
+#
+# One job:
+#   - deny : `cargo deny check` — advisories + licenses + duplicate versions + sources
+#
+# `deny` is required-blocking on PRs into `main` / `prodpath`. Each RUSTSEC
+# advisory in the ignore list in `deny.toml` MUST have a written justification
+# citing why the advisory does not apply and what tracks the fix.
+
+on:
+  push:
+    branches: [main, prodpath]
+  pull_request:
+    branches: [main, prodpath]
+  schedule:
+    # Weekly scan Sundays at 00:00 UTC — catches advisories published against
+    # unchanged lockfiles.
+    - cron: "0 0 * * 0"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deny:
+    name: cargo deny (advisories + licenses + sources + duplicate versions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny check
+        run: cargo deny --workspace check --config deny.toml
+

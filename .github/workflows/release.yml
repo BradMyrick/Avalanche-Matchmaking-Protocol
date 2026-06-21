@@ -1,0 +1,240 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Phase 5.6 — gate every release on the core test suites. A tag push can no
+  # longer bypass CI; binaries/docker/SDKs only build once tests are green.
+  prerelease-tests:
+    name: Pre-release Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Cap'n Proto
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-tests
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Build contracts
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
+          forge install foundry-rs/forge-std@v1.10.0 --no-git
+          forge build
+      - name: Rust fmt + clippy
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+      - name: Rust unit tests
+        run: cargo test --workspace --exclude amp-integration-tests
+      - name: Solidity tests
+        working-directory: contracts
+        run: forge test -vvv
+
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    needs: prerelease-tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Ensure cross-compilation target is installed
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install Cap'n Proto (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+
+      - name: Install aarch64 cross-compilation toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install Cap'n Proto (macOS)
+        if: runner.os == 'macOS'
+        run: brew install capnp
+
+      - name: Install Cap'n Proto (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install capnproto:x64-windows
+          $toolsDir = "${env:VCPKG_INSTALLATION_ROOT}\installed\x64-windows\tools\capnproto"
+          Add-Content -Path $env:GITHUB_PATH -Value $toolsDir
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build Solidity contracts
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
+          forge install foundry-rs/forge-std@v1.10.0 --no-git
+          forge build
+
+      - name: Build release binaries
+        shell: bash
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release -p AMP-Server -p amp-relayer -p amp-telemetry --target ${{ matrix.target }}
+
+      - name: Package binaries (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/AMP-Server dist/
+          cp target/${{ matrix.target }}/release/amp-relayer dist/
+          cp target/${{ matrix.target }}/release/amp-telemetry dist/
+          tar -czf amp-${{ matrix.target }}.tar.gz -C dist .
+
+      - name: Package binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target/${{ matrix.target }}/release/AMP-Server.exe dist/
+          Copy-Item target/${{ matrix.target }}/release/amp-relayer.exe dist/
+          Copy-Item target/${{ matrix.target }}/release/amp-telemetry.exe dist/
+          Compress-Archive -Path dist/* -DestinationPath amp-${{ matrix.target }}.zip
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: amp-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            amp-${{ matrix.target }}.tar.gz
+            amp-${{ matrix.target }}.zip
+
+  docker:
+    name: Docker ${{ matrix.image }}
+    needs: prerelease-tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: amp-server
+            dockerfile: docker/amp-server.Dockerfile
+          - image: amp-relayer
+            dockerfile: docker/amp-relayer.Dockerfile
+          - image: amp-telemetry
+            dockerfile: docker/amp-telemetry.Dockerfile
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  package-sdks:
+    name: Package SDKs
+    needs: prerelease-tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Package C++ SDK
+        run: tar -czf amp-sdk-cpp.tar.gz -C amp-sdk cpp schemas
+
+      - name: Package C# SDK
+        run: cd amp-sdk && zip -r ../amp-sdk-csharp.zip csharp schemas
+
+      - name: Upload C++ SDK
+        uses: actions/upload-artifact@v5
+        with:
+          name: amp-sdk-cpp
+          path: amp-sdk-cpp.tar.gz
+
+      - name: Upload C# SDK
+        uses: actions/upload-artifact@v5
+        with:
+          name: amp-sdk-csharp
+          path: amp-sdk-csharp.zip
+
+  release:
+    name: Create Release
+    needs: [build-binaries, docker, package-sdks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**
