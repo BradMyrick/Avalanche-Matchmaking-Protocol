@@ -1,0 +1,82 @@
+---
+title: FAQ
+---
+
+# FAQ
+
+Common questions about AMP.
+
+### How does AMP compare to AWS FlexMatch?
+
+FlexMatch is fast, mature, and tightly integrated with AWS GameLift. AMP differs in three ways:
+
+1. **On-chain settlement.** FlexMatch has no settlement primitive — AMP ships escrow + verifier attestation by default.
+2. **Self-hostable, no cloud lock-in.** AMP is Apache-2.0; run it on any cloud, bare metal, or peer-to-peer.
+3. **Embeddable matchmaking library.** `amp-match-core` drops into your existing game server without taking over the whole network stack.
+
+FlexMatch is ahead today on party/squad matchmaking, cross-region placement, and backfill policies. The v0.2 / v0.3 milestones on the [Roadmap](/roadmap) close those gaps. See the [Roadmap → Comparisons](/roadmap#comparisons) section for the full breakdown.
+
+### How does AMP compare to Open Match?
+
+Open Match is a matchmaking framework (also open source) that leaves matchmaking logic to the user. AMP ships an opinionated rating + rule engine out of the box — closer to FlexMatch in scope — plus the on-chain settlement layer Open Match doesn't have.
+
+### What can AMP do today?
+
+The open beta ships:
+
+- 1v1 matchmaking with Glicko-2 ratings and composable rules.
+- EIP-191 challenge-response auth + EIP-712 outcome signing.
+- Custodial escrow with verifier-attested payouts on Avalanche Fuji.
+- Six SDKs (Rust, Go, C++, C#, Python, JS) all with CI-verified tests.
+- An embeddable matchmaking library (`amp-match-core`) for studios that want the algorithm without the service.
+
+Read the [Beta Guide](/beta-guide) to play your first match in five minutes.
+
+### What's coming next?
+
+Team / squad matchmaking, N-player free-for-all, backfill policies, cross-region placement, and the path to Avalanche C-Chain mainnet. See the [Roadmap](/roadmap).
+
+### What engines are supported?
+
+We provide SDKs for **C++ (Unreal)**, **C# (Unity/Godot)**, **Go**, **Python**, **Rust**, and **JavaScript/TypeScript**. The C++ and C# SDKs bundle Keccak-256 for outcome-digest computation, so the crypto path works out of the box. See the [SDK Overview](/sdk-overview) for the full matrix.
+
+### How does authentication work?
+
+AMP uses a challenge-response flow: the server issues a time-bound nonce, the client signs it with their wallet, and the server verifies the signature. This replaces static token auth and prevents replay attacks.
+
+### Does AMP provide anti-cheat?
+
+AMP provides **verifiable anti-cheat**. Because the protocol has the match transcript, the `ASYNC_VERIFIER` can catch many common cheats (speed hacks, wall hacks) by re-simulating the game logic. AMP is not a replacement for traditional client-side anti-cheat (Easy Anti-Cheat, BattlEye) which prevents memory manipulation on the local machine.
+
+### What are the settlement modes?
+
+Two modes:
+
+- **`ASYNC_VERIFIER`**: the verifier processes the match transcript and signs an attestation. The relayer submits it on-chain. Maximum security, immune to client collusion.
+- **`RT_HASH_AGREE`**: both clients independently calculate the final state hash and submit it. Agreement auto-settles; disagreement enters dispute resolution by a designated arbiter. Lower latency, lower gas, requires deterministic clients.
+
+See [Architecture](/architecture) for details.
+
+### What happens if a match expires?
+
+Expired matches refund all staked funds to the players. OPEN/READY matches expire after the configured match timeout. DISPUTED matches require 3x the timeout before expiry.
+
+### Can players cancel a match?
+
+Yes. Player A can cancel an OPEN match (before player B joins) and receive a full refund. Once player B joins, the match moves to READY and cannot be cancelled.
+
+### What stake tokens are supported?
+
+Both native AVAX and any ERC-20 token. The game admin specifies the stake token during game registration. Fee-on-transfer tokens are supported (payouts use the actual received amount).
+
+### Is AMP limited to Avalanche?
+
+Today, yes — settlement is on Avalanche (Fuji testnet now, C-Chain mainnet per the [Roadmap](/roadmap)). The core matchmaking logic in `amp-match-core` is chain-agnostic and embeddable anywhere.
+
+### Can someone fork AMP?
+
+Yes. AMP is Apache-2.0. The protocol's value lies in the verifier network, the trust ecosystem around the shared settlement contracts, and the developer community — all of which compound on a shared deployment rather than forks.
+
+### What's the long-term vision?
+
+Scale from today's 1v1 wagered play to large-team formats, battle royales, and persistent-world territorial control — all settled on Avalanche. The protocol's separation of matchmaking (off-chain, fast) from settlement (on-chain, verifiable) is what makes that range possible. See [Roadmap → Long-term vision](/roadmap#long-term-vision-2027).

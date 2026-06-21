@@ -1,0 +1,122 @@
+---
+title: Contracts Reference
+---
+
+# Contracts Reference
+
+The AMP protocol is powered by two primary smart contracts on the Avalanche Fuji Testnet. Both contracts use OpenZeppelin v5.6.1, pragma `^0.8.33`, and implement `Ownable2Step` and `Pausable`. (Meta-transaction support via `ERC2771Context` was removed for the Developer Beta — the forwarder was hardcoded to the zero address and therefore inert; it can be reintroduced with a real forwarder + tests in a later milestone.)
+
+## `AMPRegistry`
+
+**Address:** `0x8479491220D8d56F32f1a4A5Cc827cf056a9aC34` *(legacy v0 Fuji deployment — will be replaced by a fresh deployment before the Developer Beta release)*
+
+The Registry manages game metadata, match lifecycle, and verifier authorizations. It is the single source of truth for all on-chain state.
+
+### Access Control
+- `Ownable2Step`: Two-step ownership transfer for safety.
+- `Pausable`: Owner can pause/unpause all state-mutating functions.
+
+### Match State Machine
+
+```
+OPEN  →  READY  →  SETTLED
+  │         │         ↑
+  ↓         ↓         │
+EXPIRED  DISPUTED ────┘
+```
+
+### Key Functions
+
+| Function | Description |
+| :--- | :--- |
+| `registerGame(SettlementMode mode, address[] verifiers, uint256 minStake, address stakeToken, address arbiter)` | Registers a new game. Verifiers capped at 10. RT_HASH_AGREE mode requires `arbiter != address(0)`. Returns `gameId`. |
+| `setMatchTimeout(uint256 gameId, uint256 timeoutSeconds)` | Updates match timeout (5 min -- 30 days). Only game admin. |
+| `updateGameVerifiers(uint256 gameId, address[] verifiers)` | Replaces the verifier set for a game. Only game admin. |
+| `createMatch(uint256 gameId, uint256 stakeAmount)` | Creates a match with escrowed stake. Supports native AVAX or ERC-20. Returns `matchId`. |
+| `joinMatch(uint256 matchId)` | Joins an OPEN match. Requires matching stake. Rejects player A joining own match. |
+| `cancelMatch(uint256 matchId)` | Cancels an OPEN match and refunds player A. Only player A. |
+| `expireMatch(uint256 matchId)` | Expires OPEN/READY matches after timeout, or DISPUTED matches after 3x timeout. Refunds all players. |
+| `isVerifier(uint256 gameId, address addr)` | O(1) verifier check via internal mapping. |
+| `getGameVerifiers(uint256 gameId)` | Returns the full verifier list for a game. |
+| `setSettlement(address settlementAddress)` | Sets the settlement contract address. Only owner. |
+| `settleMatch(uint256 matchId, MatchState newState, address[] recipients, uint256[] amounts, uint256 protocolFee)` | Internal settlement callback. Only callable by the settlement contract. |
+| `pause()` / `unpause()` | Emergency pause. Only owner. |
+| `withdrawFees(address token)` | Withdraws accumulated protocol fees. Only owner. |
+
+### Events
+- `GameRegistered(uint256 indexed gameId, address indexed admin, SettlementMode mode)`
+- `GameVerifiersUpdated(uint256 indexed gameId)`
+- `MatchCreated(uint256 indexed matchId, uint256 indexed gameId, address indexed playerA, uint256 stakeAmount)`
+- `MatchJoined(uint256 indexed matchId, address indexed playerB)`
+- `MatchCancelled(uint256 indexed matchId, address indexed playerA, uint256 refundAmount)`
+- `MatchExpired(uint256 indexed matchId)`
+- `SettlementUpdated(address indexed settlementAddress)`
+- `FeesWithdrawn(address indexed token, uint256 amount, address indexed wallet)`
+
+---
+
+## `AMPSettlement`
+
+**Address:** `0xecD9C6C1727d610A7C0Aeb3a37A6278049791a24` *(legacy v0 Fuji deployment — will be replaced by a fresh deployment before the Developer Beta release)*
+
+The Settlement contract handles attestation verification, dispute resolution, and payouts. It references the Registry as an immutable dependency.
+
+### Key Functions
+
+| Function | Description |
+| :--- | :--- |
+| `submitAsyncResult(uint256 matchId, AsyncResult result)` | Submits a verifier-signed outcome for `ASYNC_VERIFIER` matches. Requires match state `READY` and a valid verifier signature. |
+| `submitRealTimeHashResult(uint256 matchId, RealTimeHashResult result)` | Submits a player's hash for `RT_HASH_AGREE` matches. Auto-settles when both players agree; auto-disputes on mismatch. |
+| `resolveDispute(uint256 matchId, OutcomeCode enforcedOutcome)` | Resolves a DISPUTED match. Only the designated arbiter can call. |
+| `updateProtocolFeeBps(uint16 feeBps)` | Updates protocol fee in basis points (0--10000). Only owner. |
+| `updateProtocolFeeRecipient(address recipient)` | Updates the fee recipient address. Only owner. |
+| `pause()` / `unpause()` | Emergency pause. Only owner. |
+
+### Payout Logic
+- `WIN_A` / `WIN_B`: Winner receives total pool minus protocol fee.
+- `DRAW`: Pool split equally between both players.
+- `CANCELLED`: Full refund to both players, no protocol fee.
+- Protocol fee is configured via `protocolFeeBps` (default: 100 = 1%).
+
+### Events
+- `MatchSettled(uint256 indexed matchId, OutcomeCode outcome, uint256 payout)`
+- `MatchDisputed(uint256 indexed matchId)`
+- `MatchDisputeResolved(uint256 indexed matchId, OutcomeCode enforcedOutcome)`
+- `ProtocolFeeUpdated(uint16 feeBps)`
+- `ProtocolFeeRecipientUpdated(address indexed recipient)`
+
+---
+
+## Data Types (`AMPTypes.sol`)
+
+### Enums
+| Enum | Values |
+| :--- | :--- |
+| `MatchState` | `OPEN`, `READY`, `SETTLED`, `EXPIRED`, `DISPUTED` |
+| `SettlementMode` | `ASYNC_VERIFIER`, `RT_HASH_AGREE` |
+| `OutcomeCode` | `NONE`, `WIN_A`, `WIN_B`, `DRAW`, `CANCELLED` |
+
+### Structs
+| Struct | Fields |
+| :--- | :--- |
+| `Game` | `admin`, `mode`, `verifiers[]`, `minStake`, `stakeToken`, `arbiter`, `matchTimeout` |
+| `Match` | `gameId`, `playerA`, `playerB`, `stakeAmount`, `state`, `createdAt` |
+| `Settlement` | `matchId`, `outcome`, `transcriptHash`, `settledAt` |
+| `AsyncResult` | `matchId`, `outcome`, `transcriptHash`, `signature` |
+| `RealTimeHashResult` | `matchId`, `outcome`, `transcriptHash` |
+
+---
+
+## Development & ABI
+
+The Solidity source code and ABIs can be found in `/contracts`. Build with Forge:
+
+```bash
+cd contracts && forge build
+```
+
+Run the 32 tests (17 Registry + 15 Settlement):
+
+```bash
+forge test -vvv
+```

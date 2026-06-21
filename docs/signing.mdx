@@ -1,0 +1,186 @@
+---
+title: Signing Schemes
+---
+
+# AMP Signing Schemes
+
+This document specifies the canonical signing schemes used across the AMP
+protocol. All SDKs produce byte-identical signatures for cross-language
+interop, verified by the shared KAT vector below.
+
+## 1. Authentication (EIP-191 personal_sign)
+
+**Used by:** `GameSessionService.login`
+
+**Scheme:** EIP-191 personal_sign (`\x19Ethereum Signed Message:\n<len> || payload`).
+
+**Flow:**
+1. Client calls `requestChallenge(gameId)` → server returns the ASCII string
+   `"AMP_AUTH:<gameId>:<uuid>"` plus its expiry timestamp.
+2. Client computes the EIP-191 message hash:
+   `keccak256("\x19Ethereum Signed Message:\n" + len(challenge) + challenge)`.
+   In most libraries this is a single call:
+   - ethers (JS): `ethers.hashMessage(challenge)`
+   - Nethereum (C#): `new EthereumMessageSigner().Sign(challenge, key)`
+   - eth_account (Python): `Account.sign_message(encode_defunct(primitive=challenge), key)`
+   - ethers (Rust): `ethers_core::utils::hash_message(&challenge)`
+3. Client signs the resulting 32-byte hash with their secp256k1 wallet,
+   producing a 65-byte `r||s||v` signature with `v ∈ {27, 28}`.
+4. Client calls `login(gameId, signature, challengePayload)` — passing back
+   the ORIGINAL challenge bytes (NOT the hash, NOT a derivative). The server
+   uses the challenge bytes to locate its outstanding nonce and verify
+   expiry + game_id binding.
+5. Server recovers the address from the signature and uses it as the
+   player identity. The challenge is single-use and removed.
+
+**Critical:** The `challengePayload` field MUST be the original challenge
+bytes returned by `requestChallenge`. Older SDKs hardcoded this to empty,
+making the server's nonce lookup impossible.
+
+## 2. Outcome Submission (EIP-712 typed data)
+
+**Used by:** `MatchSession.submitOutcome`
+
+**Scheme:** EIP-712 typed-data signature over the canonical `AsyncResult`
+struct, defined as:
+
+```solidity
+AsyncResult(uint256 matchId, uint8 outcome, bytes32 transcriptHash)
+```
+
+**Domain separator:**
+
+```solidity
+EIP712Domain(
+    string  name              = "AMPSettlement",
+    string  version           = "1",
+    uint256 chainId           = <chain id of the verifying contract>,
+    address verifyingContract = <AMPSettlement contract address>
+)
+```
+
+**Default chain id:** `43113` (Fuji testnet). Override at app startup to
+match your deployment.
+
+**Default verifying contract:** `0x0000...0000`. MUST be set to the actual
+on-chain `AMPSettlement` address before signing. The address is part of the
+domain separator and MUST match what the server used when countersigning.
+
+### Digest construction
+
+```
+structHash = keccak256(abi.encode(
+    keccak256("AsyncResult(uint256 matchId,uint8 outcome,bytes32 transcriptHash)"),
+    matchId,        // uint256, parsed from decimal match_id or keccak256(UTF-8)
+    outcome,        // uint8 (1..=4 — victor index, NOT OutcomeType)
+    transcriptHash  // bytes32
+))
+domainSeparator = keccak256(abi.encode(
+    keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+    keccak256("AMPSettlement"),
+    keccak256("1"),
+    chainId,
+    verifyingContract
+))
+digest = keccak256(0x19 0x01 || domainSeparator || structHash)
+```
+
+The signature is `r || s || v` (65 bytes, `v ∈ {27, 28}`) from the player's
+secp256k1 wallet over the 32-byte digest.
+
+**Critical:** Do NOT apply EIP-191 prefixing to the EIP-712 digest. The
+`0x1901` byte sequence in the digest construction is the EIP-712 prefix;
+applying `personal_sign` on top would double-prefix and produce a signature
+the server cannot recover.
+
+### matchId encoding
+
+The server stores the match_id as a UTF-8 string. For the uint256 field of
+`AsyncResult`, it must be encoded as:
+
+- If the string parses as a decimal integer → use that value as uint256.
+- Otherwise → `keccak256(utf8_bytes(match_id))`, truncated to 32 bytes
+  big-endian.
+
+This mirrors ethers' `U256::from_dec_str` fallback.
+
+### Server-side verification
+
+`amp-server/src/main.rs::verify_outcome_signature` performs the following:
+
+1. Reads `submission.get_signature()` — must be exactly 65 bytes.
+2. Recomputes the digest from `matchId`, `outcome`, `transcriptHash`.
+3. Recovers the signer address via `secp256k1::ecdsa_recover`.
+4. Compares the recovered address to the caller's `player_id` (recovered
+   at login time and stored on the `MatchSession` capability).
+5. Rejects with `"submitter signature does not match participant address"`
+   on mismatch.
+
+### Cross-language KAT
+
+The canonical known-answer test vector is:
+
+```
+matchId           = "1"
+outcome           = 1
+transcriptHash    = 0x00...00 (32 zero bytes)
+chainId           = 43113
+verifyingContract = 0x0000...0000
+
+digest = 2d2525ad5098ca8f82a2a6cabc6775c40a55df96dfa2fbb46d7c0e372b99096c
+```
+
+All five languages verify this:
+
+| Language | Test |
+|:---|:---|
+| Rust | `amp-server/src/main.rs::test_outcome_digest_known_vector_cross_lang` |
+| C# | `amp-sdk/csharp/AmpSdk/AmpClient.cs::OutcomeEip712.ComputeDigest` |
+| Python | `amp-sdk/python/amp_sdk/client.py::_compute_outcome_eip712_digest` |
+| JavaScript | `amp-sdk/js/src/test/eip712.test.ts` |
+| C++ | via `compute_outcome_eip712_digest` (delegated to caller's library) |
+
+## 3. Verifier countersignature (EIP-712)
+
+**Used by:** server → relayer → on-chain `AMPSettlement` contract.
+
+The server applies the same EIP-712 scheme (same domain, same struct,
+same digest) using the verifier wallet (`VERIFIER_KEY_FILE`). The
+resulting 65-byte signature is returned from `submitOutcome` and submitted
+on-chain by the relayer. The on-chain contract recovers the address from
+this signature and requires it to equal the registered verifier.
+
+## 4. Inter-service authentication (relayer API key)
+
+The server ↔ relayer hop uses a shared pre-shared key (`RELAYER_API_KEY`)
+transported as raw bytes in the capnp `Data` field of
+`RelayerService.authenticate`. The relayer SHA-256-hashes the key and
+compares against its allowlist.
+
+**Critical:** This is a bearer-token scheme, not a cryptographic challenge.
+It MUST be transported over TLS to prevent replay. Default deployments now
+refuse to start without an API key (`AMP_ALLOW_UNAUTHENTICATED_RELAYER=1`
+to bypass — NOT recommended).
+
+## 5. Game ID typing
+
+AMP uses two different representations of "game ID" by design:
+
+- **`UInt64` in `GameSessionService.login` / `requestChallenge`** — the
+  on-chain registered game ID. Used for player authentication.
+- **`AmpId :Data` in `MatchRequest.gameId`** — a free-form byte string
+  (typically UTF-8) that the matchmaker uses for queue bucketing. May be a
+  human-readable game mode like `"chess-v1"`.
+
+This is intentional. The login flow authorizes against a registered
+on-chain game; the matchmaking flow bucketizes by a free-form mode tag.
+
+## See also
+
+- `amp-sdk/schemas/match.capnp` — schema-level type definitions
+- `amp-sdk/schemas/service.capnp` — service-level RPC definitions
+- `amp-server/src/auth.rs` — EIP-191 challenge/response implementation
+- `amp-server/src/main.rs::compute_outcome_eip712_digest` — canonical
+  EIP-712 digest reference
+- `amp-server/src/main.rs::verify_outcome_signature` — server-side
+  outcome signature verification

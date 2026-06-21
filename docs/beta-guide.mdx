@@ -1,0 +1,192 @@
+---
+title: Beta Onboarding Guide
+---
+
+# AMP Open Beta — Developer Onboarding
+
+Welcome to the AMP **open beta** on the Fuji testnet. This guide walks you
+through your first end-to-end match: connect two players, get matched,
+settle on Fuji, observe the payout.
+
+<Warning>
+**Open beta.** This is beta software running on Fuji testnet. Read the [Roadmap](/roadmap) for what's implemented today and what's coming next. If you hit something unexpected, file a [GitHub Issue](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/issues).
+</Warning>
+
+---
+
+## Prerequisites
+
+- **Rust 1.91+** (the `rust-toolchain.toml` will install the right version via `rustup`)
+- **Foundry** for contract interaction: `curl -L https://foundry.paradigm.xyz | bash && foundryup`
+- **Cap'n Proto C++ library**: `apt install capnproto libcapnp-dev` (Linux) or `brew install capnp` (macOS)
+- **Two Ethereum wallets** funded with Fuji AVAX (any amount — this is play money). Get test AVAX from the [Fuji faucet](https://faucet.avax-test.network/).
+
+## Tier-1 SDKs to start with
+
+For the beta, we recommend starting with **Rust** or **Go** — these are the
+reference SDKs with full test coverage, E2E-verified in CI. The other SDKs
+(Python, JS, C++, C#) work but have lighter test coverage. See
+[SDK Overview](/sdk-overview) for the per-language feature matrix.
+
+This guide uses the **Rust SDK** (`amp-sdk/rust`). For the Go equivalent,
+see [`amp-sdk/examples/go/`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/tree/main/amp-sdk/examples/go).
+
+## Step 0 — Fuji contract addresses
+
+These are deployed, source-verified, and `TimelockController`-wrapped:
+
+| Contract | Address |
+|:---|:---|
+| `AMPRegistry` | `0x27E02ebA98D2A50Cd1079b0a611320b05A278005` |
+| `AMPSettlement` | `0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD` |
+| `AMPTimelock` | `0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143` |
+
+Full manifest: [`contracts/deployment-fuji.json`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/blob/main/contracts/deployment-fuji.json).
+
+## Step 1 — Run the AMP server + relayer locally
+
+Easiest path: docker-compose.
+
+```bash
+git clone https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol.git
+cd Avalanche-Matchmaking-Protocol
+cp .env.example .env
+# Edit .env: set FUJI_RPC_URL, CONTRACT_REGISTRY=0x27E02...8005,
+#            CONTRACT_SETTLEMENT=0xc1b12a...c9eD,
+#            and a verifier key (any Fuji-funded wallet)
+mkdir -p secrets
+echo "0xYOUR_VERIFIER_PRIVATE_KEY" > secrets/verifier_key.txt
+echo "0xYOUR_RELAYER_PRIVATE_KEY" > secrets/relayer_key.txt
+echo "$(openssl rand -hex 32)" > secrets/relayer_api_key.txt
+docker compose up --build -d
+```
+
+Verify services are healthy:
+
+```bash
+docker compose ps
+docker compose logs -f amp-server | head -50
+```
+
+You should see `AMP-Server listening on 0.0.0.0:50051` and similar for the
+relayer.
+
+## Step 2 — Use the Rust SDK to play a match
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+amp-sdk = { path = "../amp-sdk/rust" }   # or crates.io once published
+alloy-signer-local = "2"
+tokio = { version = "1", features = ["full"] }
+```
+
+Minimum working example (sketch — see `amp-sdk/examples/rust/` for a full
+runnable version):
+
+```rust no_run
+use amp_sdk::{AmpClient, compute_outcome_eip712_digest};
+use alloy_signer_local::PrivateKeySigner;
+use alloy_signer::SignerSync;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let player_a = PrivateKeySigner::random();
+    let player_b = PrivateKeySigner::random();
+
+    // Both players connect + auth via wallet challenge-response.
+    let mut client_a = AmpClient::connect("127.0.0.1:50051").await?;
+    let challenge = client_a.request_challenge("my-game").await?;
+    let sig_a = player_a.sign_sync(challenge.as_bytes())?;
+    let player_id_a = client_a.login(&player_a, "my-game", &sig_a).await?;
+
+    // ...same for player_b / client_b...
+
+    // Both request a match. The server pairs them by Glicko-2 rating
+    // window + rule evaluation.
+    let (match_id, opponent_id) = client_a.request_match(/* ... */).await?;
+
+    // Player A wins. Sign the EIP-712 outcome digest with the player's
+    // wallet — the server verifies the signature matches the caller and
+    // only then countersigns + sends to the relayer.
+    let outcome = 1; // WIN_A
+    let transcript = [0u8; 32]; // your game's commitment
+    let digest = compute_outcome_eip712_digest(
+        &match_id, outcome, &transcript,
+        43113, // Fuji chain id
+        "0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD",
+    );
+    let outcome_sig = player_a.sign_sync(&digest)?.as_bytes().to_vec();
+
+    client_a.submit_outcome(&match_id, outcome, &transcript, &outcome_sig).await?;
+
+    // The server's verifier countersigns and the relayer submits to
+    // AMPSettlement on Fuji. Within ~30s you can observe the settlement:
+    //   cast call 0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD \
+    //     "settlements(uint256)(uint8)" <matchId-as-uint>
+    Ok(())
+}
+```
+
+Before this works end-to-end, the match must also exist on-chain in the
+`AMPRegistry` (so the settlement contract has stakes to pay out). Use
+`forge script` or `cast send` to call `createMatch` (player A) then
+`joinMatch` (player B) with staked Fuji AVAX. See
+[`amp-integration-tests/src/main.rs`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/blob/main/amp-integration-tests/src/main.rs)
+for the canonical sequence — it's the same flow the integration test runs.
+
+## Step 3 — Observe the settlement
+
+After `submit_outcome`, watch the relayer log:
+
+```bash
+docker compose logs -f amp-relayer
+```
+
+You should see (within ~30s):
+- `Settlement for match <id> confirmed in block <n>`
+- `Match settled! outcome=WIN_A`
+
+Then verify on-chain:
+
+```bash
+cast call 0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD \
+  "settlements(uint256)(uint256,uint8,bytes32,uint256)" <matchId>
+```
+
+The winner's `pendingWithdrawals` is credited. They can withdraw with:
+
+```bash
+cast send 0x27E02ebA98D2A50Cd1079b0a611320b05A278005 \
+  "withdraw(address)" 0x0000000000000000000000000000000000000000 \
+  --rpc-url fuji --private-key $WINNER_PRIVATE_KEY
+```
+
+## Where to file issues
+
+- **Bugs / feature requests**: [GitHub Issues](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/issues)
+- **Security**: see [`SECURITY.md`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/blob/main/SECURITY.md) — do NOT file public issues for security reports
+- **Questions / discussion**: [GitHub Discussions](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/discussions)
+
+## Expected response times (beta)
+
+- Bug reports: initial triage within 1 week
+- Security reports: 72 hours (see `SECURITY.md`)
+- Pull requests: review within 2 weeks
+- There is one maintainer. Please be patient.
+
+## What success looks like for the beta
+
+We want to learn:
+
+1. **Does the matchmaker behave correctly** across realistic populations
+   (skill distributions, region mixes, queue-time patterns)?
+2. **Does the settlement flow survive real RPC conditions** (Fuji congestion,
+   nonce races, gas spikes)?
+3. **Is the SDK ergonomics story right** for studios evaluating AMP as an
+   embed vs. as a service?
+4. **What's missing** from the honest scope that you actually need?
+
+Tell us in Discussions or Issues. The beta is for learning; we won't pretend
+to be more polished than we are.
