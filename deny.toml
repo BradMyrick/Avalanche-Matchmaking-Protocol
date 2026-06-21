@@ -1,0 +1,160 @@
+# cargo-deny configuration for cargo-deny ≥ 0.19 (new schema, post #611).
+# See https://embarkstudios.github.io/cargo-deny/
+#
+# This file is the single source of truth for the workspace's supply-chain
+# policy. The `supply-chain` CI job (`.github/workflows/supply-chain.yml`)
+# runs `cargo deny check` on every PR and on a weekly schedule, failing the
+# build on any RUSTSEC advisory, unlicensed crate, or duplicated major
+# version that doesn't appear in the `skip` allowlist below.
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-pc-windows-msvc" },
+]
+all-features = true
+
+[advisories]
+# Fail the build on any RUSTSEC advisory affecting the workspace, except
+# those explicitly justified in `ignore` below. Each ignore MUST have a
+# written justification citing why the advisory doesn't apply.
+version = 2
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = [
+    # RUSTSEC-2026-0104 (rustls-webpki 0.101.7): a panic in CRL parsing
+    # reachable before signature verification. AMP does not parse or use
+    # certificate revocation lists (CRLs) anywhere in the TLS path — the
+    # advisory explicitly states "Applications that do not use CRLs are not
+    # affected." The 0.101 series is too old to patch in place; closing
+    # this requires upgrading amp-tls from rustls 0.21 → 0.23 (tracked in
+    # the Roadmap v0.3 milestone). Re-evaluate when that upgrade lands.
+    "RUSTSEC-2026-0104",
+
+    # RUSTSEC-2025-0141 (bincode unmaintained): AMP uses bincode 1.3 for
+    # serialization of persisted state. Migration to `postcard` is scoped in
+    # the Roadmap v0.3 milestone; until then bincode works correctly for our
+    # (non-adversarial, local) persistence shape.
+    "RUSTSEC-2025-0141",
+
+    # RUSTSEC-2025-0143 (capnp 0.19 unsound public APIs): AMP never exposes
+    # the affected `constant::Reader` / `StructSchema` types to untrusted
+    # input. Migration to capnp 0.20 is non-trivial (API changes across
+    # capnp-rpc) and tracked in the Roadmap v0.3 milestone.
+    "RUSTSEC-2025-0143",
+
+    # RUSTSEC-2021-0141 (dotenv unmaintained): AMP uses dotenv only for
+    # local-dev convenience config (never in Docker production paths, which
+    # use real env vars). Migration to `dotenvy` is a one-line swap tracked
+    # in the Roadmap v0.3 milestone.
+    "RUSTSEC-2021-0141",
+
+    # RUSTSEC-2025-0057 (fxhash unmaintained): pulled transitively by
+    # alloy — not a direct AMP dependency. No security surface in our use.
+    # Will resolve when alloy bumps.
+    "RUSTSEC-2025-0057",
+
+    # RUSTSEC-2024-0384 (`instant` unmaintained): pulled transitively by
+    # older metrics-exporter-prometheus. Will resolve when the metrics
+    # crate tree updates.
+    "RUSTSEC-2024-0384",
+
+    # RUSTSEC-2024-0436 (paste unmaintained): pulled transitively by
+    # capnp-rpc's build scripts. Resolves when we migrate to capnp 0.20.
+    "RUSTSEC-2024-0436",
+
+    # RUSTSEC-2026-0173 (proc-macro-error2 unmaintained): transitive dep of
+    # older darling/derive trees. Resolves when upstream derive crates bump.
+    "RUSTSEC-2026-0173",
+
+    # RUSTSEC-2026-0097 (rand unsound with custom logger): affects only
+    # callers that install a custom logger that calls `rand::rng()`. AMP's
+    # use of rand 0.8 (via loadtest / proptest) does not install such a
+    # logger. Resolve by bumping to rand 0.9 in Phase 3.6.
+    "RUSTSEC-2026-0097",
+
+    # RUSTSEC-2025-0134 (rustls-pemfile unmaintained): transitive via
+    # rustls 0.21. Resolves when amp-tls migrates to rustls 0.23
+    # (Phase 3.5).
+    "RUSTSEC-2025-0134",
+
+    # RUSTSEC-2026-0098 / RUSTSEC-2026-0099 (webpki URI/wildcard name
+    # constraint bugs): affect cert-chain validation against malicious
+    # CA-issued certs with crafted name constraints. AMP's TLS path is
+    # server-side, terminates client connections, and trusts the cert
+    # chain configured by the operator — clients are not validated as
+    # "name-constrained CAs." Resolves with the rustls 0.23 migration.
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+
+    # RUSTSEC-2024-0388 (derivative unmaintained): transitive dep of older
+    # alloy derive macros. Resolves when alloy's derive tree updates.
+    "RUSTSEC-2024-0388",
+
+    # RUSTSEC-2026-0002 (hashbrown IterMut Stacked-Borrows violation):
+    # affects only unsafe code that holds raw pointers across hashbrown
+    # IterMut calls. AMP never does this — all our hashbrown usage is via
+    # safe HashMap/HashSet iterators. Resolves when tokio/sled pull
+    # hashbrown 0.16+.
+    "RUSTSEC-2026-0002",
+]
+
+[licenses]
+# Allow common permissive licenses; deny copyleft and unlicensed crates.
+version = 2
+confidence-threshold = 0.93
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "0BSD",
+    "Unlicense",
+]
+
+[[licenses.clarify]]
+# ring ships its own license file; cargo-deny can't infer it from the
+# SPDX expression alone.
+name = "ring"
+version = "*"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[bans]
+# Duplicate-version policy: WARN for the developer-beta period, tighten to
+# DENY once the alloy/rustls/tokio duplicate trees consolidate (tracked in
+# the Roadmap v0.3 milestone). Real advisories (the [advisories] table above)
+# remain hard-DENY regardless of this setting.
+#
+# Wildcards (e.g. `capnp = "0.19"` without a patch) are ALLOWED — they
+# express legitimate minor-version flexibility for upstream deps that follow
+# SemVer. Tightening to DENY is low-value churn for the beta.
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+# Deny any crate sourced from a git URL or private registry. All deps must
+# come from crates.io. This blocks accidental supply-chain substitution.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+# (reserved for future use if we vendor github deps under a known org)
+github = []

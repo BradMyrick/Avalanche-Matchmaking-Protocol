@@ -1,0 +1,48 @@
+{
+  "chain_id": 43113,
+  "chain_name": "Avalanche Fuji Testnet",
+  "deploy_block": 56444757,
+  "contracts": {
+    "AMPRegistry": {
+      "address": "0x27E02ebA98D2A50Cd1079b0a611320b05A278005",
+      "source": "contracts/src/AMPRegistry.sol",
+      "verified": true,
+      "verification_provider": "sourcify"
+    },
+    "AMPSettlement": {
+      "address": "0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD",
+      "source": "contracts/src/AMPSettlement.sol",
+      "constructor_args": [
+        "AMPRegistry@0x27E02ebA98D2A50Cd1079b0a611320b05A278005"
+      ],
+      "verified": true,
+      "verification_provider": "sourcify"
+    },
+    "AMPTimelock": {
+      "address": "0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143",
+      "source": "openzeppelin-contracts/contracts/governance/TimelockController.sol",
+      "constructor_args": {
+        "min_delay_seconds": 3600,
+        "proposers": [
+          "0x95CC495dF579981d3Ffa4a8f77B93A17563E077a"
+        ],
+        "executors": [
+          "0x95CC495dF579981d3Ffa4a8f77B93A17563E077a"
+        ],
+        "admin": "0x0000000000000000000000000000000000000000"
+      },
+      "verified": true,
+      "verification_provider": "sourcify"
+    }
+  },
+  "governance_status": "FINALIZED",
+  "governance_status_note": "Both AMPRegistry.owner and AMPSettlement.owner are now the AMPTimelock address (verified on-chain). Every economic owner action (setSettlement, pause, withdrawFees, updateProtocolFeeBps, updateProtocolFeeRecipient) requires schedule \u2192 1h delay \u2192 execute through the timelock. The deployer EOA key (0x95CC...077a) is the timelock proposer/executor \u2014 multisig onboarding for the proposer role is tracked in the Roadmap v0.4 milestone.",
+  "openzeppelin_version": "v5.6.1",
+  "forge_std_version": "v1.10.0",
+  "solidity_compiler": "0.8.33",
+  "evm_version": "cancun",
+  "via_ir": true,
+  "deploy_script": "contracts/script/Deploy.s.sol",
+  "finalize_script": "contracts/script/FinalizeGovernance.s.sol",
+  "deployer_disclosure": "Fuji deployer key is a single EOA (0x95CC495dF579981d3Ffa4a8f77B93A17563E077a) generated fresh for this deploy and funded from the public Fuji faucet. Multisig onboarding for the timelock governor role is tracked in the Roadmap v0.4 milestone; until then, the deployer EOA controls the timelock proposer role (but cannot make instant economic changes \u2014 all schedule+delay+execute)."
+}

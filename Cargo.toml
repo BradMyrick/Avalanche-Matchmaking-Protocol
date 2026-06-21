@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = [
+    "amp-telemetry",
+    "amp-server",
+    "amp-relayer",
+    "amp-tls",
+    "amp-match-core",
+    "trace-viewer",
+    "amp-sdk/rust",
+    "amp-sdk/js/native",
+    "amp-loadtest",
+    "amp-integration-tests",
+    "amp-benches",
+]
+
+# Single source of truth for package metadata. All workspace members inherit
+# these via `version.workspace = true` / `edition.workspace = true` /
+# `license.workspace = true`. Bump the version here once to release.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol"
+

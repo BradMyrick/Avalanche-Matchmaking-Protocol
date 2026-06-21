@@ -1,0 +1,656 @@
+#![allow(warnings)]
+mod match_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/match_capnp.rs"));
+}
+mod game_types_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/game_types_capnp.rs"));
+}
+mod service_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/service_capnp.rs"));
+}
+mod game_core_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/game_core_capnp.rs"));
+}
+mod amp_telemetry_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/amp_telemetry_capnp.rs"));
+}
+mod player_profile_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/player_profile_capnp.rs"));
+}
+mod matchmaking_rules_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/matchmaking_rules_capnp.rs"));
+}
+mod inventory_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/inventory_capnp.rs"));
+}
+mod tournament_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/tournament_capnp.rs"));
+}
+mod security_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/security_capnp.rs"));
+}
+mod relayer_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/relayer_capnp.rs"));
+}
+mod game_registry_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/game_registry_capnp.rs"));
+}
+mod rust_capnp {
+    #![allow(warnings)]
+    include!(concat!(env!("OUT_DIR"), "/rust_capnp.rs"));
+}
+
+use alloy_primitives::{Address, U256, address, keccak256};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_signer::SignerSync;
+use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::sol;
+use anyhow::{Context, Result};
+use std::process::Command;
+use std::time::{Duration, Instant};
+use tokio::net::TcpStream;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+// Phase 3.4: ethers `abigen!` → alloy `sol!`. The deployed selectors match:
+// Solidity enums ABI-encode as uint8, so `registerGame(uint8 mode, ...)` lines
+// up with the contract's `registerGame(AMPTypes.SettlementMode mode, ...)`.
+sol! {
+    #[sol(rpc)]
+    interface IAMPRegistry {
+        function registerGame(uint8 mode, address[] calldata verifiers, uint256 minStake, address stakeToken, address arbiter) external returns (uint256 gameId);
+        function createMatch(uint256 gameId, uint256 matchId, uint256 stakeAmount) external payable;
+        function joinMatch(uint256 matchId) external payable;
+        function pendingWithdrawals(address token, address user) external view returns (uint256);
+        function feeBalances(address token) external view returns (uint256);
+    }
+    #[sol(rpc)]
+    interface IAMPSettlement {
+        function settlements(uint256 matchId) external view returns (uint256 matchId_, uint8 outcome, bytes32 transcriptHash, uint256 settledAt);
+    }
+}
+
+// Structs to read from server database
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StoredPlayerProfile {
+    pub display_name: String,
+    pub wallet_address: Vec<u8>,
+    pub global_mmr: f32,
+    pub mmr_uncertainty: f32,
+    pub mmr_volatility: f32,
+    pub games_played: u32,
+    pub game_stats: std::collections::HashMap<String, StoredGameStats>,
+    pub preferred_role: String,
+    pub language: String,
+    pub platform: String,
+    pub region: String,
+    pub max_ping_ms: u32,
+    pub is_online: bool,
+    pub last_login: u64,
+    pub restrictions: StoredPlayerRestrictions,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StoredGameStats {
+    pub matches_played: u32,
+    pub wins: u32,
+    pub losses: u32,
+    pub draws: u32,
+    pub best_streak: u16,
+    pub current_streak: i16,
+    pub total_play_time_ms: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StoredPlayerRestrictions {
+    pub is_banned: bool,
+    pub ban_expiry: u64,
+    pub ban_reason: String,
+    pub matchmaking_cooldown_until: u64,
+    pub daily_match_limit: u32,
+    pub matches_today: u32,
+    pub last_match_day: u64,
+}
+
+struct KillOnDrop(std::process::Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+    }
+}
+
+fn find_free_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().port()
+}
+
+async fn wait_for_tcp(port: u16, name: &str, timeout_secs: u64) -> Result<()> {
+    let start = Instant::now();
+    loop {
+        if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok() {
+            println!("[TEST] {} is ready on port {}", name, port);
+            return Ok(());
+        }
+        if start.elapsed().as_secs() > timeout_secs {
+            anyhow::bail!("Timed out waiting for {} on port {}", name, port);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn connect_rpc<C>(addr: &str) -> Result<C>
+where
+    C: capnp::capability::FromClientHook,
+{
+    let stream = TcpStream::connect(addr).await?;
+    let (reader, writer) = stream.into_split();
+    let network = capnp_rpc::twoparty::VatNetwork::new(
+        reader.compat(),
+        writer.compat_write(),
+        capnp_rpc::rpc_twoparty_capnp::Side::Client,
+        Default::default(),
+    );
+    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+    let client = rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+    tokio::task::spawn_local(async move {
+        let _ = rpc_system.await;
+    });
+    Ok(client)
+}
+
+async fn login_player(
+    service: &service_capnp::game_session_service::Client,
+    wallet: &PrivateKeySigner,
+) -> Result<service_capnp::user_session::Client> {
+    let mut chal_req = service.request_challenge_request();
+    chal_req.get().set_game_id(0);
+    let chal_resp = chal_req.send().promise.await?;
+    let challenge = chal_resp.get()?.get_challenge()?.to_vec();
+
+    let msg_hash = alloy_primitives::eip191_hash_message(&challenge);
+    let sig = wallet.sign_hash_sync(&msg_hash)?.as_bytes().to_vec();
+
+    let mut login_req = service.login_request();
+    login_req.get().set_game_id(0);
+    login_req.get().set_signature(&sig);
+    login_req.get().set_challenge_payload(&challenge);
+    let login_resp = login_req.send().promise.await?;
+    let session = login_resp.get()?.get_session()?;
+    Ok(session)
+}
+
+async fn request_match(
+    session: &service_capnp::user_session::Client,
+    player_id: &str,
+    player_wallet: Address,
+) -> Result<(service_capnp::match_session::Client, String)> {
+    let mut req = session.request_match_request();
+    {
+        let mut builder = req.get().init_req();
+        builder.set_game_id(b"test-game-0");
+        builder.set_rules_type("standard");
+        builder.set_match_type(match_capnp::MatchType::TurnBased);
+        builder.set_timeout_ms(15_000);
+        builder.reborrow().init_stake();
+        {
+            let mut pi = builder.reborrow().init_player_info();
+            pi.set_player_id(player_id.as_bytes());
+            pi.set_display_name(player_id);
+            pi.set_player_wallet(player_wallet.as_slice());
+        }
+    }
+    let resp = req.send().promise.await?;
+    let response = resp.get()?;
+    let assignment = response.get_assignment()?;
+    let match_id = String::from_utf8(assignment.get_match_id()?.to_vec())?;
+    let m_session = response.get_session()?;
+    Ok((m_session, match_id))
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
+    let local = tokio::task::LocalSet::new();
+    local.run_until(run_test()).await
+}
+
+async fn run_test() -> Result<()> {
+    println!("====================================================");
+    println!("  AMP END-TO-END INTEGRATION TEST SUITE");
+    println!("====================================================");
+
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let repo_root = std::path::PathBuf::from(manifest_dir)
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let server_bin = repo_root.join("target/release/AMP-Server");
+    let relayer_bin = repo_root.join("target/release/amp-relayer");
+    let telemetry_bin = repo_root.join("target/release/amp-telemetry");
+
+    // 1. Compile contracts
+    println!("[TEST] Compiling smart contracts...");
+    let build_output = Command::new("forge")
+        .current_dir(repo_root.join("contracts"))
+        .args(["build"])
+        .output()?;
+    if !build_output.status.success() {
+        anyhow::bail!(
+            "Failed to compile contracts with forge: {}",
+            String::from_utf8_lossy(&build_output.stderr)
+        );
+    }
+    println!("[TEST] Smart contracts compiled successfully.");
+
+    // 2. Find ports
+    let anvil_port = find_free_port();
+    let tel_port = find_free_port();
+    let relayer_port = find_free_port();
+    let server_port = find_free_port();
+
+    println!("[TEST] Port allocations:");
+    println!("  Anvil:     {}", anvil_port);
+    println!("  Telemetry: {}", tel_port);
+    println!("  Relayer:   {}", relayer_port);
+    println!("  Server:    {}", server_port);
+
+    // Temp dirs for DBs
+    let temp_dir = tempfile::tempdir()?;
+    let telemetry_log = temp_dir.path().join("telemetry.bin");
+    let relayer_db = temp_dir.path().join("relayer-db");
+    let server_db = temp_dir.path().join("server-db");
+
+    // 3. Start Anvil
+    println!("[TEST] Starting Anvil on port {}...", anvil_port);
+    let anvil_child = Command::new("anvil")
+        .args(["--port", &anvil_port.to_string(), "--chain-id", "43113"])
+        .spawn()?;
+    let _anvil_guard = KillOnDrop(anvil_child);
+
+    wait_for_tcp(anvil_port, "Anvil", 10).await?;
+
+    // 4. Deploy contracts
+    println!("[TEST] Deploying contracts via Forge script...");
+    let deploy_output = Command::new("forge")
+        .current_dir(repo_root.join("contracts"))
+        .env(
+            "PRIVATE_KEY",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        )
+        .args([
+            "script",
+            "script/Deploy.s.sol",
+            "--rpc-url",
+            &format!("http://127.0.0.1:{}", anvil_port),
+            "--broadcast",
+            "--private-key",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        ])
+        .output()?;
+
+    if !deploy_output.status.success() {
+        anyhow::bail!(
+            "Failed to deploy contracts: {}",
+            String::from_utf8_lossy(&deploy_output.stderr)
+        );
+    }
+
+    let stdout_str = String::from_utf8_lossy(&deploy_output.stdout);
+    let mut registry_addr = String::new();
+    let mut settlement_addr = String::new();
+
+    for line in stdout_str.lines() {
+        if line.contains("AMPRegistry Deployed at:") {
+            registry_addr = line
+                .split("AMPRegistry Deployed at:")
+                .last()
+                .unwrap()
+                .trim()
+                .to_string();
+        }
+        if line.contains("AMPSettlement Deployed at:") {
+            settlement_addr = line
+                .split("AMPSettlement Deployed at:")
+                .last()
+                .unwrap()
+                .trim()
+                .to_string();
+        }
+    }
+
+    println!("[TEST] Deployed addresses:");
+    println!("  AMPRegistry:   {}", registry_addr);
+    println!("  AMPSettlement: {}", settlement_addr);
+
+    assert!(
+        !registry_addr.is_empty(),
+        "Failed to parse registry address"
+    );
+    assert!(
+        !settlement_addr.is_empty(),
+        "Failed to parse settlement address"
+    );
+
+    // 5. Start Telemetry
+    println!("[TEST] Starting Telemetry Receiver...");
+    let tel_child = Command::new(&telemetry_bin)
+        .arg(format!("127.0.0.1:{}", tel_port))
+        .arg(&telemetry_log)
+        .env("RUST_LOG", "info")
+        .spawn()?;
+    let _tel_guard = KillOnDrop(tel_child);
+    wait_for_tcp(tel_port, "Telemetry", 10).await?;
+
+    // 6. Start Relayer
+    println!("[TEST] Starting Settlement Relayer...");
+    let relayer_child = Command::new(&relayer_bin)
+        .env("RPC_PORT", relayer_port.to_string())
+        .env("FUJI_RPC_URL", format!("http://127.0.0.1:{}", anvil_port))
+        .env("CONTRACT_REGISTRY", &registry_addr)
+        .env("CONTRACT_SETTLEMENT", &settlement_addr)
+        .env(
+            "RELAYER_PRIVATE_KEY",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        )
+        .env("RELAYER_DB_PATH", &relayer_db)
+        .env("RELAYER_API_KEY", "test-api-key")
+        .env("RELAYER_MAX_RETRIES", "3")
+        .env("RELAYER_RETRY_DELAY_MS", "500")
+        .env("RUST_LOG", "info")
+        .spawn()?;
+    let _relayer_guard = KillOnDrop(relayer_child);
+    wait_for_tcp(relayer_port, "Relayer", 10).await?;
+
+    // 7. Start Server
+    println!("[TEST] Starting Matchmaking Server...");
+    let server_child = Command::new(&server_bin)
+        .env("AMP_ADDR", format!("127.0.0.1:{}", server_port))
+        .env("AMP_DB_PATH", &server_db)
+        .env(
+            "VERIFIER_KEY",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        )
+        .env("AMP_CHAIN_ID", "43113")
+        .env("AMP_SETTLEMENT_ADDRESS", &settlement_addr)
+        .env("RELAYER_RPC_ADDR", format!("127.0.0.1:{}", relayer_port))
+        .env("RELAYER_API_KEY", "test-api-key")
+        .env("TELEMETRY_ADDR", format!("127.0.0.1:{}", tel_port))
+        .env("AMP_WORKERS", "1")
+        .env("RUST_LOG", "info")
+        .spawn()?;
+    let server_guard = KillOnDrop(server_child);
+    wait_for_tcp(server_port, "Server", 10).await?;
+
+    // Setup wallets for players (anvil keys 1 & 2), each backing an alloy provider.
+    let wallet_a: PrivateKeySigner =
+        "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d".parse()?;
+    let wallet_b: PrivateKeySigner =
+        "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a".parse()?;
+
+    let rpc_url = format!("http://127.0.0.1:{}", anvil_port);
+    // Wallet-fillable providers sign + broadcast from wallet_a / wallet_b.
+    let provider_a = ProviderBuilder::new()
+        .wallet(wallet_a.clone())
+        .connect(&rpc_url)
+        .await?;
+    let provider_b = ProviderBuilder::new()
+        .wallet(wallet_b.clone())
+        .connect(&rpc_url)
+        .await?;
+    // Read-only provider (no signer) for settlement/balance lookups.
+    let read_provider = ProviderBuilder::new().connect(&rpc_url).await?;
+
+    let registry_addr_parsed: Address = registry_addr.parse()?;
+    let settlement_addr_parsed: Address = settlement_addr.parse()?;
+    let registry_a = IAMPRegistry::new(registry_addr_parsed, provider_a.clone());
+    let registry_b = IAMPRegistry::new(registry_addr_parsed, provider_b.clone());
+
+    // 8. Register game on-chain
+    println!("[TEST] Registering game on-chain...");
+    let verifier_address: Address = "f39Fd6e51aad88F6F4ce6aB8827279cffFb92266".parse()?;
+    let one_ether = U256::from(1_000_000_000_000_000_000u64);
+    let pending = registry_a
+        .registerGame(
+            0u8,
+            vec![verifier_address],
+            one_ether,
+            Address::ZERO,
+            Address::ZERO,
+        )
+        .send()
+        .await?;
+    pending.watch().await?;
+    println!("[TEST] Game registered successfully on-chain.");
+
+    // 9. Login players to Matchmaking Server
+    println!("[TEST] Connecting to matchmaking server RPC...");
+    let session_service: service_capnp::game_session_service::Client =
+        connect_rpc(&format!("127.0.0.1:{}", server_port)).await?;
+
+    println!("[TEST] Authenticating Player A...");
+    let user_session_a = login_player(&session_service, &wallet_a).await?;
+    println!("[TEST] Player A authenticated.");
+
+    println!("[TEST] Authenticating Player B...");
+    let user_session_b = login_player(&session_service, &wallet_b).await?;
+    println!("[TEST] Player B authenticated.");
+
+    // 10. Queue for matchmaking
+    println!("[TEST] Entering matchmaking queue for Player A and Player B...");
+    let (match_res_a, match_res_b) = tokio::try_join!(
+        request_match(&user_session_a, "Player A", wallet_a.address()),
+        request_match(&user_session_b, "Player B", wallet_b.address())
+    )?;
+
+    let (match_session_a, match_id_uuid) = match_res_a;
+    let (_match_session_b, match_id_uuid_b) = match_res_b;
+
+    assert_eq!(
+        match_id_uuid, match_id_uuid_b,
+        "Matched players must receive the same match ID"
+    );
+    println!("[TEST] Match found! UUID: {}", match_id_uuid);
+
+    // Calculate on-chain match ID
+    let match_id_val = U256::from_be_bytes::<32>(keccak256(match_id_uuid.as_bytes()).into());
+    println!("[TEST] On-chain match ID hash: {}", match_id_val);
+
+    // 11. Create and Join Match on-chain
+    println!("[TEST] Player A creating match on-chain with 1 ether stake...");
+    let pending = registry_a
+        .createMatch(U256::from(0), match_id_val, one_ether)
+        .value(one_ether)
+        .send()
+        .await?;
+    pending.watch().await?;
+    println!("[TEST] Match created on-chain.");
+
+    println!("[TEST] Player B joining match on-chain with 1 ether stake...");
+    let pending = registry_b
+        .joinMatch(match_id_val)
+        .value(one_ether)
+        .send()
+        .await?;
+    pending.watch().await?;
+    println!("[TEST] Match joined on-chain. State transitioned to READY.");
+
+    // 12. Submit match outcome
+    println!("[TEST] Submitting outcome (Player A wins) to verifier...");
+
+    // Compute the submitter's EIP-712 signature over (matchId, outcome,
+    // transcriptHash). Reuse amp-sdk's canonical helper (byte-identical to
+    // AMP-Server's compute_outcome_eip712_digest + the cross-language KAT).
+    let transcript_hash = keccak256(match_id_uuid.as_bytes());
+    let outcome_val: u8 = 1; // Player A wins
+    let digest = amp_sdk::compute_outcome_eip712_digest(
+        &match_id_uuid,
+        outcome_val,
+        transcript_hash.as_slice(),
+        43113,
+        &settlement_addr_parsed.into(),
+    )?;
+    let submitter_sig_bytes = wallet_a
+        .sign_hash_sync(&alloy_primitives::B256::from(digest))?
+        .as_bytes()
+        .to_vec();
+
+    let mut submit_req = match_session_a.submit_outcome_request();
+    {
+        let mut sub = submit_req.get().init_submission();
+        sub.set_match_id(match_id_uuid.as_bytes());
+        sub.set_replay_hash(transcript_hash.as_slice());
+        sub.set_signature(&submitter_sig_bytes);
+        {
+            let mut outcome = sub.reborrow().init_outcome();
+            outcome.set_type(match_capnp::OutcomeType::Win);
+            outcome.set_victor(outcome_val); // Player A wins
+            let mut scores = outcome.init_scores(2);
+            scores.set(0, 1);
+            scores.set(1, 0);
+        }
+    }
+    let submit_resp = submit_req.send().promise.await?;
+    let verifier_sig = submit_resp.get()?.get_signature()?;
+    println!(
+        "[TEST] Outcome submission accepted. Verifier signature received ({} bytes).",
+        verifier_sig.len()
+    );
+
+    // 13. Poll on-chain settlement
+    println!("[TEST] Polling on-chain Settlement contract state...");
+    let settlement_contract = IAMPSettlement::new(settlement_addr_parsed, read_provider.clone());
+    let start_poll = Instant::now();
+    let mut settled = false;
+
+    while start_poll.elapsed().as_secs() < 30 {
+        if let Ok(returned) = settlement_contract.settlements(match_id_val).call().await {
+            if returned.outcome == 1 {
+                // WIN_A
+                println!("[TEST] Outcome verified on-chain: WIN_A");
+                settled = true;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    assert!(settled, "Match failed to settle on-chain within timeout");
+
+    // 14. Verify balances (reads via the read-only provider).
+    let registry_read = IAMPRegistry::new(registry_addr_parsed, read_provider.clone());
+    let pending_withdrawal_a = registry_read
+        .pendingWithdrawals(Address::ZERO, wallet_a.address())
+        .call()
+        .await?;
+    println!(
+        "[TEST] Player A pending withdrawal balance: {} Wei (expected 1.98 ether)",
+        pending_withdrawal_a
+    );
+    // stake is 1 ether from A + 1 ether from B = 2 ether. fee is 1% (100 BPS), so payout is 1.98 ether = 1_980_000_000_000_000_000 Wei.
+    assert_eq!(
+        pending_withdrawal_a,
+        U256::from(1_980_000_000_000_000_000u64)
+    );
+
+    let protocol_fee = registry_read.feeBalances(Address::ZERO).call().await?;
+    println!(
+        "[TEST] Protocol fee pot (fee_balances): {} Wei (expected 0)",
+        protocol_fee
+    );
+    // Phase 3.1: fees now route to the Settlement's `protocolFeeRecipient`
+    // (the deployer, anvil account 0) via pendingWithdrawals instead of the
+    // Registry's owner fee pot.
+    assert_eq!(protocol_fee, U256::ZERO);
+
+    let deployer: Address = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+    let fee_recipient_balance = registry_read
+        .pendingWithdrawals(Address::ZERO, deployer)
+        .call()
+        .await?;
+    println!(
+        "[TEST] Fee-recipient pending withdrawal: {} Wei (expected 0.02 ether)",
+        fee_recipient_balance
+    );
+    assert_eq!(fee_recipient_balance, U256::from(20_000_000_000_000_000u64));
+
+    // Phase 5.1 — negative-path coverage: a duplicate submit on an already-settled
+    // match must be rejected (idempotency / settle-before-sign, audit P4). The
+    // wrong-signature path is covered by amp-server's
+    // test_verify_outcome_signature_round_trip unit test.
+    println!("[TEST] Negative path: duplicate submit on settled match must be rejected...");
+    let mut dup_req = match_session_a.submit_outcome_request();
+    {
+        let mut sub = dup_req.get().init_submission();
+        sub.set_match_id(match_id_uuid.as_bytes());
+        sub.set_replay_hash(transcript_hash.as_slice());
+        sub.set_signature(&submitter_sig_bytes);
+        let mut outcome = sub.reborrow().init_outcome();
+        outcome.set_type(match_capnp::OutcomeType::Win);
+        outcome.set_victor(outcome_val);
+        let mut scores = outcome.init_scores(2);
+        scores.set(0, 1);
+        scores.set(1, 0);
+    }
+    let dup_result = dup_req.send().promise.await;
+    assert!(
+        dup_result.is_err(),
+        "duplicate submit on a settled match must be rejected, not silently accepted"
+    );
+    println!("[TEST] Duplicate submit correctly rejected.");
+
+    // 15. Verify player profile rating updates
+    println!("[TEST] Shutting down matchmaking server to verify database MMR updates...");
+    drop(server_guard);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let db = sled::open(&server_db)?;
+    let players_tree = db.open_tree("players")?;
+
+    let player_id_a = format!("0x{}", hex::encode(wallet_a.address().as_slice()));
+    let player_id_b = format!("0x{}", hex::encode(wallet_b.address().as_slice()));
+
+    let profile_bytes_a = players_tree
+        .get(player_id_a.as_bytes())?
+        .expect("Player A profile not found in Sled");
+    let profile_a: StoredPlayerProfile = bincode::deserialize(&profile_bytes_a)?;
+    println!(
+        "[TEST] Player A final rating: MMR={:.2} (games={})",
+        profile_a.global_mmr, profile_a.games_played
+    );
+    assert!(
+        profile_a.global_mmr > 1200.0,
+        "Player A MMR should have increased after a win"
+    );
+    assert_eq!(profile_a.games_played, 1);
+
+    let profile_bytes_b = players_tree
+        .get(player_id_b.as_bytes())?
+        .expect("Player B profile not found in Sled");
+    let profile_b: StoredPlayerProfile = bincode::deserialize(&profile_bytes_b)?;
+    println!(
+        "[TEST] Player B final rating: MMR={:.2} (games={})",
+        profile_b.global_mmr, profile_b.games_played
+    );
+    assert!(
+        profile_b.global_mmr < 1200.0,
+        "Player B MMR should have decreased after a loss"
+    );
+    assert_eq!(profile_b.games_played, 1);
+
+    println!("\n====================================================");
+    println!("  ALL INTEGRATION TESTS PASSED SUCCESSFULLY!");
+    println!("====================================================");
+
+    Ok(())
+}

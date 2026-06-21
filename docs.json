@@ -1,0 +1,47 @@
+{
+  "name": "Avalanche Matchmaking Protocol",
+  "description": "High-performance matchmaking with on-chain settlement for competitive games on Avalanche.",
+  "theme": {
+    "primary": "#E84142"
+  },
+  "sidebar": [
+    {
+      "group": "Overview",
+      "pages": [
+        { "title": "Introduction", "href": "/" },
+        { "title": "Architecture", "href": "/architecture" },
+        { "title": "SDK Overview", "href": "/sdk-overview" },
+        { "title": "Roadmap", "href": "/roadmap" }
+      ]
+    },
+    {
+      "group": "Guides",
+      "pages": [
+        { "title": "Beta Guide", "href": "/beta-guide" },
+        { "title": "Integration Guide", "href": "/integration-guide" },
+        { "title": "Match Transcripts", "href": "/match-transcripts" },
+        { "title": "Running a Verifier", "href": "/running-a-verifier" },
+        { "title": "Testing & Verification", "href": "/testing" }
+      ]
+    },
+    {
+      "group": "Reference",
+      "pages": [
+        { "title": "Verifier Architecture", "href": "/verifier-architecture" },
+        { "title": "Cap'n Proto Schemas", "href": "/capnp-schemas" },
+        { "title": "Contracts Reference", "href": "/contracts-reference" },
+        { "title": "Signing Schemes", "href": "/signing" },
+        { "title": "Benchmarks", "href": "/benchmarks" },
+        { "title": "FAQ", "href": "/faq" },
+        { "title": "Glossary", "href": "/glossary" }
+      ]
+    }
+  ],
+  "anchors": [
+    {
+      "title": "GitHub",
+      "icon": "github",
+      "href": "https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol"
+    }
+  ]
+}

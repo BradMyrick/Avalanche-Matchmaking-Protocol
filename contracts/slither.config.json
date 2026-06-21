@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/crytic/slither/master/slither/docs/jsonslither.schema.json",
+  "_comment": "Phase 1.7 — Slither static-analysis config for AMP contracts. Run: `slither --config-file slither.config.json .` CI gate (Phase 5) fails on any High/Medium.",
+  "filter_paths": "lib|test|mocks",
+  "solc_remaps": [
+    "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/",
+    "forge-std/=lib/forge-std/src/"
+  ],
+  "solc_disable_warnings": false,
+  "detect_aliases": true,
+  "exclude_informational": true,
+  "exclude_low": false,
+  "exclude_optimization": false,
+  "detectors_to_run": "all",
+  "print_header": true
+}

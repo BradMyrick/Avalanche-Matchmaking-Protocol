@@ -1,0 +1,49 @@
+[package]
+name = "AMP-Server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+capnp = "0.19"
+capnp-rpc = "0.19"
+# Phase 3.4: ethers (unmaintained) replaced by alloy. The server only needs
+# primitives + a local ECDSA signer for EIP-712/EIP-191. (Note: alloy subcrates
+# version independently — primitives is 1.x while signer/provider are 2.x.)
+alloy-primitives = "1"
+alloy-signer = "2"
+alloy-signer-local = "2"
+tokio-util = { version = "0.7", features = ["compat", "rt"] }
+anyhow = "1.0"
+uuid = { version = "1.20.0", features = ["v4"] }
+futures-util = "0.3.32"
+amp-telemetry = { path = "../amp-telemetry" }
+amp-tls = { path = "../amp-tls" }
+# amp-match-core is the canonical embeddable matchmaking library. The server
+# uses its types/functions directly rather than maintaining a parallel copy,
+# so a studio embedding `amp-match-core` and a studio running `AMP-Server`
+# see the exact same algorithm.
+amp-match-core = { path = "../amp-match-core" }
+tracing = "0.1.44"
+tracing-subscriber = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+sled = "0.34"
+dashmap = "6.0"
+thiserror = "2"
+hex = "0.4"
+dotenv = "0.15"
+arc-swap = "1.6.0"
+socket2 = { version = "0.5", features = ["all"] }
+num_cpus = "1.16"
+# Observability (release Phase 7): Prometheus /metrics endpoint.
+metrics = "0.23"
+metrics-exporter-prometheus = { version = "0.15", default-features = false, features = ["http-listener"] }
+
+[build-dependencies]
+capnpc = "0.19"
+
+[dev-dependencies]
+rand = "0.8"
+proptest = "1"

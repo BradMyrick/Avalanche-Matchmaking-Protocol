@@ -1,0 +1,10 @@
+[package]
+name = "amp-tls"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio-rustls = "0.24"
+rustls-pemfile = "1"
+rustls = "0.21"
