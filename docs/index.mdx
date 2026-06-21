@@ -1,0 +1,98 @@
+---
+title: Introduction
+---
+
+# AMP — Avalanche Matchmaking Protocol
+
+**High-performance matchmaking with on-chain settlement. Built for competitive games on Avalanche.**
+
+AMP pairs players, runs the match, and settles the outcome on-chain — all with sub-millisecond matchmaking and cryptographically verifiable payouts. The protocol is engineered to scale from today's 1v1 wagered play all the way to large-team formats and battle royales, with the same escrow-and-attest model underlying every mode.
+
+<Info>
+**Open beta live on Fuji testnet.** Hardened contracts are deployed and source-verified. Read the [Beta Guide](/beta-guide) to play your first match in five minutes.
+</Info>
+
+---
+
+## Why AMP?
+
+Traditional matchmakers (FlexMatch, Open Match, custom backends) are fast but **opaque**: players trust the operator to declare winners and pay out. On-chain settlement fixes that — every outcome is committed to Avalanche with cryptographic attestation — but naive on-chain matchmaking is too slow for real-time play.
+
+AMP gets the best of both worlds: off-chain matchmaking at the speed competitive games demand, plus on-chain settlement with the transparency players and studios require.
+
+- **Sub-millisecond matchmaking.** Cap'n Proto RPC, thread-per-core architecture, DashMap matchstore — see [Benchmarks](/benchmarks).
+- **Verifiable outcomes.** EIP-712 verifier signatures committed to smart-contract escrow. Players don't have to trust the operator's database.
+- **Custodial escrow, not custody.** Stakes sit in the `AMPRegistry` contract, never in the operator's wallet. Payouts are deterministic, governed by code.
+- **Open source, Apache-2.0.** Run it yourself, embed the library, fork it, contribute back.
+
+---
+
+## Two integration paths
+
+### Run the server
+
+Deploy `AMP-Server` + `AMP-Relayer` + the `AMPRegistry` / `AMPSettlement` contracts. Players authenticate via wallet challenge-response, get matched, play, and settle on-chain. The Docker Compose stack in the repo gets you running in minutes.
+
+### Embed the library
+
+Pull in [`amp-match-core`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/tree/main/amp-match-core) — a dependency-light Rust crate with the Glicko-2 rating math, the rule engine, and the matchmaking queue. Zero server, RPC, async, or crypto machinery. Use it inside your own game server, peer-to-peer game, or analytics tool.
+
+```rust
+use amp_match_core::{glicko2_update, MatchQueue, PlayerTicket, RuleSet};
+
+let mut queue: MatchQueue<PlayerTicket> = MatchQueue::new();
+queue.push(PlayerTicket { /* ... */ });
+
+let ruleset = RuleSet::default_arc();
+for key in queue.bucket_keys() {
+    while let Some(m) = queue.try_match_bucket(&key, &ruleset, 10_000, 0) {
+        // snapshot both ratings, update each against the pre-match opponent
+    }
+}
+```
+
+---
+
+## SDKs
+
+AMP ships first-class SDKs for the engines your team already uses. Every SDK produces byte-identical EIP-712 outcome signatures — pinned by the [cross-language KAT vector](/signing) verified in CI.
+
+| SDK | Engines / Use cases | TLS | Tests |
+|:---|:---|:---:|:---:|
+| **Rust** | Reference implementation, performance tooling | ✅ | ✅ |
+| **Go** | Server-side, high-frequency backends | ✅ | ✅ |
+| **C++** | Unreal Engine, custom engines | ✅ | ✅ |
+| **C#** | Unity, Godot | reverse-proxy¹ | ✅ |
+| **Python** | Scripting, AI agents, research | ✅ | ✅ |
+| **JS / TS** | Node.js services | n/a² | ✅ |
+
+¹ Capnp.Net.Runtime 1.3.x limitation — terminate TLS with nginx/envoy in production.
+² Browser path requires a WebSocket bridge.
+
+See the [SDK Overview](/sdk-overview) for per-language setup and the [Integration Guide](/integration-guide) for an end-to-end walkthrough.
+
+---
+
+## Live deployment (Fuji)
+
+| Contract | Address |
+|:---|:---|
+| `AMPRegistry` | [`0x27E02ebA98D2A50Cd1079b0a611320b05A278005`](https://testnet.snowtrace.io/address/0x27E02ebA98D2A50Cd1079b0a611320b05A278005) |
+| `AMPSettlement` | [`0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD`](https://testnet.snowtrace.io/address/0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD) |
+| `AMPTimelock` | [`0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143`](https://testnet.snowtrace.io/address/0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143) |
+
+Contracts are source-verified on Snowtrace, governance is finalized (both contracts' owner is the `TimelockController`), and the full deployment manifest is checked in at [`contracts/deployment-fuji.json`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/blob/main/contracts/deployment-fuji.json).
+
+---
+
+## Documentation
+
+- **[Architecture](/architecture)** — components, data flow, settlement modes.
+- **[Integration Guide](/integration-guide)** — end-to-end walkthrough with code.
+- **[SDK Overview](/sdk-overview)** — per-language setup and API reference.
+- **[Beta Guide](/beta-guide)** — get a match running on Fuji in five minutes.
+- **[Roadmap](/roadmap)** — where the protocol is going: many-v-many, advanced rules, and the path to mainnet.
+- **[Contracts Reference](/contracts-reference)** — Solidity API for `AMPRegistry` and `AMPSettlement`.
+- **[Signing Schemes](/signing)** — EIP-191 auth + EIP-712 outcomes with the cross-language KAT.
+- **[Benchmarks](/benchmarks)** — measured latency and throughput numbers.
+- **[FAQ](/faq)** — common questions, including how AMP compares to FlexMatch.

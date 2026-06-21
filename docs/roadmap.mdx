@@ -1,0 +1,103 @@
+---
+title: Roadmap
+---
+
+# Roadmap
+
+AMP is engineered to become the default matchmaking and settlement layer for competitive games on Avalanche. The vision is broad: large-team formats, battle royales, persistent-world territorial control, and cross-chain settlement — all backed by the same escrow-and-attest model that ships today.
+
+The path from here to that vision runs through clearly defined milestones. Each milestone unlocks new capabilities without breaking what already works.
+
+---
+
+## Where we are today — Open Beta (Fuji)
+
+The open beta ships with a complete vertical slice of the protocol:
+
+- **Matchmaking**: Glicko-2 ratings, composable rule engine (skill, region, language, latency, ping, skill-decay), sorted-MMR bucketed queue with 50ms tick.
+- **Authentication**: EIP-191 challenge-response, single-use nonces, rate-limited.
+- **Outcome signing**: EIP-712 verifier signatures, cross-language byte-identical digest (KAT-verified in CI across Rust, Go, C++, C#, Python, JS, Solidity).
+- **On-chain settlement**: custodial escrow on `AMPRegistry`, verifier-attested payouts via `AMPSettlement`, `TimelockController`-governed ownership.
+- **SDKs**: Rust, Go, C++ (Unreal), C# (Unity/Godot), Python, JS — all shipping tests in CI.
+- **Embeddable library**: `amp-match-core` crate with the rating math, rules, and queue, no server deps.
+- **Operations**: Docker Compose, supply-chain CI (`cargo-deny`), graceful shutdown with persistence flush.
+
+The beta scope is **1v1 with stakes**: chess-like games, card games, arcade duels, 1v1 tournament platforms. This is the surface where every piece of the protocol — matchmaking, escrow, signing, settlement, SDKs — is exercised end-to-end against real Avalanche blocks.
+
+---
+
+## What's next
+
+### v0.2 — Team matchmaking & advanced rules
+
+- **Party / squad matchmaking** with role-complementarity scoring.
+- **Team Glicko-2 / TrueSkill** rating system (Bayesian team inference).
+- **Backfill done right**: per-rule relaxation policy (currently skill-only; v0.2 adds latency/region/party-size policies with operator control).
+- **Avoidance / recent-opponent rules** backed by actual state (currently stub evaluators).
+- **N-player free-for-all** mode (battle royale / arena).
+- **Cross-region placement** with latency-rule expansion.
+
+The evaluator stubs shipped today (`Schedule`, `Inventory`, `Party`, `Custom`, `Avoidance`, `RecentMatches`, `ConnectionQuality`) exist precisely so this milestone is a "wire up the implementation" task rather than a schema break.
+
+### v0.3 — Mainnet (Avalanche C-Chain)
+
+- Independent third-party security audit.
+- 72-hour soak at 1k concurrent connections.
+- Chaos testing (`kill -9 × 100` — assert no duplicate settlement, no fund lock).
+- Multisig over the `TimelockController` proposer role.
+- Mainnet deployment with deterministic `CREATE2` and verified-bytecode gate.
+- `bincode → postcard` and `sled → redb` migrations (transactional archive path).
+- `rustls 0.21 → 0.23` and `capnp 0.19 → 0.20` upgrades (close the documented RUSTSEC advisories).
+
+### v0.4 — Decentralization
+
+- **N-of-M verifier set** with on-chain key rotation.
+- **Optimistic settlement window** — any party can dispute with cryptographic evidence.
+- **Player-side fraud-proof submission** so users don't depend solely on operator liveness.
+- **Verifier DAO** for whitelist governance and evidence requirements.
+- **Open verifier node release** for third-party hosting.
+
+### v1.0 — The AMP L1
+
+- Transition to a dedicated **Avalanche L1** (appchain) for high-frequency settlement.
+- Warp messaging for cross-chain match-and-settle.
+- 10,000+ matches per day sustained target.
+
+---
+
+## How we ship
+
+Every milestone follows the same discipline:
+
+1. **Scope it in the rule schema first.** New rule types land as stubs before they're wired up — no schema breaks later.
+2. **Test in CI before tag.** Every Rust crate, every SDK, every contract test, plus the E2E integration test, must pass on every PR.
+3. **Document before release.** The docs you're reading now reflect what's shipping today; release notes cover the deltas.
+4. **Timelock every economic change.** No same-block operator action can move funds or change fees.
+
+---
+
+## Comparisons
+
+### vs AWS FlexMatch
+
+FlexMatch is fast, mature, and tightly integrated with AWS GameLift. AMP differs in three ways:
+
+1. **On-chain settlement.** FlexMatch has no settlement primitive. AMP ships escrow + verifier attestation by default.
+2. **Self-hostable, no cloud lock-in.** AMP is Apache-2.0; run it on any cloud, bare metal, or peer-to-peer.
+3. **Embeddable matchmaking library.** `amp-match-core` drops into your existing game server without taking over the whole network stack.
+
+Where FlexMatch is ahead today: party/squad matchmaking, cross-region placement, backfill policies, and the operational polish of a managed service. The v0.2 / v0.3 milestones close those gaps.
+
+### vs Open Match
+
+Open Match is a matchmaking framework (also open source) that leaves matchmaking logic to the user. AMP ships an opinionated rating + rule engine out of the box — closer to FlexMatch in scope, plus the settlement layer Open Match doesn't have.
+
+### vs custom in-house backends
+
+AMP replaces the matchmaking + settlement surface of a custom backend. The embeddable `amp-match-core` library is specifically designed for studios that want AMP's algorithms without running the AMP service.
+
+---
+
+## Long-term vision (2027+)
+
+AMP aims to support the full range of competitive play — from 1v1 wagered matches to massive-scale battle royales and persistent-world territorial control — all settled on Avalanche. The protocol's separation of matchmaking (off-chain, fast) from settlement (on-chain, verifiable) is what makes that range possible: the same escrow-and-attest model scales from two players to thousands.

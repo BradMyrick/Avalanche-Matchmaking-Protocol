@@ -1,0 +1,20 @@
+# CODEOWNERS — review routing for AMP
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Until the team expands, the project has a single maintainer. These rules
+# exist so future contributors are auto-routed and so CI/branch-protection
+# has a target once new reviewers are added.
+
+# Default owner for the repository.
+*                          @BradMyrick
+
+# Hot-path / correctness-critical areas — flag for explicit review.
+/amp-server/src/           @BradMyrick
+/amp-relayer/src/          @BradMyrick
+/contracts/src/            @BradMyrick
+/amp-sdk/schemas/          @BradMyrick
+
+# Generated bindings, CI, and docs.
+/.github/                  @BradMyrick
+/contracts/lib/            @BradMyrick
+/docs/                     @BradMyrick

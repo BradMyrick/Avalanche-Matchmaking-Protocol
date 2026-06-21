@@ -1,0 +1,49 @@
+---
+title: Glossary
+---
+
+# Glossary
+
+Essential definitions for the Avalanche Matchmaking Protocol.
+
+### ASYNC_VERIFIER
+A settlement mode where the Verifier node replays the entire match transcript to determine the outcome. Used for high-stakes matches or when client hashes mismatch.
+
+### Arbiter
+A designated address that can resolve disputed matches in `RT_HASH_AGREE` mode via `resolveDispute()` on the `AMPSettlement` contract.
+
+### Attestation
+A cryptographically signed message from an authorized Verifier node that certifies the final state and winner of a match.
+
+### Capability
+A security handle used in the Cap'n Proto RPC layer. Possessing a `MatchSession` capability proves that a player is authorized to interact with that specific match.
+
+### Challenge-Response Auth
+AMP's authentication flow. The server issues a time-bound nonce (challenge), the client signs it with their wallet key, and the server verifies the signature to establish a session.
+
+### Determinism
+The property where a game engine produces the exact same output state given the same sequence of inputs and the same initial seed.
+
+### IndexedQueue
+AMP's internal match queue data structure. Players are bucketed by `(gameId, rulesetId)` and sorted by MMR for O(log n) skill-compatible pair lookups.
+
+### Match Transcript
+An ordered log of all `MatchConfig`, `InputFrames`, and `GameEvents` in a match.
+
+### RT_HASH_AGREE
+"Real-Time Hash Agreement." A settlement mode where clients submit state hashes to the `AMPSettlement` contract, which auto-settles on agreement or auto-disputes on mismatch.
+
+### Rolling Hash
+A cryptographic hash that is updated tick-by-tick during a match to represent the current state of the transcript.
+
+### Settlement Relayer (amp-relayer)
+The off-chain bridge that submits verified match outcomes on-chain. Features sled-backed persistence, EIP-1559 gas, nonce tracking, and retry with dead-letter queue.
+
+### Stake
+The collateral (AVAX or ERC-20) deposited by a player into the `AMPRegistry` contract before a match begins.
+
+### UserSession
+A Cap'n Proto capability granted after successful authentication. Used for matchmaking and session management.
+
+### MatchSession
+A short-lived Cap'n Proto capability granted when a match is found. Used for outcome submission, telemetry, and game events.
