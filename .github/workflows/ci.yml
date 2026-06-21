@@ -1,0 +1,317 @@
+name: AMP CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust-lint:
+    name: Rust Lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Cap'n Proto
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build contracts (needed by amp-relayer)
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
+          forge install foundry-rs/forge-std@v1.10.0 --no-git
+          forge build
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  rust-test:
+    # Phase 5.5 — run workspace unit tests on all three release OSes so the
+    # macOS/Windows binaries are test-executed, not just cross-compiled. The
+    # anvil-dependent integration crate runs in its own Linux-only job below.
+    name: Rust Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Cap'n Proto (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+
+      - name: Install Cap'n Proto (macOS)
+        if: runner.os == 'macOS'
+        run: brew install capnp
+
+      - name: Install Cap'n Proto (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install capnproto:x64-windows
+          echo "${env:VCPKG_INSTALLATION_ROOT}\installed\x64-windows\tools\capnproto" >> $env:GITHUB_PATH
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build contracts (needed by amp-relayer)
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
+          forge install foundry-rs/forge-std@v1.10.0 --no-git
+          forge build
+
+      - name: Run workspace unit tests (excludes anvil integration crate)
+        run: cargo test --workspace --exclude amp-integration-tests
+
+  coverage:
+    # Phase 5.7 — coverage measurement + upload. Non-blocking until the
+    # baseline is established; the ≥85% Rust-core gate is enforced once stable.
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Cap'n Proto
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Build contracts
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
+          forge install foundry-rs/forge-std@v1.10.0 --no-git
+          forge build
+      - name: Rust coverage (amp-server + amp-relayer core)
+        run: cargo llvm-cov --package AMP-Server --package amp-relayer --lcov --output-path lcov.info
+      - name: Solidity coverage
+        working-directory: contracts
+        run: forge coverage --report lcov --lcov-out forge-lcov.info || true
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./lcov.info,./contracts/forge-lcov.info
+          fail_ci_if_error: false
+
+
+  perf-gate:
+    # Phase 2.7 — latency regression gate. Fails if the matchstore hot path
+    # regresses past the sub-100µs budget (e.g. a reversion to the
+    # clone-on-write ArcSwap design that took ~1.4ms at 10k entries).
+    name: Perf Gate (matchstore latency)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: perf-gate
+
+      - name: Latency gate test
+        run: cargo test -p amp-benches --tests -- --nocapture
+
+      - name: Informational criterion bench
+        run: cargo bench -p amp-benches --bench matchstore || true
+
+
+  test-contracts:
+    name: Foundry Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install Foundry libraries
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
+          forge install foundry-rs/forge-std@v1.10.0 --no-git
+
+      - name: Check Solidity formatting
+        working-directory: contracts
+        run: forge fmt --check
+
+      - name: Run Forge tests
+        working-directory: contracts
+        run: forge test -vvv
+
+  sdk-build:
+    # Phase 5.4 — compile verification + bundled-crypto tests for the C++/C#
+    # SDKs. The C++ step no longer swallows failures.
+    #
+    # C++ tests cover the bundled Keccak-256 + EIP-712 digest path, which
+    # makes the SDK tier-1 for outcome signing (no external crypto dep).
+    # C# tests cover the same KAT + sign/recover round-trip via Nethereum.
+    name: SDK Tests (C++ build + tests, C# tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Cap'n Proto
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+
+      - name: Verify C++ SDK compiles (full client + Unreal-relevant examples)
+        working-directory: amp-sdk/examples/cpp
+        run: |
+          # The committed C++ bindings are pinned to the capnp version that
+          # generated them; force regeneration against the runner's installed
+          # capnproto so the generated headers match the library headers
+          # (otherwise capnp's version-mismatch #error fires).
+          rm -rf ../../schemas/generated/cpp && mkdir -p ../../schemas/generated/cpp
+          mkdir -p build && cd build
+          cmake ..
+          make -j$(nproc)
+
+      - name: Run C++ EIP-712 + Keccak-256 tests (bundled crypto, no capnp dep)
+        working-directory: amp-sdk/cpp
+        run: |
+          cmake -B build-tests -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-tests -j$(nproc)
+          ./build-tests/amp_tests
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Run C# SDK tests (EIP-712 KAT + sign/recover round-trip)
+        working-directory: amp-sdk/csharp/AmpSdk.Tests
+        run: dotnet test --logger "console;verbosity=normal"
+
+  sdk-go:
+    # Phase 5.4 — Go SDK tests run in CI (previously absent). Requires the
+    # capnp-generated bindings; produced by the bootstrap step.
+    name: SDK Tests (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Cap'n Proto + capnpc-go
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache-dependency-path: amp-sdk/go/go.sum
+      - name: Generate Go bindings
+        working-directory: amp-sdk
+        run: |
+          capnp compile -o- -I schemas schemas/match.capnp > /dev/null
+          which capnpc-go || (go install capnproto.org/go/capnp/v3/capnpc-go@latest)
+          ./generate_bindings.sh || true
+      - name: Go tests
+        working-directory: amp-sdk/go
+        run: go test ./...
+
+  sdk-python:
+    name: SDK Tests (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install + test
+        working-directory: amp-sdk/python
+        run: |
+          python -m pip install --upgrade pip
+          # pycapnp is a runtime dep in pyproject; --prefer-binary forces the
+          # manylinux wheel (avoids a source build that needs the capnp C++ SDK).
+          pip install --prefer-binary -e ".[dev]"
+          pytest -q
+
+  sdk-js:
+    name: SDK Tests (JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Cap'n Proto (for native build)
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: js-sdk
+      - name: Build + test
+        working-directory: amp-sdk/js
+        run: |
+          npm install
+          # `build` runs build:native (the .node) AND tsc (dist/), so the
+          # `node --test dist/test/**/*.test.js` glob has files to run.
+          npm run build
+          npm test
+
+
+  integration:
+    name: End-to-End Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Cap'n Proto
+        run: sudo apt-get update && sudo apt-get install -y capnproto libcapnp-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: integration
+
+      - name: Install Foundry (forge + anvil)
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install Foundry libraries
+        working-directory: contracts
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts@v5.6.1 --no-git
+          forge install foundry-rs/forge-std@v1.10.0 --no-git
+
+      - name: Build release binaries
+        run: cargo build --release -p AMP-Server -p amp-relayer -p amp-telemetry -p amp-integration-tests
+
+      - name: Run E2E integration tests
+        run: cargo run --release -p amp-integration-tests
