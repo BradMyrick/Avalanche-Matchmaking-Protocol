@@ -2,97 +2,70 @@
 title: Introduction
 ---
 
-# AMP — Avalanche Matchmaking Protocol
+# AMP — Verifiable Tournament Engine
 
-**High-performance matchmaking with on-chain settlement. Built for competitive games on Avalanche.**
+AMP is a trustless tournament engine for competitive gaming on Avalanche. An organizer funds a **sponsor prize pool**, the bracket runs off-chain, and winners **pull-claim** their payout from an on-chain escrow (`AMPTournamentCup`). Every result is EIP-712 attested; every payout is a public Avalanche transaction.
 
-AMP pairs players, runs the match, and settles the outcome on-chain — all with sub-millisecond matchmaking and cryptographically verifiable payouts. The protocol is engineered to scale from today's 1v1 wagered play all the way to large-team formats and battle royales, with the same escrow-and-attest model underlying every mode.
-
-<Info>
-**Open beta live on Fuji testnet.** Hardened contracts are deployed and source-verified. Read the [Beta Guide](/beta-guide) to play your first match in five minutes.
-</Info>
+> The full documentation is being rewritten for the tournament-engine architecture. The legacy docs (which described the removed Cap'n Proto matchmaking stack) are preserved as `*.mdx.old` and are not rendered. This page is the current source of truth.
 
 ---
 
-## Why AMP?
+## The product (4 components)
 
-Traditional matchmakers (FlexMatch, Open Match, custom backends) are fast but **opaque**: players trust the operator to declare winners and pay out. On-chain settlement fixes that — every outcome is committed to Avalanche with cryptographic attestation — but naive on-chain matchmaking is too slow for real-time play.
+| Component | Language | Role |
+|:---|:---|:---|
+| `web/` | TypeScript / Next.js | UI (`/setup`, `/manage`, `/play`, `/cup`, `/claim`) + JSON API + bracket engine + Postgres client |
+| `relayer/` | Rust | Isolated custodial relayer — the **only** process holding the funded key; drains a Postgres job queue, signs EIP-712, submits on-chain |
+| `contracts/` | Solidity | `AMPTournamentCup` — sponsor-funded prize escrow. The security boundary |
+| `migrations/` | SQL | Postgres schema (tournaments, brackets, relayer job queue) |
 
-AMP gets the best of both worlds: off-chain matchmaking at the speed competitive games demand, plus on-chain settlement with the transparency players and studios require.
-
-- **Sub-millisecond matchmaking.** Cap'n Proto RPC, thread-per-core architecture, DashMap matchstore — see [Benchmarks](/benchmarks).
-- **Verifiable outcomes.** EIP-712 verifier signatures committed to smart-contract escrow. Players don't have to trust the operator's database.
-- **Custodial escrow, not custody.** Stakes sit in the `AMPRegistry` contract, never in the operator's wallet. Payouts are deterministic, governed by code.
-- **Open source, Apache-2.0.** Run it yourself, embed the library, fork it, contribute back.
+The bracket engine is a single TypeScript implementation in `web/src/lib/engine/` (single-elimination, round-robin, Swiss). The funded key is isolated in the Rust relayer; the web app has zero custody authority.
 
 ---
 
-## Two integration paths
+## Live contract (Fuji testnet)
 
-### Run the server
+| Contract | Address | Role |
+|:---|:---|:---|
+| `AMPTournamentCup` | [`0x7c743c1c9ae3e7a65d030098f2249b7787d66dff`](https://testnet.snowtrace.io/address/0x7c743c1c9ae3e7a65d030098f2249b7787d66dff) | The tournament product: sponsor-funded pools, EIP-712 attested finalization, winner pull-claims |
+| `AMPRegistry` / `AMPSettlement` / `AMPTimelock` | [`0x27E02…`](https://testnet.snowtrace.io/address/0x27E02ebA98D2A50Cd1079b0a611320b05A278005) … | **Legacy** 1v1 wagering escrow — deployed, governance-finalized, not used by the tournament product |
 
-Deploy `AMP-Server` + `AMP-Relayer` + the `AMPRegistry` / `AMPSettlement` contracts. Players authenticate via wallet challenge-response, get matched, play, and settle on-chain. The Docker Compose stack in the repo gets you running in minutes.
+Deployment manifest + a verified end-to-end demo: [`contracts/deployment-fuji-tournament.json`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/blob/main/contracts/deployment-fuji-tournament.json).
 
-### Embed the library
+---
 
-Pull in [`amp-match-core`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/tree/main/amp-match-core) — a dependency-light Rust crate with the Glicko-2 rating math, the rule engine, and the matchmaking queue. Zero server, RPC, async, or crypto machinery. Use it inside your own game server, peer-to-peer game, or analytics tool.
+## How it fits together
 
-```rust
-use amp_match_core::{glicko2_update, MatchQueue, PlayerTicket, RuleSet};
-
-let mut queue: MatchQueue<PlayerTicket> = MatchQueue::new();
-queue.push(PlayerTicket { /* ... */ });
-
-let ruleset = RuleSet::default_arc();
-for key in queue.bucket_keys() {
-    while let Some(m) = queue.try_match_bucket(&key, &ruleset, 10_000, 0) {
-        // snapshot both ratings, update each against the pre-match opponent
-    }
-}
+```
+Browser (Next.js)        JSON over HTTPS          On-chain (Fuji)
+┌───────────────┐   ┌─────────────────────┐   ┌────────────────────┐
+│ /setup        │──▶│ /api/tournament/*   │   │ AMPTournamentCup   │
+│ /manage /play │   │ /api/paypal/*       │◀──│  (escrow + EIP-712 │
+│ /cup  /claim  │   │ Postgres queue      │   │   finalize + claim)│
+└───────────────┘   └─────────┬───────────┘   └────────────────────┘
+                              │ enqueue jobs           ▲
+                              ▼                        │ sign + submit
+                    ┌─────────────────────┐   ┌────────────────────┐
+                    │ Postgres            │◀──│ relayer/ (Rust)    │
+                    │ tournaments/brackets│   │ sole funded-key    │
+                    │ relayer_jobs        │   │ holder             │
+                    └─────────────────────┘   └────────────────────┘
 ```
 
----
+## Run it
 
-## SDKs
+> **Database:** use Neon Postgres, and set `DATABASE_URL` to the **pooled** connection string (the one with `-pooler` in the hostname) — the web runs on Vercel serverless and needs the pooled endpoint.
 
-AMP ships first-class SDKs for the engines your team already uses. Every SDK produces byte-identical EIP-712 outcome signatures — pinned by the [cross-language KAT vector](/signing) verified in CI.
+```bash
+# Web (requires DATABASE_URL — Neon, pooled)
+cd web && npm install && npm run dev
 
-| SDK | Engines / Use cases | TLS | Tests |
-|:---|:---|:---:|:---:|
-| **Rust** | Reference implementation, performance tooling | ✅ | ✅ |
-| **Go** | Server-side, high-frequency backends | ✅ | ✅ |
-| **C++** | Unreal Engine, custom engines | ✅ | ✅ |
-| **C#** | Unity, Godot | reverse-proxy¹ | ✅ |
-| **Python** | Scripting, AI agents, research | ✅ | ✅ |
-| **JS / TS** | Node.js services | n/a² | ✅ |
+# Relayer — the custody process (requires DATABASE_URL + AMP_RELAYER_KEY)
+# Run as a persistent daemon (Fly.io / Railway / Render / VPS), NOT on Vercel.
+cd relayer && cargo run --release
 
-¹ Capnp.Net.Runtime 1.3.x limitation — terminate TLS with nginx/envoy in production.
-² Browser path requires a WebSocket bridge.
+# Contracts
+cd contracts && forge test -vvv
+```
 
-See the [SDK Overview](/sdk-overview) for per-language setup and the [Integration Guide](/integration-guide) for an end-to-end walkthrough.
-
----
-
-## Live deployment (Fuji)
-
-| Contract | Address |
-|:---|:---|
-| `AMPRegistry` | [`0x27E02ebA98D2A50Cd1079b0a611320b05A278005`](https://testnet.snowtrace.io/address/0x27E02ebA98D2A50Cd1079b0a611320b05A278005) |
-| `AMPSettlement` | [`0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD`](https://testnet.snowtrace.io/address/0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD) |
-| `AMPTimelock` | [`0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143`](https://testnet.snowtrace.io/address/0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143) |
-
-Contracts are source-verified on Snowtrace, governance is finalized (both contracts' owner is the `TimelockController`), and the full deployment manifest is checked in at [`contracts/deployment-fuji.json`](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/blob/main/contracts/deployment-fuji.json).
-
----
-
-## Documentation
-
-- **[Architecture](/architecture)** — components, data flow, settlement modes.
-- **[Integration Guide](/integration-guide)** — end-to-end walkthrough with code.
-- **[SDK Overview](/sdk-overview)** — per-language setup and API reference.
-- **[Beta Guide](/beta-guide)** — get a match running on Fuji in five minutes.
-- **[Roadmap](/roadmap)** — where the protocol is going: many-v-many, advanced rules, and the path to mainnet.
-- **[Contracts Reference](/contracts-reference)** — Solidity API for `AMPRegistry` and `AMPSettlement`.
-- **[Signing Schemes](/signing)** — EIP-191 auth + EIP-712 outcomes with the cross-language KAT.
-- **[Benchmarks](/benchmarks)** — measured latency and throughput numbers.
-- **[FAQ](/faq)** — common questions, including how AMP compares to FlexMatch.
+See the [root README](https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol/blob/main/README.md) for the full architecture, security model, and the security-remediation status.

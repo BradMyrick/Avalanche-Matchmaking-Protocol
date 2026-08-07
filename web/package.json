@@ -1,0 +1,40 @@
+{
+  "name": "amp-demo-website",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:kat:regen": "echo 'Run from AMP repo: cargo run -p amp-tournament --example dump_kat > amp-demo-website/src/lib/engine/engine.kat.json'",
+    "db:migrate": "node scripts/migrate.mjs"
+  },
+  "dependencies": {
+    "@paypal/react-paypal-js": "^10.3.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.2",
+    "framer-motion": "^12.43.0",
+    "lucide-react": "^0.577.0",
+    "next": "16.3.0",
+    "pg": "^8.22.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^20",
+    "@types/pg": "^8.20.4",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "babel-plugin-react-compiler": "1.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "ethers": "^6.17.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

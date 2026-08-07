@@ -1,0 +1,31 @@
+{
+  "chain_id": 43113,
+  "network": "Avalanche Fuji Testnet (C-Chain)",
+  "rpc_url": "https://api.avax-test.network/ext/bc/C/rpc",
+  "deploy_block": 57589917,
+  "deployed_at": "2026-08-06",
+  "contracts": {
+    "AMPTournamentCup": {
+      "address": "0x7c743c1c9ae3e7a65d030098f2249b7787d66dff",
+      "deploy_tx": "0x2d47b3b27bf1ba3de2174e8a9a56578dc4754f6105f511d0a34124cbac8a5de5",
+      "eip712_domain": { "name": "AMPTournamentCup", "version": "1", "chainId": 43113 }
+    }
+  },
+  "deployer_disclosure": "Deployed by the AMP Fuji deployer EOA (0x95CC495dF579981d3Ffa4a8f77B93A17563E077a), funded from the public Fuji faucet. Owner is the deployer EOA; transfer to the existing AMPTimelock (0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143) is a planned follow-up (requires a 1h timelock schedule).",
+  "verification": {
+    "end_to_end_demo": {
+      "tournament_id": 1,
+      "prize_pool_avax": "0.05",
+      "payout_split_bps": [7000, 3000],
+      "flow": "create -> EIP-712 verifier-attested finalize -> winner pull-claims",
+      "result": "Both winners claimed; contract balance drained to 0.",
+      "events_emitted": [
+        "TournamentCreated (block 57589941)",
+        "TournamentFinalized (block 57589947)",
+        "PrizeClaimed winner1 0.035 AVAX (block 57589949)",
+        "PrizeClaimed winner2 0.015 AVAX (block 57589950)"
+      ]
+    }
+  },
+  "notes": "MVP sponsored-prize escrow. Standalone — does not touch the deployed AMPRegistry/AMPSettlement wagering contracts. TimelockController-wrapping and mainnet deployment follow the Roadmap v0.3 milestone (audit-gated)."
+}

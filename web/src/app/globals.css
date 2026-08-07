@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-red: #E84142;
+  --color-brand-dark-red: #A31E20;
+  --color-brand-cyan: #00E5FF;
+  --color-brand-quaternary-cyan: #00B8C9;
+  --color-brand-dark-cyan: #007A88;
+  --color-brand-white: #FFFFFF;
+  --color-dark-bg: #030303;
+  --color-glass: rgba(0, 229, 255, 0.03);
+  --color-glass-border: rgba(0, 229, 255, 0.2);
+  --color-neon-cyan: #00ffff;
+}
+
+:root {
+  --background: var(--color-dark-bg);
+  --foreground: #ededed;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: 'Inter', Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-image:
+    radial-gradient(circle at 15% 50%, rgba(0, 229, 255, 0.1), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(232, 65, 66, 0.1), transparent 30%),
+    linear-gradient(rgba(0, 229, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.08) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 50px 50px, 50px 50px;
+  background-attachment: fixed;
+}
+
+/* Custom Glassmorphism Utilities */
+.glass-panel {
+  background: var(--color-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--color-glass-border);
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.15), inset 0 0 15px rgba(0, 229, 255, 0.05);
+  border-radius: 0.25rem;
+  transition: all 0.3s ease;
+}
+
+.glass-panel:hover {
+  box-shadow: 0 0 30px rgba(0, 229, 255, 0.3), inset 0 0 20px rgba(0, 229, 255, 0.1);
+  border-color: rgba(0, 229, 255, 0.5);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, var(--color-brand-white), var(--color-brand-cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

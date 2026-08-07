@@ -1,0 +1,22 @@
+[package]
+name = "amp-relayer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Isolated custodial relayer — signs and submits AMP tournament funding/finalization from a Postgres job queue. The only process that ever holds the funded key."
+
+[[bin]]
+name = "amp-relayer"
+path = "src/main.rs"
+
+[dependencies]
+ethers = { version = "2", default-features = false, features = ["rustls", "abigen"] }
+dotenvy = "0.15"
+hex = "0.4"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "json", "chrono"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
