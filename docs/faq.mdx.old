@@ -1,0 +1,81 @@
+---
+title: FAQ
+---
+
+# FAQ
+
+Common questions about AMP.
+
+### What is AMP, in one sentence?
+
+AMP is the verifiable tournament engine for competitive gaming on Avalanche — it runs the bracket, escrows sponsor-funded prize pools, and settles payouts on-chain so every result is tamper-proof.
+
+### How does AMP compare to tournament platforms like Start.gg / Challonge / FACEIT?
+
+These platforms run brackets well, but payouts are manual — spreadsheet math, Discord DMs, and trust. AMP runs the bracket **and** settles the prize pool verifiably on-chain: sponsors fund escrow up front, champions pull-claim instantly, and every payout is a public Avalanche transaction. Where they're ahead today: mature bracket UI, large user bases, broadcast tooling. The v0.2 milestone closes the bracket-engine gap.
+
+### How does AMP compare to AWS FlexMatch / Open Match?
+
+FlexMatch and Open Match are matchmaking middleware — they don't settle anything. AMP is a tournament engine that *also* settles, ships escrow + verifier attestation by default, is Apache-2.0 (no cloud lock-in), and offers an embeddable matchmaking library (`amp-match-core`) for teams that want the rating/queue algorithms without the full service.
+
+### What can AMP do today?
+
+The open beta ships:
+
+- **Live on Fuji:** the `AMPTournamentCup` sponsor-funded prize-pool contract — a real end-to-end tournament (AMP Cup #1) has run on it, verifiable on Snowtrace.
+- Sub-millisecond matchmaking with Glicko-2 ratings and composable rules.
+- EIP-191 challenge-response auth + EIP-712 outcome signing.
+- Escrow with verifier-attested payouts on Avalanche Fuji.
+- Six SDKs (Rust, Go, C++, C#, Python, JS) all with CI-verified tests.
+- An embeddable matchmaking library (`amp-match-core`) for teams that want the algorithm without the service.
+
+### What's coming next?
+
+The `amp-tournament` bracket engine (single-elim, Swiss, round-robin), the browser organizer flow, an HTTP gateway so the website can drive real Fuji flows, and portable skill credentials. See the [Roadmap](/roadmap).
+
+### What engines are supported?
+
+We provide SDKs for **C++ (Unreal)**, **C# (Unity/Godot)**, **Go**, **Python**, **Rust**, and **JavaScript/TypeScript**. The C++ and C# SDKs bundle Keccak-256 for outcome-digest computation, so the crypto path works out of the box. See the [SDK Overview](/sdk-overview) for the full matrix.
+
+### How does authentication work?
+
+AMP uses a challenge-response flow: the server issues a time-bound nonce, the client signs it with their wallet, and the server verifies the signature. This replaces static token auth and prevents replay attacks.
+
+### Does AMP provide anti-cheat?
+
+AMP provides **verifiable anti-cheat**. Because the protocol has the match transcript, the `ASYNC_VERIFIER` can catch many common cheats (speed hacks, wall hacks) by re-simulating the game logic. AMP is not a replacement for traditional client-side anti-cheat (Easy Anti-Cheat, BattlEye) which prevents memory manipulation on the local machine.
+
+### What are the settlement modes?
+
+Two modes:
+
+- **`ASYNC_VERIFIER`**: the verifier processes the match transcript and signs an attestation. The relayer submits it on-chain. Maximum security, immune to client collusion.
+- **`RT_HASH_AGREE`**: both clients independently calculate the final state hash and submit it. Agreement auto-settles; disagreement enters dispute resolution by a designated arbiter. Lower latency, lower gas, requires deterministic clients.
+
+See [Architecture](/architecture) for details.
+
+### How are tournaments funded? Do players stake?
+
+In the tournament model (`AMPTournamentCup`), **sponsors fund the prize pool** — players never put up collateral. The sponsor deposits AVAX or an ERC-20 into escrow up front; the payout structure (e.g., 70/30 or 60/30/10) is committed at creation; the verifier attests the final standings; winners pull-claim their share. No wagering, no gambling exposure.
+
+> The original deployed `AMPRegistry`/`AMPSettlement` contracts use a 1v1 player-escrow model (both players deposit, winner takes the pool). That model is **not** the tournament direction and is documented at [Contracts Reference](/contracts-reference). The sponsored-prize `AMPTournamentCup` is the forward path.
+
+### What happens if a tournament isn't finalized?
+
+If a sponsor funds a pool and the verifier never attests winners, the sponsor can refund the pool: anytime before the finalize deadline (sponsor only), or by anyone once the deadline has passed. Funds are never trapped.
+
+### What tokens are supported for prize pools?
+
+Both native AVAX and any ERC-20. Fee-on-transfer tokens are handled correctly (the contract measures the actual balance delta on deposit).
+
+### Is AMP limited to Avalanche?
+
+Today, yes — settlement is on Avalanche (Fuji testnet now, C-Chain mainnet per the [Roadmap](/roadmap)). The core matchmaking logic in `amp-match-core` is chain-agnostic and embeddable anywhere.
+
+### Can someone fork AMP?
+
+Yes. AMP is Apache-2.0. The protocol's value lies in the verifier network, the trust ecosystem around the shared settlement contracts, and the developer community — all of which compound on a shared deployment rather than forks.
+
+### What's the long-term vision?
+
+A verifiable tournament layer for the full range of competitive play — from a community cup in a school gym to a global ranked season — all settled on Avalanche. See [Roadmap → Long-term vision](/roadmap#long-term-vision-2027).

@@ -1,230 +1,107 @@
-# Avalanche Matchmaking Protocol (AMP)
+# AMP — Verifiable Tournament Engine
 
-### High-performance matchmaking with on-chain settlement. Built for competitive games on Avalanche.
+### Trustless tournaments on Avalanche: run the bracket, escrow the prize pool, pay winners on-chain.
 
-AMP pairs players, runs the match, and settles the outcome on-chain — all with sub-millisecond matchmaking and cryptographically verifiable payouts. Today's open beta ships 1v1 wagered play; the same architecture scales to large-team formats, battle royales, and persistent-world play as the protocol matures.
+AMP is a verifiable tournament engine for gaming communities. An organizer funds a sponsor prize pool, the bracket runs, and winners **pull-claim** their payout from an on-chain escrow — every result attested, every payout a public Avalanche transaction. Any game, any engine, any community.
 
-**Documentation:** [docs.page](https://docs.page/bradmyrick/avalanche-matchmaking-protocol) (or read the [`docs/`](docs/) folder locally).
-
----
-
-## Award
-
-<p align="center">
-  <img src="docs/images/grant_badge.png" alt="Avalanche Build Games 2026 Merit Grant" width="300" />
-</p>
-
-AMP was awarded a **$15,000 Merit Grant** for placing in the **top 20 projects** of the **Avalanche Build Games 2026**.
+**Live on Fuji testnet:** the `AMPTournamentCup` sponsored-prize escrow is deployed, source-verified, and has run a real end-to-end tournament. Try it at **[playwithamp.xyz](https://playwithamp.xyz)** → *Host a Tournament*.
 
 ---
 
-## Why AMP?
-
-- **Sub-millisecond matchmaking.** Cap'n Proto RPC, thread-per-core architecture, DashMap matchstore.
-- **Verifiable outcomes.** EIP-712 verifier signatures committed to smart-contract escrow on Avalanche.
-- **Custodial escrow, not custody.** Stakes sit in the `AMPRegistry` contract — never in the operator's wallet. Payouts are deterministic, governed by code.
-- **Open source, Apache-2.0.** Run it, embed it, fork it, contribute back.
-
----
-
-## Two integration paths
-
-### Run the server
-
-Deploy `AMP-Server` + `AMP-Relayer` + the `AMPRegistry` / `AMPSettlement` contracts. Players authenticate via wallet challenge-response, get matched, play, and settle on-chain. The Docker Compose stack gets you running in minutes.
-
-### Embed the library
-
-Pull in `amp-match-core` — a dependency-light Rust crate containing the Glicko-2 rating math, the rule engine, and the matchmaking queue. No server, RPC, async, or crypto deps. Use it inside your own game server, peer-to-peer game, or analytics tool. See [`amp-match-core/README.md`](amp-match-core/README.md).
-
----
-
-## Key Features
-
-- **Embeddable matchmaking library** (`amp-match-core`): Glicko-2 + composable rule evaluation + bucketed queue, zero server/RPC/async/crypto deps.
-- **Thread-per-Core Server**: `SO_REUSEPORT` worker threads scale across all CPU cores. Each worker runs an independent `LocalSet` for Cap'n Proto RPC.
-- **Capability-based RPC** with **challenge-response auth**: server-issued nonces signed by player wallets prevent replay attacks.
-- **Glicko-2 rating system** with NaN/Inf/non-positive-volatility guards and a bounded Illinois-method solver.
-- **Custodial escrow with on-chain settlement**: stakes sit in the `AMPRegistry` contract — never in the operator's wallet. Outcomes are committed via verifier signatures (EIP-712) and enforced by the contract's payout rules.
-- **Reliable settlement bridge** (`amp-relayer`): sled-backed persistent queue with explicit flush on shutdown, EIP-1559 gas management, nonce tracking, exponential backoff retry, dead-letter queue, and `Notify`-driven wake.
-- **TLS support**: optional `rustls`-based TLS for all services. Misconfiguration is a hard error (never silent fallback to plaintext).
-- **Graceful shutdown**: SIGINT/SIGTERM handling across all services. `CancellationToken` propagation drains active matches and flushes persistence before exit.
-- **Docker-native**: network segmentation, Docker secrets, TLS cert mounts, non-root containers.
-- **Unified schema**: single Cap'n Proto schema source generates native bindings for Rust, Go, C++, and C#.
-- **Supply-chain CI gates**: `cargo-deny` enforces RUSTSEC advisory policy, license allowlist, and source policy.
-- **All six SDKs tier-1 for outcome signing**: Rust, Go, C++, C#, Python, JS all ship with EIP-712 digest verified against a cross-language KAT in CI. C++ and C# bundle the Keccak-256 needed for digest computation.
-
----
-
-## SDKs
-
-| SDK | Engines / Use cases | TLS | Tests |
-|:---|:---|:---:|:---:|
-| **Rust** | Reference implementation, performance tooling | ✅ | ✅ |
-| **Go** | Server-side, high-frequency backends | ✅ | ✅ |
-| **C++** | Unreal Engine, custom engines | ✅ | ✅ |
-| **C#** | Unity, Godot | reverse-proxy | ✅ |
-| **Python** | Scripting, AI agents, research | ✅ | ✅ |
-| **JS / TS** | Node.js services | n/a | ✅ |
-
-See the [SDK Overview](https://docs.page/bradmyrick/avalanche-matchmaking-protocol/sdk-overview) for per-language setup.
-
----
-
-## Architecture
+## The architecture (each component in the right language)
 
 ```
-                    AMP v0.1.0 Architecture
-
-┌─────────────────────────────────────────────────────────────┐
-│                 Main OS Thread (Coordinator)                │
-│  - SIGINT / SIGTERM → CancellationToken propagation        │
-│  - Flush persistence before exit                           │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-         ┌─────────────────────┼─────────────────────┐
-         ▼                     ▼                     ▼
-┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
-│   amp-worker-0   │ │   amp-worker-1   │ │   amp-worker-N   │
-│ SO_REUSEPORT     │ │ SO_REUSEPORT     │ │ SO_REUSEPORT     │
-│ LocalSet + TLS   │ │ LocalSet + TLS   │ │ LocalSet + TLS   │
-│ Cap'n Proto RPC  │ │ Cap'n Proto RPC  │ │ Cap'n Proto RPC  │
-└──────────────────┘ └──────────────────┘ └──────────────────┘
-         │                     │                     │
-         │  QueueEntry (mpsc)  │  RelayerTask (mpsc) │  Vec<u8> (mpsc)
-         ▼                     ▼                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│             Tokio Multi-threaded Runtime                    │
-│  Matchmaker Loop ────── Cleanup Loop ────── Signer         │
-│  (amp-match-core queue + rules + Glicko-2)                  │
-└─────────────────────────────────────────────────────────────┘
-         │ log events                │ settlement tasks
-         ▼                           ▼
-┌──────────────────────┐  ┌──────────────────────┐
-│  Telemetry Client    │  │  Relayer Client      │
-│  Dedicated OS thread │  │  Dedicated OS thread │
-│  Persistent TCP      │  │  Persistent TCP+Auth │
-└──────────────────────┘  └──────────────────────┘
+┌──────────────────────────┐         ┌─────────────────────────────┐
+│  web/  (Next.js + TS)    │ enqueue │  Postgres                   │
+│  - /setup  /manage /play │────────▶│  - tournaments, brackets    │
+│    /cup    /claim        │  jobs   │  - relayer_jobs (the queue) │
+│  - TS bracket engine     │         │                             │
+│  - JSON API              │◀────────│                             │
+└──────────────────────────┘  poll   └─────────────────────────────┘
+          │  ethers (browser wallet, sponsor path)           ▲ drain
+          ▼                                                   │
+┌──────────────────────────┐                          ┌──────────────────┐
+│  contracts/ (Solidity)   │◀──── sign + submit ──────│  relayer/ (Rust) │
+│  AMPTournamentCup        │                          │  isolated custody│
+│  = the security boundary │                          │  holds the ONLY  │
+└──────────────────────────┘                          │  funded key      │
+                                                       └──────────────────┘
 ```
 
-Full architecture: [`docs/architecture.mdx`](docs/architecture.mdx).
+**Why this shape:**
+- **`contracts/` (Solidity)** — the on-chain escrow. This is the real security boundary: immutable, audited, holds the funds. Non-negotiable that it's Solidity/EVM.
+- **`web/` (TypeScript/Next.js)** — the product surface: UI + JSON API + the bracket engine. The bracket is pure logic running in the browser/Node — not speed- or security-critical — so TS is the right tool. One implementation.
+- **`relayer/` (Rust)** — the **only** process that holds the funded key. It drains `relayer_jobs`, signs EIP-712, submits on-chain, writes back the result. Single-purpose, minimal surface, memory-safe. The web app never sees the key; a full web compromise grants **no custody ability**. This is where Rust earns its place.
+- **Postgres** — the single source of truth for off-chain state + the queue that decouples the web from custody.
 
 ---
 
-## Project Layout
+## Repository layout
 
 ```
-AMP/
-├── amp-server/        # Matchmaker & Verifier (Rust, Cap'n Proto, SO_REUSEPORT)
-├── amp-relayer/       # Settlement bridge (Rust, sled queue, EIP-1559)
-├── amp-match-core/    # Embeddable matchmaking library (Glicko-2 + rules + queue)
-├── amp-telemetry/     # Binary telemetry log with JSON export
-├── amp-tls/           # Shared rustls TLS acceptor factory
-├── amp-sdk/           # Multi-language SDKs & Cap'n Proto schemas
-├── amp-loadtest/      # Load testing tool
-├── contracts/         # Solidity (Forge, ^0.8.33, OpenZeppelin v5.6.1)
-├── docs/              # Documentation (docs.page source)
-├── docker/            # Multi-stage Dockerfiles
-├── trace-viewer/      # Telemetry binary log viewer
-└── scripts/           # Deployment utilities
+amp/
+├── web/            # Next.js + TS: UI, JSON API, bracket engine, Postgres client
+│   └── src/lib/engine/    # the TS bracket engine (single-elim, round-robin, Swiss)
+├── relayer/        # Rust: isolated custodial relayer (job queue → sign → submit)
+├── contracts/      # Solidity (Forge): AMPTournamentCup + legacy escrow
+├── docs/           # docs.page source → docs.page/bradmyrick/Avalanche-Matchmaking-Protocol
+├── migrations/     # Postgres schema (tournaments, brackets, relayer_jobs)
+└── scripts/        # deployment utilities
 ```
 
 ---
 
-## Smart Contracts (Live on Fuji)
+## Smart contract (Fuji)
 
-| Contract | Address |
-|:---|:---|
-| `AMPRegistry` | [`0x27E02ebA98D2A50Cd1079b0a611320b05A278005`](https://testnet.snowtrace.io/address/0x27E02ebA98D2A50Cd1079b0a611320b05A278005) |
-| `AMPSettlement` | [`0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD`](https://testnet.snowtrace.io/address/0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD) |
-| `AMPTimelock` | [`0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143`](https://testnet.snowtrace.io/address/0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143) |
+| Contract | Address | Role |
+|:---|:---|:---|
+| `AMPTournamentCup` | [`0x7c743c1c9ae3e7a65d030098f2249b7787d66dff`](https://testnet.snowtrace.io/address/0x7c743c1c9ae3e7a65d030098f2249b7787d66dff) | Sponsor-funded prize pool, EIP-712 verifier-attested finalization, winner pull-claims |
 
-Both contracts are `TimelockController`-wrapped (governance finalized). Deployment manifest: [`contracts/deployment-fuji.json`](contracts/deployment-fuji.json). C-Chain mainnet deployment follows the [Roadmap](https://docs.page/bradmyrick/avalanche-matchmaking-protocol/roadmap) v0.3 milestone.
+Deployment + end-to-end demo manifest: [`contracts/deployment-fuji-tournament.json`](contracts/deployment-fuji-tournament.json). Forge tests: 16/16.
+
+The legacy `AMPRegistry`/`AMPSettlement` wagering contracts remain deployed + governance-finalized on Fuji but are not used by the tournament product — see [`contracts/`](contracts/).
 
 ---
 
-## Getting Started
+## Run it
 
-### Prerequisites
-
-- Rust 1.91+ (the `rust-toolchain.toml` pins the version)
-- capnproto C library (`apt install capnproto` or `brew install capnp`)
-- Foundry (for contract builds)
-- Docker + Docker Compose (for containerized deployment)
-
-### Local Development
+### Database (Neon Postgres)
+Provision on [neon.tech](https://neon.tech), then set `DATABASE_URL` to the **pooled** connection string — the one with `-pooler` in the hostname (e.g. `ep-…-pooler…neon.tech`), **not** the direct endpoint. The pooled endpoint is required because the web runs on Vercel serverless functions (many short-lived connections); the direct endpoint exhausts connections under load. The relayer uses the same `DATABASE_URL`.
 
 ```bash
-# Build all Rust components
-cargo build --release
-
-# Run the matchmaker/verifier
-AMP_ADDR=0.0.0.0:50051 \
-AMP_SETTLEMENT_ADDRESS=0x... \
-VERIFIER_KEY_FILE=./secrets/verifier_key.txt \
-RELAYER_RPC_ADDR=localhost:50052 \
-RELAYER_API_KEY_FILE=./secrets/relayer_api_key.txt \
-./target/release/AMP-Server
-
-# Run the settlement relayer
-FUJI_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc \
-CONTRACT_REGISTRY=0x... \
-CONTRACT_SETTLEMENT=0x... \
-RELAYER_PRIVATE_KEY_FILE=./secrets/relayer_key.txt \
-RELAYER_API_KEY_FILE=./secrets/relayer_api_key.txt \
-./target/release/amp-relayer
-
-# Run the telemetry receiver
-./target/release/amp-telemetry 0.0.0.0:9317 ./telemetry.bin
+cd web && export DATABASE_URL="$(grep '^DATABASE_URL=' .env.local | cut -d= -f2-)" && npm run db:migrate
 ```
 
-### Docker Deployment
-
+### Web
 ```bash
-mkdir -p secrets
-echo "0xYOUR_PRIVATE_KEY" > secrets/verifier_key.txt
-echo "0xYOUR_RELAYER_KEY" > secrets/relayer_key.txt
-echo "your-api-key-here" > secrets/relayer_api_key.txt
-
-cp .env.example .env  # Edit with your contract addresses and RPC URL
-
-docker compose up --build -d
+cd web && npm install
+# requires DATABASE_URL (Neon, pooled) and, for card payments, PayPal creds
+npm run dev          # http://localhost:3000
+npm test             # bracket engine property tests
+npm run build
 ```
 
-See [.env.example](.env.example) for the full environment-variable reference. For an end-to-end walkthrough, read the [Beta Guide](https://docs.page/bradmyrick/avalanche-matchmaking-protocol/beta-guide).
+### Relayer (the custody process — run separately)
+```bash
+cd relayer && cargo run --release
+# requires DATABASE_URL (same Neon) + AMP_RELAYER_KEY (funded Fuji EOA)
+# must run as a persistent daemon (Fly.io / Railway / Render / VPS) — NOT on Vercel
+```
+
+### Contracts
+```bash
+cd contracts && forge test -vvv
+```
 
 ---
 
-## Testing & Verification
+## Security model
 
-| Target | Command |
-|:---|:---|
-| Rust unit tests | `cargo test --workspace` |
-| Solidity contracts | `cd contracts && forge test -vvv` |
-| Embeddable library | `cargo test -p amp-match-core` |
-| C++ SDK tests | `cd amp-sdk/cpp && cmake -B build-tests && cmake --build build-tests && ./build-tests/amp_tests` |
-| C# SDK tests | `cd amp-sdk/csharp/AmpSdk.Tests && dotnet test` |
-| Go SDK tests | `make test-sdk-go` |
-| Python SDK tests | `cd amp-sdk/python && pytest` |
-| JS SDK tests | `cd amp-sdk/js && npm test` |
-| E2E integration | `make test-integration` |
-| Supply-chain | `cargo deny --workspace check --config deny.toml` |
-| Lint | `make lint` |
-| Format check | `make format` |
-
----
-
-## Security
-
-- All private keys loaded via `*_FILE` env vars or Docker secrets (never inline)
-- API keys hashed (SHA-256) with constant-time comparison
-- Inter-service API key required by default
-- TLS opt-in, enforced when configured (no silent fallback)
-- Non-root containers in all Docker images
-- Input validation at RPC boundary
-- Submitter signature verified on `submitOutcome` — recovered address must match the caller's `player_id`
-- Both contracts `TimelockController`-wrapped at deploy time
-- Persistence explicitly flushed on shutdown
+- **Pull-payment only** — winners call `claimPrize`; no push transfers to untrusted addresses.
+- **`AMPTournamentCup`** is `ReentrancyGuard` + `Pausable` + `Ownable2Step`; payout splits must sum to exactly 10000 bps; placements bounded.
+- **Key isolation** — the funded key lives only in the Rust relayer's env (production target: KMS/HSM, so the key never exists in software). The web process has zero custody authority.
+- **EIP-712 attestation** — finalization is verifier-signed; the digest is computed identically in Solidity, the browser (ethers), and the Rust relayer.
+- All keys loaded via env, never committed.
 
 For the responsible disclosure policy, see [`SECURITY.md`](SECURITY.md).
 
@@ -232,4 +109,4 @@ For the responsible disclosure policy, see [`SECURITY.md`](SECURITY.md).
 
 ## License
 
-AMP is licensed under the **Apache License, Version 2.0**. See the [LICENSE](LICENSE) file for the full terms.
+Apache License 2.0. See [LICENSE](LICENSE).

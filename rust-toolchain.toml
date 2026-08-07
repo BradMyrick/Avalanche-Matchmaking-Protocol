@@ -1,12 +1,12 @@
-# Phase 2.3 — pinned Rust toolchain for reproducible builds.
-# Edition 2024 requires Rust 1.85+; alloy 2.x requires 1.91+. Pinning to
-# 1.91.x keeps the project on a known-tested baseline that satisfies all
-# current deps. CI consumes this file automatically.
+# Pinned Rust toolchain for reproducible builds.
+# Edition 2024 requires Rust 1.85+. The live crates (amp-tournament,
+# amp-match-core) are serde-only; this baseline is the latest stable that
+# all current deps and CI are tested against.
 #
-# To bump: update both `channel` and any `dtolnay/rust-toolchain@stable`
-# references in `.github/workflows/*.yml` in the same commit, then run the
-# full test suite locally.
+# To bump: update `channel` (and any `dtolnay/rust-toolchain@<ver>` refs in
+# `.github/workflows/*.yml`) in the same commit, then run the full suite:
+#   cargo test --workspace && (cd contracts && forge test) && (cd ../amp-demo-website && npm test && npm run build)
 [toolchain]
-channel = "1.91.0"
+channel = "1.97.1"
 components = ["rustfmt", "clippy", "rust-src"]
 profile = "minimal"

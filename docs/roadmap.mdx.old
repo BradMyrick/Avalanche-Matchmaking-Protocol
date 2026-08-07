@@ -1,0 +1,93 @@
+---
+title: Roadmap
+---
+
+# Roadmap
+
+AMP is becoming the verifiable tournament engine for competitive gaming on Avalanche. The protocol's hard primitives — matchmaking, verifier attestation, on-chain escrow + settlement, and six language SDKs — are live on Fuji today. The tournament layer (brackets, sponsored prize pools, portable skill credentials) is the active build direction on top of those primitives.
+
+The path from here runs through clearly defined milestones. Each milestone unlocks new capabilities without breaking what already works.
+
+---
+
+## Where we are today — Open Beta (Fuji)
+
+**Primitives, live and source-verified:**
+
+- **Matchmaking**: Glicko-2 ratings, composable rule engine (skill, region, language, latency, ping, skill-decay), sorted-MMR bucketed queue with 50ms tick.
+- **Authentication**: EIP-191 challenge-response, single-use nonces, rate-limited.
+- **Outcome signing**: EIP-712 verifier signatures, cross-language byte-identical digest (KAT-verified in CI across Rust, Go, C++, C#, Python, JS, Solidity).
+- **On-chain settlement**: escrow + verifier-attested payouts, `TimelockController`-governed.
+- **SDKs**: Rust, Go, C++ (Unreal), C# (Unity/Godot), Python, JS — all shipping tests in CI.
+- **Embeddable library**: `amp-match-core` crate with the rating math, rules, and queue.
+
+**Tournament escrow, live:** [`AMPTournamentCup`](https://testnet.snowtrace.io/address/0x7c743c1c9ae3e7a65d030098f2249b7787d66dff) — sponsor-funded prize pools, EIP-712 verifier-attested finalization, winner pull-claims — is deployed on Fuji, and a real end-to-end tournament (AMP Cup #1) has run on it: 0.05 AVAX funded → attested finalization → both winners claimed → contract drained to 0.
+
+The off-chain bracket engine (the `amp-tournament` crate) drives the rest: pairing players into rounds, seeding from Glicko-2 ratings, and progressing the bracket to finalization. It lands as v0.2 below.
+
+---
+
+## What's next
+
+### v0.2 — Tournament engine + organizer flow
+
+- **`amp-tournament` Rust crate**: single-elim, double-elim, Swiss, round-robin bracket logic; seeding from Glicko-2; progression + finalization.
+- **Organizer setup page**: configure a tournament, fund the prize pool, and manage it from the browser — no CLI required.
+- **HTTP gateway**: so the website and organizer UI can drive real tournament flows on Fuji. (The server today is Cap'n Proto RPC only — browsers cannot call it directly.)
+- **Portable skill credentials**: every match mints an EIP-712-signed skill record players keep across AMP events.
+- **Party / squad matchmaking** with role-complementarity scoring; team Glicko-2 / TrueSkill.
+
+### v0.3 — Mainnet (Avalanche C-Chain)
+
+- Independent third-party security audit of `AMPTournamentCup` and the existing contracts.
+- 72-hour soak at 1k concurrent connections.
+- Chaos testing (`kill -9 × 100` — assert no duplicate settlement, no fund lock).
+- Multisig over the `TimelockController` proposer role.
+- Mainnet deployment with deterministic `CREATE2` and verified-bytecode gate.
+
+### v0.4 — Decentralization
+
+- **N-of-M verifier set** with on-chain key rotation.
+- **Optimistic settlement window** — any party can dispute with cryptographic evidence.
+- **Player-side fraud-proof submission** so users don't depend solely on operator liveness.
+- **Verifier DAO** for whitelist governance and evidence requirements.
+- **Open verifier node release** for third-party hosting.
+
+### v1.0 — The AMP L1
+
+- Transition to a dedicated **Avalanche L1** (appchain) for high-frequency settlement.
+- Warp messaging for cross-chain tournament prize pools.
+- 10,000+ matches per day sustained target.
+
+---
+
+## How we ship
+
+Every milestone follows the same discipline:
+
+1. **Scope it in the schema first.** New rule types land as stubs before they're wired up — no schema breaks later.
+2. **Test in CI before tag.** Every Rust crate, every SDK, every contract test, plus the E2E integration test, must pass on every PR.
+3. **Document before release.** The docs you're reading now reflect what's shipping today; release notes cover the deltas.
+4. **Timelock every economic change.** No same-block operator action can move funds or change fees.
+
+---
+
+## Comparisons
+
+### vs tournament platforms (Start.gg, Challonge, FACEIT)
+
+These platforms run brackets well but settle payouts manually — Discord DMs, spreadsheet math, and trust. AMP runs the bracket **and** settles the prize pool verifiably on-chain: sponsors fund escrow up front, champions pull-claim instantly, every payout is a public Avalanche transaction. Where they're ahead today: mature bracket UI, large existing user bases, broadcast tooling. The v0.2 milestone closes the bracket-engine gap.
+
+### vs AWS FlexMatch / Open Match
+
+FlexMatch and Open Match are matchmaking middleware. AMP is a tournament engine that *also* settles — escrow + verifier attestation by default, no cloud lock-in, and the embeddable `amp-match-core` library for teams that want the rating/queue algorithms without the full service.
+
+### vs custom in-house backends
+
+AMP replaces the matchmaking + settlement surface of a custom backend. The embeddable `amp-match-core` library is specifically designed for teams that want AMP's algorithms without running the AMP service.
+
+---
+
+## Long-term vision (2027+)
+
+AMP aims to support the full range of competitive play — from 1v1 ranked matches to massive-scale battle royales and persistent-world territorial control — all settled on Avalanche. The protocol's separation of matchmaking (off-chain, fast) from settlement (on-chain, verifiable) is what makes that range possible: the same escrow-and-attest model scales from two players to thousands, and from a single sponsored cup to a global ranked season.

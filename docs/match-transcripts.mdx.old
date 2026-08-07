@@ -1,0 +1,67 @@
+---
+title: Match Transcripts
+---
+
+# Match Transcripts
+
+At the core of the Avalanche Matchmaking Protocol (AMP) is the **Match Transcript**. To securely settle matches off-chain without blind trust, AMP requires a verifiable, deterministic record of everything that occurred during the game.
+
+The Transcripts serve as irrefutable proof of gameplay, allowing the AMP Verifier to validate outcomes securely and transparently.
+
+## What is a Transcript?
+
+A match transcript is an ordered cryptographic log of every state-altering event in a match. Because AMP uses [Cap'n Proto](https://capnproto.org/) for lightning-fast, zero-copy serialization, the transcript can be built efficiently in memory during the match and hashed instantaneously.
+
+Transcripts consist of streams of:
+- **`MatchConfig`**: The initial starting state, RNG seeds, and player identifiers.
+- **`InputFrames`**: Button presses, mouse movements, or high-level commands submitted by players at specific tick numbers.
+- **`GameEvents`**: Significant state changes (e.g., "Player A damaged Player B", "Item dropped").
+
+## Determinism & Hashing
+
+For AMP to function in `RT_HASH_AGREE` (Real-Time Hash Agreement) mode, the game engine must be **deterministic**. This means that given the exact same `MatchConfig` and sequence of `InputFrames`, the game state will resolve identically on every single machine.
+
+### The Rolling Hash
+
+Instead of sending the entire gigabyte-sized replay file to the Verifier, clients maintain a **rolling hash** of the transcript:
+
+1. Let `H_0` be the hash of `MatchConfig`.
+2. For every tick `t`, calculate `H_t = Hash(H_t-1 || TickData_t)`.
+3. Clients periodically send `H_t` to the Verifier (e.g., every 60 ticks) to checkpoint their state.
+
+If player A's hash diverges from player B's hash at tick 1200, the Verifier instantly knows a desync or cheating attempt has occurred and can halt the match.
+
+## Standard Transcript Fields
+
+The transcript data structure (defined via Cap'n Proto schemas) is minimal but extensible.
+
+```capnp
+struct Transcript {
+  matchId @0 :Text;
+  gameId @1 :Text;
+  startTime @2 :UInt64;
+  configHash @3 :Data;
+  finalStateHash @4 :Data;
+  inputs @5 :List(InputFrame);
+}
+```
+
+### Hashing Mechanism
+
+AMP utilizes `SHA-256` for transcript hashing. While blazing fast, it is collision-resistant enough to ensure players cannot artificially craft a fake sequence of `InputFrames` that results in a winning state hash.
+
+---
+
+## Examples of Transcript Verification
+
+### Scenario A: Honest Players
+1. Alice and Bob play a fast-paced fighting game.
+2. The match concludes. Alice's client states she won with Final Hash `0xABCD...`.
+3. Bob's client states Alice won with Final Hash `0xABCD...`.
+4. The Verifier sees identical hashes, verifies signatures, and signs off on the settlement for Alice.
+
+### Scenario B: Desync or Cheat Attempt
+1. Alice and Bob are playing. At tick 500, Alice modifies her client memory to give herself infinite health.
+2. At tick 600, Alice's game client reports a rolling state hash of `0x1111...`.
+3. Bob's unmodified client reports a rolling state hash of `0x2222...` for tick 600.
+4. The Verifier immediately detects the mismatch, pauses the match, and flags it for **Asynchronous Verification** (`ASYNC_VERIFIER`), where the server will replay the full transcript from tick 0 to determine who manipulated the state.
