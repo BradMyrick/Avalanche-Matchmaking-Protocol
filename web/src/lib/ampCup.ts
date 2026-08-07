@@ -59,15 +59,45 @@ export async function signFinalize(
   );
 }
 
-/** Connect to an injected browser wallet (Core / MetaMask) on Fuji. */
+/** Connect to an injected browser wallet (Core / MetaMask) on Fuji.
+ *  Auto-prompts to switch/add the Fuji network instead of erroring. */
 export async function connectWallet(): Promise<ethers.BrowserProvider> {
-  const ethereum = (window as unknown as { ethereum?: { request: (a: unknown) => Promise<unknown> } }).ethereum;
+  const ethereum = (window as unknown as { ethereum?: { request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown> } }).ethereum;
   if (!ethereum) throw new Error("No wallet found. Install the Core or MetaMask wallet.");
   await ethereum.request({ method: "eth_requestAccounts" });
   const provider = new ethers.BrowserProvider(ethereum);
   const network = await provider.getNetwork();
+  const chainIdHex = "0xA869"; // 43113
+
   if (Number(network.chainId) !== FUJI_CHAIN_ID) {
-    throw new Error(`Switch your wallet to the Avalanche Fuji testnet (chain ${FUJI_CHAIN_ID}).`);
+    try {
+      await ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: chainIdHex }],
+      });
+    } catch (switchError: any) {
+      // 4902 = chain not added to wallet; add it.
+      if (switchError.code === 4902 || switchError.code === -32603) {
+        await ethereum.request({
+          method: "wallet_addEthereumChain",
+          params: [{
+            chainId: chainIdHex,
+            chainName: "Avalanche Fuji Testnet",
+            nativeCurrency: { name: "AVAX", symbol: "AVAX", decimals: 18 },
+            rpcUrls: ["https://api.avax-test.network/ext/bc/C/rpc"],
+            blockExplorerUrls: ["https://testnet.snowtrace.io"],
+          }],
+        });
+      } else {
+        throw new Error(`Could not switch to Fuji testnet: ${switchError.message}`);
+      }
+    }
+    // Re-check after the switch/add.
+    await provider._detectNetwork?.();
+    const newNet = await provider.getNetwork();
+    if (Number(newNet.chainId) !== FUJI_CHAIN_ID) {
+      throw new Error("Please switch your wallet to the Avalanche Fuji testnet and try again.");
+    }
   }
   return provider;
 }
