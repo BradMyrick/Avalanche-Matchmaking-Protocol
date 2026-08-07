@@ -216,7 +216,7 @@ async fn fund_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, pool
         let paypal_id = job.payload.get("paypalOrderId").and_then(|v| v.as_str()).unwrap_or("");
         sqlx::query(
             r#"INSERT INTO tournaments (tournament_id, sponsor, prize_pool_wei, token, payout_bps, winner_wallets, state, mode, manage_token, paypal_order_id, tx_hash, created_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+               VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11,now())
                ON CONFLICT (tournament_id) DO UPDATE SET tx_hash = EXCLUDED.tx_hash"#,
         )
         .bind(tid_i64)
@@ -240,7 +240,7 @@ async fn fund_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, pool
                 "results": [],
             });
             sqlx::query(
-                r#"INSERT INTO brackets (tournament_id, state, updated_at) VALUES ($1, $2, now())
+                r#"INSERT INTO brackets (tournament_id, state, updated_at) VALUES ($1, $2::jsonb, now())
                    ON CONFLICT (tournament_id) DO UPDATE SET state = EXCLUDED.state"#,
             )
             .bind(tid_i64)

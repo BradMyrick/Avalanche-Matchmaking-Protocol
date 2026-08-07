@@ -2,7 +2,8 @@
 
 ALTER TABLE tournaments
   ADD COLUMN IF NOT EXISTS organizer_wallet TEXT,
-  ADD COLUMN IF NOT EXISTS manage_token     TEXT;
+  ADD COLUMN IF NOT EXISTS manage_token     TEXT,
+  ADD COLUMN IF NOT EXISTS mode             TEXT;
 
 CREATE TABLE IF NOT EXISTS report_nonces (
   wallet        TEXT      NOT NULL,

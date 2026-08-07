@@ -154,7 +154,7 @@ export default function FujiNetwork() {
                                 <Coins className="w-5 h-5 text-yellow-400" />
                                 <span className="font-bold">AMPTournamentCup</span>
                             </div>
-                            <div className="text-[11px] text-zinc-500 mb-3">Live · sponsor-funded prize pools</div>
+                            <div className="text-[11px] text-zinc-500 mb-3">Live · sponsor-funded prize pools · 2% protocol fee</div>
                             <a
                                 href="https://testnet.snowtrace.io/address/0x7c743c1c9ae3e7a65d030098f2249b7787d66dff"
                                 target="_blank"
@@ -166,55 +166,16 @@ export default function FujiNetwork() {
                             </a>
                         </div>
 
-                        <div className="glass-panel p-6 border-brand-red/20">
-                            <div className="flex items-center gap-3 mb-4 text-zinc-300">
-                                <ShieldCheck className="w-5 h-5 text-brand-red" />
-                                <span className="font-bold">AMPRegistry</span>
+                        <div className="glass-panel p-6 border-white/5 opacity-50">
+                            <div className="flex items-center gap-2 mb-2 text-zinc-500">
+                                <span className="text-[10px] font-bold tracking-widest uppercase text-zinc-600">Legacy · not used by the tournament product</span>
                             </div>
-                            <div className="text-[11px] text-zinc-500 mb-3">Escrows every prize pool</div>
-                            <a
-                                href="https://testnet.snowtrace.io/address/0x27E02ebA98D2A50Cd1079b0a611320b05A278005"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="bg-black/40 rounded-lg p-3 flex items-center justify-between border border-white/5 hover:border-brand-red/40 transition-colors group"
-                            >
-                                <code className="text-xs text-brand-cyan group-hover:text-brand-red">0x27E02ebA...278005</code>
-                                <Hash className="w-3 h-3 text-zinc-600" />
-                            </a>
-                        </div>
-
-                        <div className="glass-panel p-6 border-brand-cyan/20">
-                            <div className="flex items-center gap-3 mb-4 text-zinc-300">
-                                <Activity className="w-5 h-5 text-brand-cyan" />
-                                <span className="font-bold">AMPSettlement</span>
+                            <div className="space-y-1.5 text-[11px] text-zinc-600">
+                                <div className="flex justify-between"><span>AMPRegistry</span><code className="text-zinc-700">0x27E02ebA…278005</code></div>
+                                <div className="flex justify-between"><span>AMPSettlement</span><code className="text-zinc-700">0xc1b12a7F…3c9eD</code></div>
+                                <div className="flex justify-between"><span>AMPTimelock</span><code className="text-zinc-700">0xb6d9A7e2…08143</code></div>
                             </div>
-                            <div className="text-[11px] text-zinc-500 mb-3">EIP-712 payouts, pull-only claims</div>
-                            <a
-                                href="https://testnet.snowtrace.io/address/0xc1b12a7Ffad6CeFf045064f9fE3E8879F0F3c9eD"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="bg-black/40 rounded-lg p-3 flex items-center justify-between border border-white/5 hover:border-brand-cyan/40 transition-colors group"
-                            >
-                                <code className="text-xs text-brand-cyan">0xc1b12a7F...3c9eD</code>
-                                <Hash className="w-3 h-3 text-zinc-600" />
-                            </a>
-                        </div>
-
-                        <div className="glass-panel p-6 border-green-500/20">
-                            <div className="flex items-center gap-3 mb-4 text-zinc-300">
-                                <ShieldCheck className="w-5 h-5 text-green-400" />
-                                <span className="font-bold">AMPTimelock</span>
-                            </div>
-                            <div className="text-[11px] text-zinc-500 mb-3">Governs all economic changes</div>
-                            <a
-                                href="https://testnet.snowtrace.io/address/0xb6d9A7e2C6d1B551C8166d9E489a8BA39B008143"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="bg-black/40 rounded-lg p-3 flex items-center justify-between border border-white/5 hover:border-green-500/40 transition-colors group"
-                            >
-                                <code className="text-xs text-brand-cyan group-hover:text-green-400">0xb6d9A7e2...08143</code>
-                                <Hash className="w-3 h-3 text-zinc-600" />
-                            </a>
+                            <p className="text-[10px] text-zinc-700 mt-2">Deployed 1v1 wagering escrow — governance-finalized, superseded by AMPTournamentCup.</p>
                         </div>
                     </div>
 
