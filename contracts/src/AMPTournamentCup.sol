@@ -69,7 +69,9 @@ contract AMPTournamentCup is Ownable2Step, Pausable, EIP712, ReentrancyGuard {
     error InvalidFee();
     error DeadlinePassedImplicit();
 
-    event TournamentCreated(uint256 indexed tournamentId, address indexed sponsor, address token, uint256 prizePool, address verifier);
+    event TournamentCreated(
+        uint256 indexed tournamentId, address indexed sponsor, address token, uint256 prizePool, address verifier
+    );
     event TournamentFinalized(uint256 indexed tournamentId, bytes32 indexed winnersRoot);
     event PrizeClaimed(uint256 indexed tournamentId, uint256 indexed placement, address winner, uint256 amount);
     event TournamentCancelled(uint256 indexed tournamentId, uint256 refund);
@@ -133,11 +135,13 @@ contract AMPTournamentCup is Ownable2Step, Pausable, EIP712, ReentrancyGuard {
     /// @param payoutBps    Per-placement share in bps. index 0 = 1st place. Must sum to 10000.
     /// @param verifier     Address authorized to attest winners (EIP-712 signer).
     /// @param finalizeDeadline Timestamp after which an unfinalized cup may be refunded.
-    function createTournament(
-        uint16[] calldata payoutBps,
-        address verifier,
-        uint64 finalizeDeadline
-    ) external payable whenNotPaused nonReentrant returns (uint256 tournamentId) {
+    function createTournament(uint16[] calldata payoutBps, address verifier, uint64 finalizeDeadline)
+        external
+        payable
+        whenNotPaused
+        nonReentrant
+        returns (uint256 tournamentId)
+    {
         if (msg.value == 0) revert InvalidPayout();
         if (verifier == address(0)) revert ZeroAddress();
         if (payoutBps.length == 0 || payoutBps.length > MAX_PLACEMENTS) revert InvalidPayout();
@@ -214,8 +218,7 @@ contract AMPTournamentCup is Ownable2Step, Pausable, EIP712, ReentrancyGuard {
         if (winners.length != t.payoutBps.length) revert WinnerCountMismatch();
 
         bytes32 winnersRoot = _hashWinners(winners);
-        bytes32 structHash =
-            keccak256(abi.encode(TOURNAMENT_RESULT_TYPEHASH, tournamentId, winnersRoot));
+        bytes32 structHash = keccak256(abi.encode(TOURNAMENT_RESULT_TYPEHASH, tournamentId, winnersRoot));
         bytes32 digest = _hashTypedDataV4(structHash);
         address signer = ECDSA.recover(digest, signature);
         if (signer != t.verifier) revert InvalidSignature();

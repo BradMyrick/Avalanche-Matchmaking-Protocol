@@ -46,14 +46,9 @@ contract AMPTournamentCupTest is Test {
         return keccak256(abi.encodePacked(words));
     }
 
-    function _signFinalize(uint256 tournamentId, address[] memory winners)
-        internal
-        view
-        returns (bytes memory)
-    {
+    function _signFinalize(uint256 tournamentId, address[] memory winners) internal view returns (bytes memory) {
         bytes32 winnersRoot = _hashWinners(winners);
-        bytes32 structHash =
-            keccak256(abi.encode(cup.TOURNAMENT_RESULT_TYPEHASH(), tournamentId, winnersRoot));
+        bytes32 structHash = keccak256(abi.encode(cup.TOURNAMENT_RESULT_TYPEHASH(), tournamentId, winnersRoot));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", cup.domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(verifierPrivKey, digest);
         return abi.encodePacked(r, s, v);
@@ -124,8 +119,7 @@ contract AMPTournamentCupTest is Test {
         address[] memory w = _winners();
         // Sign with a wrong key.
         bytes32 winnersRoot = _hashWinners(w);
-        bytes32 structHash =
-            keccak256(abi.encode(cup.TOURNAMENT_RESULT_TYPEHASH(), id, winnersRoot));
+        bytes32 structHash = keccak256(abi.encode(cup.TOURNAMENT_RESULT_TYPEHASH(), id, winnersRoot));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", cup.domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xBEEF, digest);
         bytes memory badSig = abi.encodePacked(r, s, v);
@@ -253,8 +247,7 @@ contract AMPTournamentCupTest is Test {
         address[] memory w = new address[](1);
         w[0] = address(0x1234);
         bytes32 winnersRoot = _hashWinners(w);
-        bytes32 structHash =
-            keccak256(abi.encode(cup.TOURNAMENT_RESULT_TYPEHASH(), uint256(1), winnersRoot));
+        bytes32 structHash = keccak256(abi.encode(cup.TOURNAMENT_RESULT_TYPEHASH(), uint256(1), winnersRoot));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", cup.domainSeparator(), structHash));
         // Smoke test: digest must be non-zero and deterministic for this layout.
         assertNotEq(digest, bytes32(0));
