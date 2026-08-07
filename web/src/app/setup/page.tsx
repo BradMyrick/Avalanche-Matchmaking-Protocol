@@ -474,6 +474,7 @@ export default function SetupPage() {
                   <Row label="Prize" value={`${amount} ${currency}`} />
                   <Row label="Split" value={preset.label} />
                   <Row label="Winners" value={`${placements} wallet${placements > 1 ? "s" : ""}`} />
+                  <Row label="Protocol fee" value="2% on payouts" />
                 </div>
 
                 {busy && (
