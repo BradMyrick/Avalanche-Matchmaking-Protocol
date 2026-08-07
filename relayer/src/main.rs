@@ -7,9 +7,9 @@
 use std::env;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use ethers::contract::abigen;
-use ethers::core::k256::{ecdsa::SigningKey, FieldBytes};
+use ethers::core::k256::{FieldBytes, ecdsa::SigningKey};
 use ethers::core::types::{Address, U256};
 use ethers::middleware::SignerMiddleware;
 use ethers::providers::{Http, Middleware, Provider};
@@ -129,7 +129,9 @@ async fn poll_once(pool: &PgPool, provider: &Arc<SignerProvider>, key_str: &str)
     let job = Job {
         id: rec.get("id"),
         kind: rec.get("kind"),
-        payload: serde_json::from_str(&rec.get::<Option<String>, _>("payload").unwrap_or_default())?,
+        payload: serde_json::from_str(
+            &rec.get::<Option<String>, _>("payload").unwrap_or_default(),
+        )?,
     };
 
     info!(job_id = job.id, kind = %job.kind, "processing job");
@@ -172,7 +174,12 @@ async fn poll_once(pool: &PgPool, provider: &Arc<SignerProvider>, key_str: &str)
     Ok(true)
 }
 
-async fn fund_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, pool: &PgPool) -> Result<(Option<i64>, Option<String>)> {
+async fn fund_job(
+    provider: &Arc<SignerProvider>,
+    job: &Job,
+    key_str: &str,
+    pool: &PgPool,
+) -> Result<(Option<i64>, Option<String>)> {
     let p: FundPayload = serde_json::from_value(job.payload.clone())?;
 
     let cup: Address = CUP_ADDRESS_HEX.parse()?;
@@ -203,9 +210,14 @@ async fn fund_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, pool
     if p.mode.as_deref() == Some("instant") && !p.winner_wallets.is_empty() {
         let winners = parse_addresses(&p.winner_wallets)?;
         let sig = finalize_signature(key_str, tournament_id.as_u64(), &winners)?;
-        let fin_call = contract.finalize_tournament(tournament_id, winners, sig.into()).gas(400_000);
+        let fin_call = contract
+            .finalize_tournament(tournament_id, winners, sig.into())
+            .gas(400_000);
         let receipt = fin_call.send().await?.await?.context("finalize reverted")?;
-        return Ok((Some(tid_i64), Some(format!("{:?}", receipt.transaction_hash))));
+        return Ok((
+            Some(tid_i64),
+            Some(format!("{:?}", receipt.transaction_hash)),
+        ));
     }
 
     // Bracket mode: provision DB rows (P0-5) — the relayer is the authority.
@@ -213,7 +225,11 @@ async fn fund_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, pool
         let sponsor_hex = format!("{:?}", verifier);
         let prize_wei = value.to_string();
         let payout_json = serde_json::to_string(&p.payout_bps)?;
-        let paypal_id = job.payload.get("paypalOrderId").and_then(|v| v.as_str()).unwrap_or("");
+        let paypal_id = job
+            .payload
+            .get("paypalOrderId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         sqlx::query(
             r#"INSERT INTO tournaments (tournament_id, sponsor, prize_pool_wei, token, payout_bps, winner_wallets, state, mode, manage_token, paypal_order_id, tx_hash, created_at)
                VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11,now())
@@ -253,7 +269,12 @@ async fn fund_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, pool
     Ok((Some(tid_i64), Some(create_tx_hash)))
 }
 
-async fn finalize_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, pool: &PgPool) -> Result<(Option<i64>, Option<String>)> {
+async fn finalize_job(
+    provider: &Arc<SignerProvider>,
+    job: &Job,
+    key_str: &str,
+    pool: &PgPool,
+) -> Result<(Option<i64>, Option<String>)> {
     // P0-1: the job carries ONLY { tournamentId }. Winners are loaded from the
     // bracket's computedWinners (written by the authenticated finalize route).
     #[derive(Deserialize)]
@@ -287,7 +308,9 @@ async fn finalize_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, 
     let cup: Address = CUP_ADDRESS_HEX.parse()?;
     let contract = AMPTournamentCup::new(cup, Arc::clone(provider));
     let sig = finalize_signature(key_str, tid as u64, &addrs)?;
-    let fin_call = contract.finalize_tournament(tid_u256, addrs, sig.into()).gas(400_000);
+    let fin_call = contract
+        .finalize_tournament(tid_u256, addrs, sig.into())
+        .gas(400_000);
     let receipt = fin_call.send().await?.await?.context("finalize reverted")?;
     Ok((Some(tid), Some(format!("{:?}", receipt.transaction_hash))))
 }
@@ -323,7 +346,9 @@ fn eip712_finalize_digest(tournament_id: u64, winners: &[Address]) -> [u8; 32] {
 
     // Domain separator
     let mut bs = Vec::new();
-    bs.extend_from_slice(&keccak256(b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
+    bs.extend_from_slice(&keccak256(
+        b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+    ));
     bs.extend_from_slice(&keccak256(b"AMPTournamentCup"));
     bs.extend_from_slice(&keccak256(b"1"));
     bs.extend_from_slice(&u256_bytes(U256::from(FUJI_CHAIN_ID)));
@@ -366,6 +391,9 @@ fn addr_bytes(a: &Address) -> [u8; 32] {
 
 fn parse_addresses(strs: &[String]) -> Result<Vec<Address>> {
     strs.iter()
-        .map(|s| s.parse::<Address>().with_context(|| format!("bad address: {s}")))
+        .map(|s| {
+            s.parse::<Address>()
+                .with_context(|| format!("bad address: {s}"))
+        })
         .collect()
 }
