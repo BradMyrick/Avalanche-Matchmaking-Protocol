@@ -151,8 +151,9 @@ export default function ManagePage() {
         const provider = await connectWallet();
         const signer = await provider.getSigner();
         const cup = new ethers.Contract(CUP_ADDRESS, AMPCUP_ABI, signer);
-        const sig = await signFinalize(signer, tid, winnerWallets);
-        const tx = await cup.finalizeTournament(tid, winnerWallets, sig, { gasLimit: 400_000 });
+        const cleanWinners = winnerWallets.map((w) => ethers.getAddress(w));
+        const sig = await signFinalize(signer, tid, cleanWinners);
+        const tx = await cup.finalizeTournament(tid, cleanWinners, sig, { gasLimit: 400_000 });
         const rcpt = await tx.wait();
         if (record) setRecord({ ...record, state: "FINALIZED", txHash: rcpt?.hash ?? null, winnerWallets });
       }
@@ -334,7 +335,7 @@ export default function ManagePage() {
                 className="px-6 py-3 rounded-sm font-bold text-black bg-yellow-400 hover:bg-yellow-300 transition-colors flex items-center gap-2 uppercase tracking-widest text-sm disabled:opacity-40"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Swords className="w-4 h-4" />}
-                {busy ?? `Finalize & pay ${isCustodial ? "(custodial)" : "(connect wallet)"}`}
+                {busy ?? `Attest Results & Pay Winners ${isCustodial ? "(via relayer)" : "(sign with wallet)"}`}
               </button>
             )}
             {error && <p className="text-xs text-brand-red mt-3 font-mono">{error}</p>}

@@ -50,10 +50,12 @@ export async function signFinalize(
   tournamentId: number | bigint,
   winners: string[]
 ): Promise<string> {
+  // Validate + checksum all addresses to prevent ENS resolution attempts.
+  const addresses = winners.map((w) => ethers.getAddress(w));
   return signer.signTypedData(
     EIP712_DOMAIN,
     { TournamentResult: TOURNAMENT_RESULT_TYPE },
-    { tournamentId, winners }
+    { tournamentId, winners: addresses }
   );
 }
 
