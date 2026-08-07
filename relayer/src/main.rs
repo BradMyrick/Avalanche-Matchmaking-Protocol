@@ -54,6 +54,12 @@ struct FundPayload {
     mode: Option<String>,
     #[serde(rename = "finalizeDays", default = "default_finalize_days")]
     finalize_days: i64,
+    #[serde(rename = "manageToken", default)]
+    manage_token: Option<String>,
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
+    players: Option<Value>,
 }
 
 fn default_finalize_days() -> i64 {
@@ -129,8 +135,8 @@ async fn poll_once(pool: &PgPool, provider: &Arc<SignerProvider>, key_str: &str)
     info!(job_id = job.id, kind = %job.kind, "processing job");
 
     let result = match job.kind.as_str() {
-        "fund" => fund_job(provider, &job, key_str).await,
-        "finalize" => finalize_job(provider, &job, key_str).await,
+        "fund" => fund_job(provider, &job, key_str, pool).await,
+        "finalize" => finalize_job(provider, &job, key_str, pool).await,
         other => Err(anyhow!("unknown job kind: {other}")),
     };
 
@@ -166,7 +172,7 @@ async fn poll_once(pool: &PgPool, provider: &Arc<SignerProvider>, key_str: &str)
     Ok(true)
 }
 
-async fn fund_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str) -> Result<(Option<i64>, Option<String>)> {
+async fn fund_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, pool: &PgPool) -> Result<(Option<i64>, Option<String>)> {
     let p: FundPayload = serde_json::from_value(job.payload.clone())?;
 
     let cup: Address = CUP_ADDRESS_HEX.parse()?;
@@ -191,36 +197,99 @@ async fn fund_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str) -> R
 
     let next = contract.next_tournament_id().call().await?;
     let tournament_id = next - U256::one();
+    let tid_i64 = tournament_id.as_u64() as i64;
 
+    // Instant mode: finalize immediately with sponsor-provided winners.
     if p.mode.as_deref() == Some("instant") && !p.winner_wallets.is_empty() {
         let winners = parse_addresses(&p.winner_wallets)?;
         let sig = finalize_signature(key_str, tournament_id.as_u64(), &winners)?;
         let fin_call = contract.finalize_tournament(tournament_id, winners, sig.into()).gas(400_000);
         let receipt = fin_call.send().await?.await?.context("finalize reverted")?;
-        return Ok((Some(tournament_id.as_u64() as i64), Some(format!("{:?}", receipt.transaction_hash))));
+        return Ok((Some(tid_i64), Some(format!("{:?}", receipt.transaction_hash))));
     }
 
-    Ok((Some(tournament_id.as_u64() as i64), Some(create_tx_hash)))
+    // Bracket mode: provision DB rows (P0-5) — the relayer is the authority.
+    if p.mode.as_deref() == Some("bracket") {
+        let sponsor_hex = format!("{:?}", verifier);
+        let prize_wei = value.to_string();
+        let payout_json = serde_json::to_string(&p.payout_bps)?;
+        let paypal_id = job.payload.get("paypalOrderId").and_then(|v| v.as_str()).unwrap_or("");
+        sqlx::query(
+            r#"INSERT INTO tournaments (tournament_id, sponsor, prize_pool_wei, token, payout_bps, winner_wallets, state, mode, manage_token, paypal_order_id, tx_hash, created_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+               ON CONFLICT (tournament_id) DO UPDATE SET tx_hash = EXCLUDED.tx_hash"#,
+        )
+        .bind(tid_i64)
+        .bind(&sponsor_hex)
+        .bind(&prize_wei)
+        .bind("0x0000000000000000000000000000000000000000")
+        .bind(&payout_json)
+        .bind("[]")
+        .bind("OPEN")
+        .bind("bracket")
+        .bind(p.manage_token.as_deref())
+        .bind(paypal_id)
+        .bind(&create_tx_hash)
+        .execute(pool)
+        .await?;
+
+        if let Some(players) = &p.players {
+            let bracket_state = serde_json::json!({
+                "format": p.format.as_deref().unwrap_or("single_elimination"),
+                "players": players,
+                "results": [],
+            });
+            sqlx::query(
+                r#"INSERT INTO brackets (tournament_id, state, updated_at) VALUES ($1, $2, now())
+                   ON CONFLICT (tournament_id) DO UPDATE SET state = EXCLUDED.state"#,
+            )
+            .bind(tid_i64)
+            .bind(bracket_state.to_string())
+            .execute(pool)
+            .await?;
+        }
+    }
+
+    Ok((Some(tid_i64), Some(create_tx_hash)))
 }
 
-async fn finalize_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str) -> Result<(Option<i64>, Option<String>)> {
+async fn finalize_job(provider: &Arc<SignerProvider>, job: &Job, key_str: &str, pool: &PgPool) -> Result<(Option<i64>, Option<String>)> {
+    // P0-1: the job carries ONLY { tournamentId }. Winners are loaded from the
+    // bracket's computedWinners (written by the authenticated finalize route).
     #[derive(Deserialize)]
     struct FinPayload {
         #[serde(rename = "tournamentId")]
         tournament_id: i64,
-        #[serde(rename = "winnerWallets")]
-        winner_wallets: Vec<String>,
     }
     let p: FinPayload = serde_json::from_value(job.payload.clone())?;
-    let tid = U256::from(p.tournament_id);
-    let winners = parse_addresses(&p.winner_wallets)?;
+    let tid = p.tournament_id;
 
+    let row = sqlx::query("SELECT state::text FROM brackets WHERE tournament_id = $1")
+        .bind(tid)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| anyhow!("bracket not found for tournament {tid}"))?;
+    let state_text: String = row.get("state");
+    let state: Value = serde_json::from_str(&state_text)?;
+
+    let winners: Vec<String> = state["computedWinners"]
+        .as_array()
+        .ok_or_else(|| anyhow!("no computedWinners on bracket"))?
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+    if winners.is_empty() {
+        return Err(anyhow!("bracket has no computed winners"));
+    }
+
+    let addrs = parse_addresses(&winners)?;
+    let tid_u256 = U256::from(tid);
     let cup: Address = CUP_ADDRESS_HEX.parse()?;
     let contract = AMPTournamentCup::new(cup, Arc::clone(provider));
-    let sig = finalize_signature(key_str, p.tournament_id as u64, &winners)?;
-    let fin_call = contract.finalize_tournament(tid, winners, sig.into()).gas(400_000);
+    let sig = finalize_signature(key_str, tid as u64, &addrs)?;
+    let fin_call = contract.finalize_tournament(tid_u256, addrs, sig.into()).gas(400_000);
     let receipt = fin_call.send().await?.await?.context("finalize reverted")?;
-    Ok((Some(p.tournament_id), Some(format!("{:?}", receipt.transaction_hash))))
+    Ok((Some(tid), Some(format!("{:?}", receipt.transaction_hash))))
 }
 
 /// Hand-rolled EIP-712 TournamentResult signature, byte-identical to the contract

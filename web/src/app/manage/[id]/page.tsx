@@ -69,6 +69,7 @@ export default function ManagePage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [manageToken, setManageToken] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/tournament/${tid}`);
@@ -78,8 +79,9 @@ export default function ManagePage() {
   }, [tid]);
 
   useEffect(() => {
+    setManageToken(sessionStorage.getItem(`amp_manage_${tid}`));
     load().finally(() => setLoading(false));
-  }, [load]);
+  }, [load, tid]);
 
   const engine = useMemo(() => reconstruct(bracket), [bracket]);
   const players = bracket?.players ?? [];
@@ -98,7 +100,10 @@ export default function ManagePage() {
     setBracket(next);
     await fetch(`/api/tournament/${tid}/bracket`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(manageToken ? { Authorization: `Bearer ${manageToken}` } : {}),
+      },
       body: JSON.stringify(next),
     });
   }
@@ -119,12 +124,28 @@ export default function ManagePage() {
       if (isCustodial) {
         const res = await fetch(`/api/tournament/${tid}/finalize`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ winnerWallets }),
+          headers: {
+            "Content-Type": "application/json",
+            ...(manageToken ? { Authorization: `Bearer ${manageToken}` } : {}),
+          },
+          body: JSON.stringify({}),
         });
-        const json = (await res.json()) as { ok?: boolean; error?: string; txHash?: string };
+        const json = (await res.json()) as { ok?: boolean; error?: string; jobId?: number; pending?: boolean };
         if (!json.ok) throw new Error(json.error || "finalize failed");
-        if (record) setRecord({ ...record, state: "FINALIZED", txHash: json.txHash ?? null, winnerWallets });
+        // Poll the job until the relayer completes on-chain.
+        if (json.jobId) {
+          for (let i = 0; i < 30; i++) {
+            setBusy(`Relayer finalizing… (${i + 1})`);
+            await new Promise((r) => setTimeout(r, 2000));
+            const jr = await fetch(`/api/job/${json.jobId}`);
+            const job = (await jr.json()) as { status?: string; txHash?: string };
+            if (job.status === "done") {
+              if (record) setRecord({ ...record, state: "FINALIZED", txHash: job.txHash ?? null });
+              break;
+            }
+            if (job.status === "failed") throw new Error("relayer finalize failed");
+          }
+        }
       } else {
         // Sponsor (AVAX) path: connect wallet, sign EIP-712, submit finalize.
         const provider = await connectWallet();

@@ -111,16 +111,23 @@ export default function PlayPage() {
 
   async function report(outcome: "A" | "B" | "Draw") {
     if (!wallet || !myMatch) return;
-    setBusy("Submitting result…");
+    setBusy("Signing + submitting…");
     setError(null);
     try {
-      // Normalize: the player reports from their perspective; the contract
-      // outcome is absolute side. "I won" → my side; "I lost" → other side.
       const reported = outcome === "Draw" ? "Draw" : outcome === mySide ? mySide : mySide === "A" ? "B" : "A";
+
+      // EIP-191 signature proving wallet ownership (P0-2).
+      const provider = await connectWallet();
+      const signer = await provider.getSigner();
+      const nonce = crypto.randomUUID().replace(/-/g, "");
+      const ts = Math.floor(Date.now() / 1000);
+      const message = `AMP-report:${tid}:${myMatch.id}:${reported}:${nonce}:${ts}`;
+      const sig = await signer.signMessage(message);
+
       const res = await fetch(`/api/tournament/${tid}/report`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet, matchId: myMatch.id, outcome: reported }),
+        body: JSON.stringify({ wallet, matchId: myMatch.id, outcome: reported, nonce, ts, sig }),
       });
       const json = (await res.json()) as { ok?: boolean; status?: string; error?: string };
       if (!json.ok) throw new Error(json.error || "report failed");

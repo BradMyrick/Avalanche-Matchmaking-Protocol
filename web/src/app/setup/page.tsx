@@ -139,9 +139,8 @@ export default function SetupPage() {
       const tournamentId = Number((await cup.nextTournamentId()) - BigInt(1));
 
       if (mode === "bracket") {
-        // Register the off-chain record + bracket, then hand off to the console.
         setBusy("Setting up the bracket…");
-        await fetch(`/api/tournament/${tournamentId}/init`, {
+        const initRes = await fetch(`/api/tournament/${tournamentId}/init`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -153,6 +152,10 @@ export default function SetupPage() {
             txHash: createRcpt?.hash ?? null,
           }),
         });
+        const initJson = (await initRes.json()) as { manageToken?: string };
+        if (initJson.manageToken) {
+          sessionStorage.setItem(`amp_manage_${tournamentId}`, initJson.manageToken);
+        }
         router.push(`/manage/${tournamentId}`);
         return;
       }
@@ -201,6 +204,8 @@ export default function SetupPage() {
         jobId?: number;
         pending?: boolean;
         amountUsd?: number;
+        manageToken?: string;
+        replay?: boolean;
       };
       if (!json.ok) throw new Error(json.error || "Capture failed");
 
@@ -211,6 +216,9 @@ export default function SetupPage() {
 
       // Bracket mode: hand off to the organizer console.
       if (mode === "bracket") {
+        if (json.manageToken) {
+          sessionStorage.setItem(`amp_manage_${tournamentId}`, json.manageToken);
+        }
         router.push(`/manage/${tournamentId}`);
         return;
       }
