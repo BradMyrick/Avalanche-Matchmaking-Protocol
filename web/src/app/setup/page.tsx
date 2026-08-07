@@ -18,6 +18,7 @@ import {
   Sparkles,
   Copy,
   ArrowLeft,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   CUP_ADDRESS,
@@ -27,6 +28,7 @@ import {
   AMPCUP_ABI,
 } from "@/lib/ampCup";
 import { generateWallets, parseAddressList, type GeneratedWallet } from "@/lib/wallet";
+import { InfoTip } from "@/app/components/InfoTip";
 
 type Currency = "USD" | "AVAX";
 type WalletMode = "generate" | "enter";
@@ -385,9 +387,23 @@ export default function SetupPage() {
               </Panel>
 
               <Panel icon={<Coins className="w-5 h-5" />} title="Prize pool & payout split">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs uppercase tracking-wider text-zinc-500">Tournament type</span>
+                  <InfoTip>
+                    <strong className="text-white">Instant payout:</strong> winners are paid immediately after funding. You provide the winner wallets upfront — no bracket to manage.<br/><br/>
+                    <strong className="text-white">Run a bracket:</strong> players compete in a single-elimination bracket. You record results from the organizer console; winners are determined by match outcomes.
+                  </InfoTip>
+                </div>
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <Toggle active={mode === "instant"} onClick={() => setMode("instant")} icon={<Sparkles className="w-4 h-4" />} label="Instant payout" />
                   <Toggle active={mode === "bracket"} onClick={() => setMode("bracket")} icon={<Trophy className="w-4 h-4" />} label="Run a bracket" />
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs uppercase tracking-wider text-zinc-500">Payment method</span>
+                  <InfoTip>
+                    <strong className="text-white">USD (PayPal):</strong> pay with a credit/debit card. AMP&rsquo;s custodial relayer funds the on-chain prize pool for you — no wallet or crypto needed.<br/><br/>
+                    <strong className="text-white">AVAX (Wallet):</strong> pay directly with AVAX from your Avalanche wallet. You fund the prize pool yourself on-chain.
+                  </InfoTip>
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <Toggle active={currency === "USD"} onClick={() => setCurrency("USD")} icon={<span>$</span>} label="USD (Card / PayPal)" />

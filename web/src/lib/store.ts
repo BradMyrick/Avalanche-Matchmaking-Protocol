@@ -98,6 +98,12 @@ class PostgresStore {
     return res.rows.length ? rowToRecord(res.rows[0]) : null;
   }
 
+  async listTournaments(limit = 50): Promise<TournamentRecord[]> {
+    const pool = await this.pool();
+    const res = await pool.query("SELECT * FROM tournaments ORDER BY tournament_id DESC LIMIT $1", [limit]);
+    return res.rows.map(rowToRecord);
+  }
+
   async saveBracket(tid: number, state: BracketState): Promise<void> {
     const pool = await this.pool();
     await pool.query(

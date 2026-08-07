@@ -35,8 +35,8 @@ export default function Home() {
             <Link href="#showcase" className="hover:text-white hover:text-brand-cyan transition-colors duration-300">Showcase</Link>
             <Link href="#demo" className="hover:text-white hover:text-brand-cyan transition-colors duration-300">How It Works</Link>
             <Link href="#fuji" className="hover:text-white hover:text-brand-cyan transition-colors duration-300">Prize Pools</Link>
-            <Link href="#sdk" className="hover:text-white hover:text-brand-cyan transition-colors duration-300">API</Link>
-            <Link href="#partner" className="hover:text-white hover:text-brand-cyan transition-colors duration-300">Partner</Link>
+            <Link href="#api" className="hover:text-white hover:text-brand-cyan transition-colors duration-300">API</Link>
+            <Link href="/dashboard" className="hover:text-brand-cyan transition-colors duration-300">Dashboard</Link>
           </nav>
 
           <Link
@@ -139,7 +139,7 @@ export default function Home() {
         <FujiNetwork />
 
         {/* SDK Section */}
-        <section id="sdk" className="py-32 max-w-7xl mx-auto px-6 scroll-mt-32 relative">
+        <section id="api" className="py-32 max-w-7xl mx-auto px-6 scroll-mt-32 relative">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[300px] bg-brand-cyan/5 blur-[150px] rounded-full pointer-events-none" />
           <EngineTabs />
         </section>
