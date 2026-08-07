@@ -16,7 +16,6 @@ import {
   Check,
   ExternalLink,
   Sparkles,
-  Copy,
   ArrowLeft,
 } from "lucide-react";
 import {
@@ -26,10 +25,9 @@ import {
   signFinalize,
   AMPCUP_ABI,
 } from "@/lib/ampCup";
-import { generateWallets, parseAddressList, type GeneratedWallet } from "@/lib/wallet";
+import { parseAddressList } from "@/lib/wallet";
 
 type Currency = "USD" | "AVAX";
-type WalletMode = "generate" | "enter";
 
 interface Result {
   ok: boolean;
@@ -38,7 +36,7 @@ interface Result {
   funded?: boolean;
   pending?: boolean;
   note?: string;
-  winnerWallets: { placement: number; address: string; privateKey?: string }[];
+  winnerWallets: { placement: number; address: string }[];
   snowtrace?: string | null;
   error?: string;
 }
@@ -52,9 +50,7 @@ export default function SetupPage() {
   const [presetKey, setPresetKey] = useState<keyof typeof PAYOUT_PRESETS>("top3");
   const [currency, setCurrency] = useState<Currency>("USD");
   const [amount, setAmount] = useState("50");
-  const [walletMode, setWalletMode] = useState<WalletMode>("generate");
   const [addressText, setAddressText] = useState("");
-  const [generated, setGenerated] = useState<GeneratedWallet[]>([]);
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [mode, setMode] = useState<"instant" | "bracket">("instant");
@@ -63,7 +59,7 @@ export default function SetupPage() {
   const preset = PAYOUT_PRESETS[presetKey];
   const placements = preset.bps.length;
 
-  // Parse the players textarea: one per line, "name, wallet" (or bare wallet).
+  // Parse the players textarea
   const players = useMemo(
     () =>
       playersText
@@ -85,21 +81,12 @@ export default function SetupPage() {
     [playersText]
   );
 
-  const winnerWallets: string[] =
-    walletMode === "generate"
-      ? generated.slice(0, placements).map((w) => w.address)
-      : parseAddressList(addressText);
+  const winnerWallets: string[] = parseAddressList(addressText);
 
   const canProceedWinners =
     mode === "bracket"
       ? players.length >= 2
-      : walletMode === "generate"
-        ? generated.length >= placements
-        : winnerWallets.length === placements;
-
-  function regenerate() {
-    setGenerated(generateWallets(placements));
-  }
+      : winnerWallets.length === placements;
 
   /** Poll the relayer job queue until the funded tournamentId is known. */
   async function pollJobForTournament(jobId?: number): Promise<number | null> {
@@ -231,7 +218,6 @@ export default function SetupPage() {
         winnerWallets: winnerWallets.map((address, i) => ({
           placement: i,
           address,
-          privateKey: generated[i]?.privateKey,
         })),
         snowtrace: `https://testnet.snowtrace.io/address/${CUP_ADDRESS}`,
       });
@@ -339,15 +325,6 @@ export default function SetupPage() {
                               claim <ExternalLink className="w-3 h-3" />
                             </Link>
                           )}
-                          {w.privateKey && (
-                            <button
-                              onClick={() => navigator.clipboard.writeText(w.privateKey!)}
-                              className="text-[10px] text-zinc-500 hover:text-brand-cyan flex items-center gap-1"
-                              title="Copy private key (give to the winner)"
-                            >
-                              <Copy className="w-3 h-3" /> key
-                            </button>
-                          )}
                         </div>
                       ))}
                     </div>
@@ -409,11 +386,11 @@ export default function SetupPage() {
             </motion.div>
           )}
 
-          {/* ── STEP 1: WINNERS ── */}
+          {/* ── STEP 1: WINNERS / PLAYERS ── */}
           {!result && step === 1 && (
             <motion.div key="s1" initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} className="space-y-6">
               {mode === "bracket" ? (
-                <Panel icon={<Users className="w-5 h-5" />} title={`Players (${players.length})`}>
+                <Panel icon={<Users className="w-5 h-5" />} title={`Player wallets (${players.length})`}>
                   <textarea
                     value={playersText}
                     onChange={(e) => setPlayersText(e.target.value)}
@@ -428,37 +405,14 @@ export default function SetupPage() {
                 </Panel>
               ) : (
                 <Panel icon={<Users className="w-5 h-5" />} title={`Winner wallets (${placements} placement${placements > 1 ? "s" : ""})`}>
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <Toggle active={walletMode === "generate"} onClick={() => { setWalletMode("generate"); regenerate(); }} icon={<Sparkles className="w-4 h-4" />} label="Generate for me" />
-                    <Toggle active={walletMode === "enter"} onClick={() => setWalletMode("enter")} icon={<Wallet className="w-4 h-4" />} label="I&rsquo;ll enter them" />
-                  </div>
-
-                  {walletMode === "generate" ? (
-                    <div>
-                      <div className="space-y-2 mb-3">
-                        {generated.slice(0, placements).map((w, i) => (
-                          <div key={i} className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-lg p-3">
-                            <span className="text-xs font-bold text-brand-cyan w-10">{PLACE_LABELS[i]}</span>
-                            <code className="text-xs text-zinc-300 flex-1 truncate">{w.address}</code>
-                          </div>
-                        ))}
-                        {generated.length === 0 && <p className="text-sm text-zinc-500">Click generate to create {placements} fresh winner wallets.</p>}
-                      </div>
-                      <button onClick={regenerate} className="text-xs text-brand-cyan hover:underline">↻ Regenerate</button>
-                      <p className="text-[11px] text-zinc-500 mt-2">Each winner gets a private key to import & claim their prize. Shown after launch.</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <textarea
-                        value={addressText}
-                        onChange={(e) => setAddressText(e.target.value)}
-                        placeholder={`Paste ${placements} Avalanche address(es), one per line:\n0x1234…\n0x5678…`}
-                        rows={4}
-                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white focus:border-brand-cyan outline-none font-mono text-xs"
-                      />
-                      <p className="text-[11px] text-zinc-500 mt-2">Parsed {winnerWallets.length}/{placements} valid addresses.</p>
-                    </div>
-                  )}
+                  <textarea
+                    value={addressText}
+                    onChange={(e) => setAddressText(e.target.value)}
+                    placeholder={`Enter ${placements} wallet address(es) in placement order (1st, 2nd…), one per line:\n0x1234…\n0x5678…`}
+                    rows={5}
+                    className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white focus:border-brand-cyan outline-none font-mono text-xs"
+                  />
+                  <p className="text-[11px] text-zinc-500 mt-2">Parsed {winnerWallets.length}/{placements} valid addresses. Winners claim their prize from the contract after the tournament is funded.</p>
                 </Panel>
               )}
               <NavRow onBack={() => setStep(0)} onNext={() => setStep(2)} nextLabel="Next: Fund" disabled={!canProceedWinners} />
