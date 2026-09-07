@@ -411,7 +411,7 @@ impl Store {
         sqlx::query(
             r#"UPDATE amp_matches
                SET state = $2, outcome = $3, winner = $4
-               WHERE id = $1 AND state = 'live'"#,
+               WHERE id = $1 AND state IN ('live', 'disputed')"#,
         )
         .bind(id)
         .bind(state)
@@ -535,6 +535,10 @@ impl Store {
         Ok(res.rows_affected() == 1)
     }
 
+    /// Transition a live match to an agreed/settling state.
+    /// Returns Ok(false) when the row was NOT in 'live' (someone else
+    /// finalized first) — callers must treat that as "already done",
+    /// skipping ratings/attestation/settle-job side effects.
     #[allow(clippy::too_many_arguments)]
     pub async fn mark_agreed(
         &self,
@@ -543,14 +547,14 @@ impl Store {
         outcome: &str,
         winner: Option<&str>,
         rt_grace_minutes: i64,
-    ) -> sqlx::Result<()> {
-        sqlx::query(
+    ) -> sqlx::Result<bool> {
+        let res = sqlx::query(
             r#"UPDATE amp_matches
                SET state = $2, outcome = $3, winner = $4,
                    agreed_at = now(),
                    settle_deadline = CASE WHEN $2 = 'settling_rt'
                        THEN now() + make_interval(mins => $5::int) ELSE NULL END
-               WHERE id = $1"#,
+               WHERE id = $1 AND state IN ('live', 'disputed')"#,
         )
         .bind(id)
         .bind(state)
@@ -559,7 +563,7 @@ impl Store {
         .bind(rt_grace_minutes)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(res.rows_affected() == 1)
     }
 
     /// Matches that agreed to direct RT settlement but whose window lapsed —

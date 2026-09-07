@@ -691,7 +691,9 @@ async fn report_outcome(
             .matches
             .finalize_bot_match(&m, &wallet, &req.result)
             .await?;
-        st.live_matches.fetch_sub(1, Ordering::Relaxed);
+        if applied.finalized {
+            st.live_matches.fetch_sub(1, Ordering::Relaxed);
+        }
         notify_result(&st, &m, &applied);
         return Ok(Json(json!({
             "matchId": id.to_string(),
@@ -763,7 +765,9 @@ pub async fn finalize_match(
             reports,
         )
         .await?;
-    st.live_matches.fetch_sub(1, Ordering::Relaxed);
+    if applied.finalized {
+        st.live_matches.fetch_sub(1, Ordering::Relaxed);
+    }
     Ok(applied)
 }
 
@@ -906,11 +910,19 @@ async fn admin_arbitrate(
             ))
         }
         "cancelled" => {
-            st.store
-                .set_match_outcome(id, "cancelled", "cancelled", None)
-                .await
-                .map_err(ApiError::Database)?;
-            st.live_matches.fetch_sub(1, Ordering::Relaxed);
+            // Guarded transition: only decrement when a live row actually
+            // moved (prevents counter underflow on repeat arbitration).
+            let cancelled = sqlx::query(
+                "UPDATE amp_matches SET state = 'cancelled', outcome = 'cancelled' \
+                 WHERE id = $1 AND state IN ('live', 'disputed')",
+            )
+            .bind(id)
+            .execute(st.store.pool())
+            .await
+            .map_err(ApiError::Database)?;
+            if cancelled.rows_affected() == 1 {
+                st.live_matches.fetch_sub(1, Ordering::Relaxed);
+            }
             st.hub.send(
                 &m.player_a,
                 "match_update",
@@ -1272,7 +1284,7 @@ async fn multi_reveal(
     }
 
     sqlx::query(
-        "UPDATE amp_commits SET state = 'revealed', salt = $3, revealed_at = now() WHERE wallet = $1 AND game_id = $2 AND ruleset_id = $4",
+        "UPDATE amp_commits SET state = 'revealed', salt = $3, revealed_at = now() WHERE wallet = $1 AND game_id = $2 AND ruleset_id = $4 AND state = 'committed'",
     )
     .bind(&wallet)
     .bind(&req.game_id)
@@ -1417,6 +1429,18 @@ async fn multi_claim(
         )));
     }
 
+    // Race gate: exactly one claimant flips quorum → settling; concurrent
+    // claims get a Conflict instead of double settle-jobs/ratings.
+    if !st
+        .store
+        .transition_multi_state(id, "quorum", "settling")
+        .await?
+    {
+        return Err(ApiError::Conflict(
+            "match already claimed by a concurrent request".into(),
+        ));
+    }
+
     let multiplayer_addr: Address = st
         .cfg
         .multiplayer_address
@@ -1467,8 +1491,6 @@ async fn multi_claim(
     )
     .await;
 
-    st.store.update_multi_state(id, "settling").await?;
-
     // Notify every player with their personalized rating delta.
     match rating_updates {
         Ok(updates) => {
@@ -1511,7 +1533,9 @@ struct ExitCertReq {
     #[allow(dead_code)] // deserialized for API compatibility
     wallet: String,
     rank: u16,
+    #[serde(rename = "exit_frame", alias = "exitFrame")]
     exit_frame: u64,
+    #[serde(rename = "state_hash", alias = "stateHash")]
     state_hash: String,
     signature: String,
 }
@@ -1578,6 +1602,7 @@ async fn submit_exit_cert(
 
 #[derive(Deserialize)]
 struct CountersignReq {
+    #[serde(rename = "state_hash", alias = "stateHash")]
     state_hash: String,
 }
 

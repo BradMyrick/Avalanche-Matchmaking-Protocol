@@ -161,6 +161,13 @@ pub async fn form_lobbies_from_reveals(
             .map_err(ApiError::Database)?;
         }
 
+        // Canonical EIP-712 matchId (bytes32 of the UUID) — clients sign THIS.
+        let match_id_bytes32 = {
+            let mut b = [0u8; 32];
+            b[..16].copy_from_slice(match_id.as_bytes());
+            format!("{:#x}", alloy_primitives::B256::from(b))
+        };
+
         // Notify every player.
         for p in &match_row.players {
             hub.send(
@@ -168,6 +175,7 @@ pub async fn form_lobbies_from_reveals(
                 "multi_lobby_formed",
                 serde_json::json!({
                     "matchId": match_id.to_string(),
+                    "matchIdBytes32": match_id_bytes32,
                     "gameId": match_row.game_id,
                     "lobbySize": lobby_size,
                     "stakeWei": stake,
@@ -251,10 +259,71 @@ fn time_fallback() -> [u8; 32] {
     alloy_primitives::keccak256(b).0
 }
 
-/// Sweep: transition live matches past their quorum window to grace,
-/// and past grace to cancelled if no claim was filed.
+/// Sweep: watch escrow-phase matches on-chain (Open → Ready means live),
+/// cancel stale commitments, transition live matches past their quorum
+/// window to grace, and past grace to cancelled if no claim was filed.
 pub async fn multi_sweep(store: &Store, hub: &crate::ws::WsHub) -> Result<(), ApiError> {
     use sqlx::Row;
+
+    // ── Escrow phase: poll the contract; Ready ⇒ live, expired ⇒ cancel ──
+    let escrow_rows = sqlx::query(
+        "SELECT id, players::text FROM amp_multi_matches WHERE state = 'escrow' \
+         AND created_at > now() - interval '30 minutes'",
+    )
+    .fetch_all(store.pool())
+    .await
+    .map_err(ApiError::Database)?;
+    for row in &escrow_rows {
+        let id: Uuid = row.get("id");
+        let match_id_b256 = {
+            let mut b = [0u8; 32];
+            b[..16].copy_from_slice(id.as_bytes());
+            alloy_primitives::B256::from(b)
+        };
+        match crate::escrow::multi_lobby_ready(store, match_id_b256).await {
+            Ok(crate::escrow::LobbyPhase::Ready) => {
+                if store
+                    .transition_multi_state(id, "escrow", "live")
+                    .await
+                    .unwrap_or(false)
+                {
+                    notify_multi_state(hub, &row, id, "live");
+                }
+            }
+            Ok(crate::escrow::LobbyPhase::Expired) => {
+                // Refund what was funded; nobody can play.
+                sqlx::query(
+                    "INSERT INTO relayer_jobs (kind, payload, status) \
+                     VALUES ('expire_multi', $1::jsonb, 'pending')",
+                )
+                .bind(serde_json::json!({ "matchUuid": id.to_string() }).to_string())
+                .execute(store.pool())
+                .await
+                .map_err(ApiError::Database)?;
+                if store
+                    .transition_multi_state(id, "escrow", "cancelled")
+                    .await
+                    .unwrap_or(false)
+                {
+                    notify_multi_state(hub, &row, id, "escrow_expired");
+                }
+            }
+            Ok(crate::escrow::LobbyPhase::Funding)
+            | Ok(crate::escrow::LobbyPhase::Missing) => {}
+            Err(e) => {
+                tracing::warn!(match_id = %id, error = %e, "escrow poll failed");
+            }
+        }
+    }
+
+    // ── Stale commits (lobby never formed): cancel so rows don't rot ──
+    sqlx::query(
+        "UPDATE amp_multi_matches SET state = 'cancelled' \
+         WHERE state = 'committing' AND created_at < now() - interval '30 minutes'",
+    )
+    .execute(store.pool())
+    .await
+    .map_err(ApiError::Database)?;
 
     // Quorum window expired: move to grace.
     let expired_quorum = sqlx::query(
@@ -301,4 +370,27 @@ pub async fn multi_sweep(store: &Store, hub: &crate::ws::WsHub) -> Result<(), Ap
     }
 
     Ok(())
+}
+
+/// Broadcast a multi state change to participants.
+fn notify_multi_state(
+    hub: &crate::ws::WsHub,
+    row: &sqlx::postgres::PgRow,
+    id: Uuid,
+    state: &str,
+) {
+    if let Ok(players) = serde_json::from_str::<Vec<crate::multiplayer::MultiPlayer>>(
+        &row.get::<String, _>("players"),
+    ) {
+        for p in &players {
+            hub.send(
+                &p.wallet,
+                "multi_state",
+                serde_json::json!({
+                    "matchId": id.to_string(),
+                    "state": state,
+                }),
+            );
+        }
+    }
 }

@@ -62,6 +62,15 @@ abigen!(
     r#"[
         {
             "type": "function",
+            "name": "expireRefund",
+            "inputs": [
+                { "name": "matchId", "type": "bytes32", "internalType": "bytes32" }
+            ],
+            "outputs": [],
+            "stateMutability": "nonpayable"
+        },
+        {
+            "type": "function",
             "name": "settleMultiplayer",
             "inputs": [
                 { "name": "matchId", "type": "bytes32", "internalType": "bytes32" },
@@ -220,6 +229,7 @@ async fn poll_once(
         "settle_match" => settle_match_job(provider, &job, pool, cfg).await,
         "settle_multi" => settle_multi_job(provider, &job, pool, cfg).await,
         "create_lobby" => create_lobby_job(provider, &job, pool, cfg).await,
+        "expire_multi" => expire_multi_job(provider, &job, pool, cfg).await,
         other => Err(anyhow!("unknown job kind: {other}")),
     };
 
@@ -519,12 +529,15 @@ async fn create_lobby_job(
     let receipt = pending.await?.context("createLobby reverted")?;
     let tx_hash = format!("{:?}", receipt.transaction_hash);
 
-    // Write the on-chain match ID back to the server's match row.
+    // Mark the server row as escrow-phase. NOTE: the canonical on-chain
+    // matchId is the left-padded UUID bytes32 sent in matchIdBytes — the
+    // on_chain_match_id column is legacy bookkeeping and is NOT used by
+    // any crypto path anymore (settle + ladder digests derive from the UUID).
     sqlx::query(
         "UPDATE amp_multi_matches SET on_chain_match_id = $2, state = 'escrow' WHERE id = $1::uuid",
     )
     .bind(&p.match_uuid)
-    .bind(p.game_id as i64) // on-chain match id is derived from the bytes
+    .bind(p.game_id as i64)
     .execute(pool)
     .await?;
 
@@ -591,7 +604,7 @@ async fn settle_multi_job(
     let tx_hash = submit_multiplayer_settlement(
         provider,
         &contract_addr,
-        p.on_chain_match_id as u64,
+        &p.match_uuid,
         &ranked,
         &p.transcript_hash,
         p.session_nonce,
@@ -615,7 +628,7 @@ async fn settle_multi_job(
 async fn submit_multiplayer_settlement(
     provider: &Arc<SignerProvider>,
     contract_addr: &Address,
-    on_chain_match_id: u64,
+    match_uuid: &str,
     ranked: &[Address],
     transcript_hash: &str,
     session_nonce: u64,
@@ -624,11 +637,13 @@ async fn submit_multiplayer_settlement(
 ) -> Result<String> {
     let contract = AMPMultiplayer::new(*contract_addr, Arc::clone(provider));
 
-    // Build the matchId bytes32: the server sends a UUID as the on-chain
-    // match id — convert to a 32-byte left-padded value.
+    // Canonical matchId: the left-padded UUID bytes32 — identical to
+    // createLobby's storage, the server's ladder digests, and every SDK.
     let match_id_bytes = {
         let mut b = [0u8; 32];
-        b[24..].copy_from_slice(&on_chain_match_id.to_be_bytes());
+        let uuid = uuid::Uuid::parse_str(&match_uuid)
+            .context("settle payload matchUuid is not a UUID")?;
+        b[..16].copy_from_slice(uuid.as_bytes());
         b
     };
 
@@ -662,7 +677,7 @@ async fn submit_multiplayer_settlement(
 
     info!(
         tx = format!("{:?}", receipt.transaction_hash),
-        match_id = on_chain_match_id,
+        match_id = match_uuid,
         signers = signer_mask.count_ones(),
         ranked = ranked.len(),
         "settleMultiplayer confirmed on-chain"
@@ -837,4 +852,54 @@ fn parse_addresses(strs: &[String]) -> Result<Vec<Address>> {
                 .with_context(|| format!("bad address: {s}"))
         })
         .collect()
+}
+
+/// Refund an unfilled multiplayer lobby: called by the server's sweep when
+/// the escrow fill window passed without all N players funding. Pure
+/// gas-only call to AMPMultiplayer.expireRefund — the contract credits
+/// whoever did fund.
+async fn expire_multi_job(
+    provider: &Arc<SignerProvider>,
+    job: &Job,
+    pool: &PgPool,
+    _cfg: &Arc<Config>,
+) -> Result<(Option<i64>, Option<String>)> {
+    #[derive(Deserialize)]
+    struct ExpireMultiPayload {
+        #[serde(rename = "matchUuid")]
+        match_uuid: String,
+    }
+    let p: ExpireMultiPayload = serde_json::from_value(job.payload.clone())?;
+
+    let mp_addr: Address = std::env::var("AMP_MULTIPLAYER_ADDRESS")
+        .context("AMP_MULTIPLAYER_ADDRESS not set")?
+        .parse()
+        .context("bad AMP_MULTIPLAYER_ADDRESS")?;
+
+    let match_id_bytes = {
+        let mut b = [0u8; 32];
+        let uuid = uuid::Uuid::parse_str(&p.match_uuid)
+            .context("expire payload matchUuid is not a UUID")?;
+        b[..16].copy_from_slice(uuid.as_bytes());
+        b
+    };
+    let contract = AMPMultiplayer::new(mp_addr, Arc::clone(provider));
+    let call = contract.expire_refund(match_id_bytes).gas(300_000);
+    let pending = call
+        .send()
+        .await
+        .context("send expireRefund")?;
+    let receipt = pending.await?.context("expireRefund reverted")?;
+    let tx_hash = format!("{:?}", receipt.transaction_hash);
+
+    // Any on-chain refund already credited participants; mark server-side.
+    sqlx::query(
+        "UPDATE amp_multi_matches SET state = 'cancelled' WHERE id = $1::uuid AND state = 'escrow'",
+    )
+    .bind(&p.match_uuid)
+    .execute(pool)
+    .await?;
+
+    info!(tx = %tx_hash, match_uuid = %p.match_uuid, "expireRefund confirmed");
+    Ok((None, Some(tx_hash)))
 }

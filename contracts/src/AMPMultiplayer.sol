@@ -354,11 +354,30 @@ contract AMPMultiplayer is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         Match storage m = matches[matchId];
         _requireState(m, State.Ready);
         if (block.timestamp <= m.quorumUntil) revert QuorumWindowStillOpen();
+        // The grace path exists ONLY inside the grace window: no claiming
+        // weeks later against players who reasonably stopped monitoring.
+        if (block.timestamp > m.graceUntil) revert NotExpiredYet();
 
         address claimant = _recoverSingle(m, matchId, rankedPlacements, transcriptHash, sessionNonce, claimantSignature);
         if (rankedPlacements.length == 0 || rankedPlacements[0] != claimant) revert NotRankOne();
         uint8 idx1 = indexOf[matchId][claimant];
         if (idx1 == 0) revert NotParticipant();
+
+        // Placements must be an exact permutation of the participants —
+        // same rule as the quorum path. Without this, a short ladder
+        // ([claimant]-only) settles and locks/sweeps everyone else's funds.
+        {
+            uint256 validMask = _validMask(m.lobbySize);
+            uint256 placementMask;
+            for (uint256 i; i < rankedPlacements.length; ++i) {
+                uint8 pIdx1 = indexOf[matchId][rankedPlacements[i]];
+                if (pIdx1 == 0) revert NotPermutation();
+                uint256 b = uint256(1) << (pIdx1 - 1);
+                if ((placementMask & b) != 0) revert NotPermutation();
+                placementMask |= b;
+            }
+            if (placementMask != validMask) revert NotPermutation();
+        }
 
         m.state = State.GracePending;
         m.ladderAHash = _ladderHash(rankedPlacements, transcriptHash);
@@ -779,6 +798,16 @@ contract AMPMultiplayer is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     /// EIP-712 domain separator (for off-chain tooling / tests).
     function domainSeparator() external view returns (bytes32) {
         return _domainSeparatorV4();
+    }
+
+    /// Cheap phase reader for matchmakers polling the lobby lifecycle.
+    function getMatchPhase(bytes32 matchId)
+        external
+        view
+        returns (State state, uint64 joinedUntil, uint64 readyAt)
+    {
+        Match storage m = matches[matchId];
+        return (m.state, m.joinedUntil, m.readyAt);
     }
 
     function getMatch(bytes32 matchId) external view returns (Match memory) {

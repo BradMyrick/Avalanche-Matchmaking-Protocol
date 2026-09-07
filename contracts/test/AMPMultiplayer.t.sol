@@ -323,6 +323,46 @@ contract AMPMultiplayerTest is Test {
         mp.unilateralClaim(MATCH_ID, ranked, TRANSCRIPT, NONCE, abi.encodePacked(r, s, v));
     }
 
+    /// R6: the grace claim dies with the grace window — no claiming weeks
+    /// later against players who stopped monitoring after the documented
+    /// quorum(120s) + grace(300s) span.
+    function test_GraceClaim_AfterGraceWindow_Rejected() public {
+        _createAndFill();
+        vm.warp(block.timestamp + 121 + 301); // quorum + grace fully lapsed
+        address[] memory ranked = _ladder();
+        bytes32 digest = _digest(ranked);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(playerKeys[0], digest);
+        vm.expectRevert(AMPMultiplayer.NotExpiredYet.selector);
+        mp.unilateralClaim(MATCH_ID, ranked, TRANSCRIPT, NONCE, abi.encodePacked(r, s, v));
+    }
+
+    /// R7: grace ladders must be full permutations — a rank-1-only short
+    /// ladder (which would lock/sweep everyone else's funds) reverts.
+    function test_GraceClaim_ShortLadder_Rejected() public {
+        _createAndFill();
+        vm.warp(block.timestamp + 121);
+        address[] memory ranked = _ladder();
+        bytes32 digest = _digest(ranked);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(playerKeys[0], digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        // claimant-only ladder
+        address[] memory short_ = new address[](1);
+        short_[0] = ranked[0];
+        bytes32 shortDigest = _digest(short_);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(playerKeys[0], shortDigest);
+        vm.expectRevert(AMPMultiplayer.NotPermutation.selector);
+        mp.unilateralClaim(MATCH_ID, short_, TRANSCRIPT, NONCE, abi.encodePacked(r2, s2, v2));
+
+        // duplicated ladder (8 entries, one address twice, one missing)
+        address[] memory dup = _ladder();
+        dup[7] = dup[0];
+        bytes32 dupDigest = _digest(dup);
+        (uint8 v3, bytes32 r3, bytes32 s3) = vm.sign(playerKeys[0], dupDigest);
+        vm.expectRevert(AMPMultiplayer.NotPermutation.selector);
+        mp.unilateralClaim(MATCH_ID, dup, TRANSCRIPT, NONCE, abi.encodePacked(r3, s3, v3));
+    }
+
     function test_GraceWindow_ClaimBeforeQuorumLapse_Rejected() public {
         _createAndFill();
         address[] memory ranked = _ladder();

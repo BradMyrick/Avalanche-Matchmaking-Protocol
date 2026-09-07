@@ -54,7 +54,7 @@ pub fn ladder_domain_separator(chain_id: u64, contract: Address) -> B256 {
 pub fn ladder_digest(
     chain_id: u64,
     contract: Address,
-    on_chain_match_id: u64,
+    match_id: B256,
     game_id: u64,
     ranked: &[Address],
     transcript_hash: B256,
@@ -65,7 +65,7 @@ pub fn ladder_digest(
 
     let mut sh = Vec::with_capacity(32 * 5);
     sh.extend_from_slice(keccak256(LADDER_TYPEHASH).as_slice());
-    sh.extend_from_slice(&word_u64(on_chain_match_id));
+    sh.extend_from_slice(match_id.as_slice());
     sh.extend_from_slice(&word_u64(game_id));
     sh.extend_from_slice(ranked_root.as_slice());
     sh.extend_from_slice(transcript_hash.as_slice());
@@ -84,7 +84,7 @@ pub fn ladder_digest(
 pub fn recover_ladder_signer(
     chain_id: u64,
     contract: Address,
-    on_chain_match_id: u64,
+    match_id: B256,
     game_id: u64,
     ranked: &[Address],
     transcript_hash: B256,
@@ -94,7 +94,7 @@ pub fn recover_ladder_signer(
     let digest = ladder_digest(
         chain_id,
         contract,
-        on_chain_match_id,
+        match_id,
         game_id,
         ranked,
         transcript_hash,
@@ -147,7 +147,7 @@ mod tests {
                 .unwrap(),
         ];
         let th = keccak256(b"test transcript");
-        let digest = ladder_digest(43113, contract(), 42, 7, &ranked, th, 99);
+        let digest = ladder_digest(43113, contract(), B256::from([7u8; 32]), 7, &ranked, th, 99);
         let sig = signer.sign_hash_sync(&digest).unwrap();
         let mut bytes = sig.as_bytes().to_vec();
         if bytes[64] < 27 {
@@ -156,7 +156,7 @@ mod tests {
         let recovered = recover_ladder_signer(
             43113,
             contract(),
-            42,
+            B256::from([7u8; 32]),
             7,
             &ranked,
             th,
@@ -173,9 +173,9 @@ mod tests {
             .map(|i| Address::from_word(B256::from(u256_padding(i))))
             .collect();
         let th = keccak256(b"t");
-        let a = ladder_digest(1, contract(), 1, 1, &ranked, th, 1);
-        let b = ladder_digest(2, contract(), 1, 1, &ranked, th, 1);
-        let c = ladder_digest(1, contract(), 1, 1, &ranked, keccak256(b"x"), 1);
+        let a = ladder_digest(1, contract(), B256::from([1u8; 32]), 1, &ranked, th, 1);
+        let b = ladder_digest(2, contract(), B256::from([1u8; 32]), 1, &ranked, th, 1);
+        let c = ladder_digest(1, contract(), B256::from([1u8; 32]), 1, &ranked, keccak256(b"x"), 1);
         assert_ne!(a, b);
         assert_ne!(a, c);
     }

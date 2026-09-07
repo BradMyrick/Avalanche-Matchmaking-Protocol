@@ -138,6 +138,9 @@ pub struct AppliedOutcome {
     pub player_a: RatingDelta,
     pub player_b: RatingDelta,
     pub attestation: Option<serde_json::Value>,
+    /// False when a concurrent report/sweep already finalized this match —
+    /// callers must skip counter decrements and settle-job side effects.
+    pub finalized: bool,
 }
 
 impl MatchService {
@@ -258,6 +261,7 @@ impl MatchService {
         let (ra, rda, _) = rating_parts(&m.rating_a_snapshot);
         let (rb, rdb, _) = rating_parts(&m.rating_b_snapshot);
         Ok(AppliedOutcome {
+            finalized: true,
             outcome: outcome_str(outcome),
             winner,
             player_a: RatingDelta {
@@ -311,7 +315,10 @@ impl MatchService {
             SettleRoute::DirectRt => "settling_rt",
             _ => "agreed",
         };
-        self.store
+        // Race guard: only the caller that actually flips live → agreed
+        // proceeds to ratings/attestation/settle-job side effects.
+        let finalized = self
+            .store
             .mark_agreed(
                 m.id,
                 terminal_state,
@@ -321,6 +328,25 @@ impl MatchService {
             )
             .await
             .map_err(ApiError::Database)?;
+        if !finalized {
+            tracing::info!(match_id = %m.id, "finalize skipped: already finalized by a concurrent report/sweep");
+            return Ok(AppliedOutcome {
+                finalized: false,
+                outcome: outcome_str(outcome),
+                winner: winner.clone(),
+                player_a: RatingDelta {
+                    rating_before: ra,
+                    rating_after: ra,
+                    deviation_after: rda,
+                },
+                player_b: RatingDelta {
+                    rating_before: rb,
+                    rating_after: rb,
+                    deviation_after: rdb,
+                },
+                attestation: None,
+            });
+        }
 
         self.store
             .apply_rating(
@@ -366,6 +392,7 @@ impl MatchService {
         .await?;
 
         Ok(AppliedOutcome {
+            finalized: true,
             outcome: outcome_str(outcome),
             winner,
             player_a: RatingDelta {

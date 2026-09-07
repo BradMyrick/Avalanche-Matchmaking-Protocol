@@ -163,6 +163,27 @@ impl Store {
         Ok(())
     }
 
+    /// Conditional transition: returns Ok(true) only when the row moved
+    /// from `from_state` to `to_state`. Concurrent claimants race on this;
+    /// the loser gets Ok(false) and must skip side effects.
+    pub async fn transition_multi_state(
+        &self,
+        id: Uuid,
+        from_state: &str,
+        to_state: &str,
+    ) -> Result<bool, ApiError> {
+        let res = sqlx::query(
+            "UPDATE amp_multi_matches SET state = $3 WHERE id = $1 AND state = $2",
+        )
+        .bind(id)
+        .bind(from_state)
+        .bind(to_state)
+        .execute(self.pool())
+        .await
+        .map_err(ApiError::Database)?;
+        Ok(res.rows_affected() == 1)
+    }
+
     #[allow(dead_code)] // wired into the settlement pipeline (M3.5)
     pub async fn set_multi_ladder(
         &self,
@@ -297,7 +318,14 @@ pub async fn build_settle_multi_job(
     // Signer bitmask is computed below via cryptographic verification
     // (verified_mask), not by trusting the report list.
 
-    let on_chain_id = m.on_chain_match_id.unwrap_or(0);
+    // Canonical matchId for EIP-712: the left-padded UUID bytes32 —
+    // identical to what createLobby stores on-chain and what every SDK
+    // signs (the server publishes it as matchIdBytes32).
+    let match_id_b256 = {
+        let mut b = [0u8; 32];
+        b[..16].copy_from_slice(m.id.as_bytes());
+        B256::from(b)
+    };
     let game_id_num: u64 = m.game_id.parse().unwrap_or(1);
 
     // Compute the EIP-712 digest for each signer and verify against their
@@ -319,7 +347,7 @@ pub async fn build_settle_multi_job(
         let recovered = crate::ladder::recover_ladder_signer(
             chain_id,
             multiplayer_addr,
-            on_chain_id as u64,
+            match_id_b256,
             game_id_num,
             &ranked_addrs,
             th_b256,
@@ -363,7 +391,7 @@ pub async fn build_settle_multi_job(
 
     Ok(serde_json::json!({
         "matchUuid": match_id.to_string(),
-        "onChainMatchId": on_chain_id,
+        "onChainMatchId": format!("{:#x}", match_id_b256),
         "rankedPlacements": ranked_addrs.iter().map(|a| format!("{a:#x}")).collect::<Vec<_>>(),
         "transcriptHash": th,
         "sessionNonce": nonce,
