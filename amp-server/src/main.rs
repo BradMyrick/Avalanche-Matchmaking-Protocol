@@ -113,6 +113,9 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(house = %house, "practice-bot opponent registered");
     }
 
+    // Shutdown channel: created before the state so every WS loop shares
+    // the receiver and the serve loop drives the sender.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let mut state = AppState {
         cfg: Arc::clone(&cfg),
         store: store.clone(),
@@ -123,11 +126,8 @@ async fn main() -> anyhow::Result<()> {
         verifier,
         settlement,
         live_matches: Arc::clone(&live_matches),
-        shutdown_tx: None,
-    shutdown_rx: {
-        let (_, rx) = tokio::sync::watch::channel(false);
-        rx
-    },
+        shutdown_tx: Some(shutdown_tx),
+    shutdown_rx,
 };
 
     // Rehydrate queued tickets from before a restart, preserving wait time.
