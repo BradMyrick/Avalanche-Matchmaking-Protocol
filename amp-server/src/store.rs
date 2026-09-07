@@ -202,6 +202,90 @@ impl Store {
         Ok(row.get::<i64, _>("n"))
     }
 
+    /// Leaderboard: top-rated players for a game/ruleset.
+    pub async fn leaderboard(
+        &self,
+        game_id: &str,
+        ruleset_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> sqlx::Result<Vec<(String, f64, f64, i64, i64, i64)>> {
+        let rows = sqlx::query_as(
+            "SELECT wallet, rating, rating_deviation, wins, losses, draws \
+             FROM amp_ratings \
+             WHERE game_id = $1 AND ruleset_id = $2 \
+             ORDER BY rating DESC, rating_deviation ASC, wallet ASC \
+             LIMIT $3 OFFSET $4",
+        )
+        .bind(game_id)
+        .bind(ruleset_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Retention sweep (janitor loop): expired/revoked sessions, stale
+    /// commits, aged-out exit certs and ladder reports.
+    pub async fn retention_sweep(&self) -> sqlx::Result<(u64, u64, u64, u64)> {
+        let sessions = sqlx::query("DELETE FROM amp_sessions WHERE expires_at < now()")
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+
+        // Commits that never formed a lobby (24 h) expire so the wallet
+        // can commit again.
+        let commits = sqlx::query(
+            "UPDATE amp_commits SET state = 'expired' \
+             WHERE state = 'committed' AND created_at < now() - interval '24 hours'",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        let certs = sqlx::query(
+            "DELETE FROM amp_exit_certs WHERE created_at < now() - interval '30 days'",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        let ladders = sqlx::query(
+            "DELETE FROM amp_ladder_reports WHERE created_at < now() - interval '30 days'",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        Ok((sessions, commits, certs, ladders))
+    }
+
+    /// Drop the oldest outstanding (unused, unexpired) challenges for a
+    /// wallet until `keep` remain. Anti-starvation: a fresh challenge can
+    /// always be minted even if a spammer pre-filled the wallet's slots —
+    /// their oldest entries age out first.
+    pub async fn trim_outstanding_challenges(
+        &self,
+        wallet: &str,
+        keep: i64,
+    ) -> sqlx::Result<u64> {
+        let res = sqlx::query(
+            r#"DELETE FROM amp_auth_challenges
+               WHERE ctid IN (
+                 SELECT ctid FROM amp_auth_challenges
+                 WHERE wallet = $1 AND used = false AND expires_at > now()
+                 ORDER BY created_at ASC
+                 LIMIT GREATEST($2, 0)
+               )"#,
+        )
+        .bind(wallet)
+        .bind(keep)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
+
     /// Atomically consume a challenge: single-use, unexpired, wallet-bound.
     pub async fn consume_challenge(&self, nonce: &str, wallet: &str) -> sqlx::Result<bool> {
         let res = sqlx::query(
@@ -254,12 +338,16 @@ impl Store {
 
     // ---- queue ---------------------------------------------------------------
 
-    pub async fn insert_ticket(&self, row: &TicketRow) -> sqlx::Result<()> {
-        sqlx::query(
+    /// Ok(true) = queued; Ok(false) = the wallet already holds an active
+    /// ticket (unique-index race winner got there first — idempotent win).
+    pub async fn insert_ticket(&self, row: &TicketRow) -> sqlx::Result<bool> {
+        let res = sqlx::query(
             r#"INSERT INTO amp_queue_tickets
                    (id, wallet, game_id, ruleset_id, stake_wei, region, status, joined_at,
                     intent_deadline, intent_sig)
-               VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9)"#,
+               VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9)
+               ON CONFLICT DO NOTHING
+               RETURNING id"#,
         )
         .bind(row.id)
         .bind(&row.wallet)
@@ -270,9 +358,9 @@ impl Store {
         .bind(row.joined_at)
         .bind(row.intent_deadline)
         .bind(row.intent_sig.as_deref())
-        .execute(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
-        Ok(())
+        Ok(res.is_some())
     }
 
     pub async fn active_ticket(&self, wallet: &str) -> sqlx::Result<Option<TicketRow>> {

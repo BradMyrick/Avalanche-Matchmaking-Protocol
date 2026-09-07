@@ -202,15 +202,23 @@ async fn poll_once(
     key_str: &str,
     cfg: &Arc<Config>,
 ) -> Result<bool> {
+    // Claim atomically: the tx flips pending → processing, so the row
+    // lock's release at COMMIT doesn't let a second relayer re-claim it.
+    let mut tx = pool.begin().await?;
     let row = sqlx::query(
-        r#"SELECT id, kind, payload::text as payload FROM relayer_jobs
-           WHERE status = 'pending'
-           ORDER BY id ASC
-           FOR UPDATE SKIP LOCKED
-           LIMIT 1"#,
+        r#"UPDATE relayer_jobs SET status = 'processing', claimed_at = now()
+           WHERE id = (
+             SELECT id FROM relayer_jobs
+             WHERE status = 'pending'
+             ORDER BY id ASC
+             FOR UPDATE SKIP LOCKED
+             LIMIT 1
+           )
+           RETURNING id, kind, payload::text as payload"#,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     let Some(rec) = row else { return Ok(false) };
     let job = Job {
@@ -222,6 +230,15 @@ async fn poll_once(
     };
 
     info!(job_id = job.id, kind = %job.kind, "processing job");
+
+    // Crash recovery: jobs claimed but never finished get retried once
+    // (bounded by the 10-minute stall window).
+    sqlx::query(
+        "UPDATE relayer_jobs SET status = 'pending' \
+         WHERE status = 'processing' AND claimed_at < now() - interval '10 minutes'",
+    )
+    .execute(pool)
+    .await?;
 
     let result = match job.kind.as_str() {
         "fund" => fund_job(provider, &job, key_str, pool, cfg).await,
@@ -641,7 +658,7 @@ async fn submit_multiplayer_settlement(
     // createLobby's storage, the server's ladder digests, and every SDK.
     let match_id_bytes = {
         let mut b = [0u8; 32];
-        let uuid = uuid::Uuid::parse_str(&match_uuid)
+        let uuid = uuid::Uuid::parse_str(match_uuid)
             .context("settle payload matchUuid is not a UUID")?;
         b[..16].copy_from_slice(uuid.as_bytes());
         b

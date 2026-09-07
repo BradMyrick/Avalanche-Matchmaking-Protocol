@@ -121,33 +121,6 @@ impl Store {
         }
     }
 
-    pub async fn get_party_by_invite(&self, code: &str) -> Result<Option<PartyRow>, ApiError> {
-        let row = sqlx::query_as::<_, (Uuid, String, String, String, String, String, String, DateTime<Utc>, Option<DateTime<Utc>>)>(
-            "SELECT id, leader, members::text, game_id, ruleset_id, state, invite_code, created_at, locked_at FROM amp_parties WHERE invite_code = $1 AND state = 'open'",
-        )
-        .bind(code)
-        .fetch_optional(self.pool())
-        .await
-        .map_err(ApiError::Database)?;
-        match row {
-            Some(r) => {
-                let members: Vec<PartyMember> = serde_json::from_str(&r.2)
-                    .map_err(|e| ApiError::Internal(anyhow::anyhow!("bad members json: {e}")))?;
-                Ok(Some(PartyRow {
-                    id: r.0,
-                    leader: r.1,
-                    members,
-                    game_id: r.3,
-                    ruleset_id: r.4,
-                    state: r.5,
-                    invite_code: r.6,
-                    created_at: r.7,
-                    locked_at: r.8,
-                }))
-            }
-            None => Ok(None),
-        }
-    }
 
     pub async fn join_party(
         &self,
@@ -155,31 +128,66 @@ impl Store {
         wallet: &str,
         region: &str,
     ) -> Result<PartyRow, ApiError> {
-        let party = self
-            .get_party_by_invite(invite_code)
-            .await?
-            .ok_or_else(|| ApiError::NotFound("party not found or closed".into()))?;
-        if party.members.len() >= 16 {
+        // Row-locked read-modify-write: concurrent joins can no longer
+        // lose an update on the members JSONB.
+        let mut tx = self
+            .pool()
+            .begin()
+            .await
+            .map_err(ApiError::Database)?;
+        let row = sqlx::query(
+            "SELECT id, leader, members::text, game_id, ruleset_id, state, invite_code, created_at \
+             FROM amp_parties WHERE invite_code = $1 AND state = 'open' FOR UPDATE",
+        )
+        .bind(invite_code)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::Database)?
+        .ok_or_else(|| ApiError::NotFound("party not found or closed".into()))?;
+        use sqlx::Row as _;
+        let members_json: String = row.get("members");
+        let mut members: Vec<PartyMember> = serde_json::from_str(&members_json)
+            .map_err(|e| ApiError::Internal(e.into()))?;
+        if members.len() >= 16 {
             return Err(ApiError::Conflict("party is full".into()));
         }
-        if party.members.iter().any(|m| m.wallet == wallet) {
-            return Ok(party); // idempotent
+        if members.iter().any(|m| m.wallet == wallet) {
+            return Ok(PartyRow {
+                id: row.get("id"),
+                leader: row.get("leader"),
+                members,
+                game_id: row.get("game_id"),
+                ruleset_id: row.get("ruleset_id"),
+                state: row.get("state"),
+                invite_code: row.get("invite_code"),
+                created_at: row.get("created_at"),
+                locked_at: None,
+            }); // idempotent
         }
-        let mut members = party.members.clone();
         members.push(PartyMember {
             wallet: wallet.to_string(),
             region: region.to_string(),
             accepted_at: Utc::now(),
         });
+        let party_id: Uuid = row.get("id");
         sqlx::query("UPDATE amp_parties SET members = $2::jsonb WHERE id = $1")
-            .bind(party.id)
+            .bind(party_id)
             .bind(serde_json::to_string(&members).unwrap())
-            .execute(self.pool())
+            .execute(&mut *tx)
             .await
             .map_err(ApiError::Database)?;
-        let mut updated = party;
-        updated.members = members;
-        Ok(updated)
+        tx.commit().await.map_err(ApiError::Database)?;
+        Ok(PartyRow {
+            id: party_id,
+            leader: row.get("leader"),
+            members,
+            game_id: row.get("game_id"),
+            ruleset_id: row.get("ruleset_id"),
+            state: row.get("state"),
+            invite_code: row.get("invite_code"),
+            created_at: row.get("created_at"),
+            locked_at: None,
+        })
     }
 
     pub async fn lock_party(&self, id: Uuid) -> Result<PartyRow, ApiError> {

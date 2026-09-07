@@ -170,7 +170,11 @@ fn period_update(
 ) -> Option<(f64, f64, f64)> {
     let delta = v * outcome_sum;
 
-    let a = sigma.ln();
+    // Glickman 2013 step 5: solve for x = ln σ'², with a = ln σ² and
+    // σ' = e^{x*/2}. (An earlier revision anchored at ln σ and exponentiated
+    // directly — a subtly different stationarity equation; see the pinned
+    // paper-vector tests.)
+    let a = 2.0 * sigma.ln();
     let f = |x: f64| -> f64 {
         let ex = x.exp();
         let phi2 = phi * phi;
@@ -218,7 +222,8 @@ fn period_update(
     if !a_iter.is_finite() || !b_iter.is_finite() {
         return None;
     }
-    let sigma_new = ((a_iter + b_iter) / 2.0).exp();
+    let x_star = (a_iter + b_iter) / 2.0;
+    let sigma_new = (x_star / 2.0).exp(); // σ' = e^{x*/2}
 
     let phi_star = (phi * phi + sigma_new * sigma_new).sqrt();
     let phi_new = 1.0 / (1.0 / (phi_star * phi_star) + 1.0 / v).sqrt();
@@ -229,6 +234,42 @@ fn period_update(
 
 #[cfg(test)]
 mod tests {
+    // ── Paper golden vectors (Glickman 2013) ────────────────────────────
+    // Reference values produced by an independent implementation of the
+    // paper's steps 1–8 (Illinois solver, a = ln σ², σ' = e^{x*/2}); the
+    // three-opponent case reproduces the paper's published worked example
+    // (r' = 1464.05, RD' = 151.52, σ' = 0.0600).
+
+    #[test]
+    fn paper_vector_single_win() {
+        let (r, rd, v) = glicko2_update(1500.0, 200.0, 0.06, 1400.0, 30.0, 1.0);
+        assert!((r - 1563.5642).abs() < 0.02, "r' was {r}");
+        assert!((rd - 175.4027).abs() < 0.02, "RD' was {rd}");
+        assert!((v - 0.059999).abs() < 0.0001, "sigma' was {v}");
+    }
+
+    #[test]
+    fn paper_vector_equal_draw() {
+        let (r, rd, v) = glicko2_update(1500.0, 50.0, 0.06, 1500.0, 50.0, 0.5);
+        assert!((r - 1500.0).abs() < 0.01, "r' was {r}");
+        assert!((rd - 50.5448).abs() < 0.02, "RD' was {rd}");
+        assert!((v - 0.059997).abs() < 0.0001, "sigma' was {v}");
+    }
+
+    #[test]
+    fn paper_vector_worked_example_vs_many() {
+        // The paper's example: (1500, 200, 0.06) vs
+        // (1400, 30) win, (1550, 100) loss, (1700, 300) loss.
+        let (r, rd, v) = glicko2_update_vs_many(
+            1500.0, 200.0, 0.06,
+            &[(1400.0, 30.0), (1550.0, 100.0), (1700.0, 300.0)],
+            &[1.0, 0.0, 0.0],
+        );
+        assert!((r - 1464.0507).abs() < 0.02, "r' was {r}");
+        assert!((rd - 151.5165).abs() < 0.02, "RD' was {rd}");
+        assert!((v - 0.059996).abs() < 0.0001, "sigma' was {v}");
+    }
+
     use super::*;
 
     // ---- N-player / rating-period semantics -------------------------------
