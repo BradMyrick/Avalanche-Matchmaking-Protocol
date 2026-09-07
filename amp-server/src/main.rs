@@ -23,6 +23,7 @@ mod matchsvc;
 mod multiplayer;
 mod party;
 mod queue;
+mod ratelimit;
 mod rating_pipeline;
 mod store;
 mod ws;
@@ -112,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(house = %house, "practice-bot opponent registered");
     }
 
-    let state = AppState {
+    let mut state = AppState {
         cfg: Arc::clone(&cfg),
         store: store.clone(),
         queue: Arc::clone(&queue),
@@ -122,7 +123,12 @@ async fn main() -> anyhow::Result<()> {
         verifier,
         settlement,
         live_matches: Arc::clone(&live_matches),
-    };
+        shutdown_tx: None,
+    shutdown_rx: {
+        let (_, rx) = tokio::sync::watch::channel(false);
+        rx
+    },
+};
 
     // Rehydrate queued tickets from before a restart, preserving wait time.
     let tickets = store.rehydrate_tickets().await?;
@@ -174,14 +180,22 @@ async fn main() -> anyhow::Result<()> {
             .allow_headers(tower_http::cors::Any)
     };
 
-    let app = crate::http::router(state.clone())
+    // Rate limiting (per-IP, auth tier on /v1/auth/*) + request timeouts
+    // for everything except the WebSocket stream.
+    let limiter = std::sync::Arc::new(ratelimit::RateLimiter::new());
+    let (ws_router, api_router) = crate::http::router(state.clone());
+    let app = api_router
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(axum::http::StatusCode::REQUEST_TIMEOUT, Duration::from_secs(30)))
+        .merge(ws_router)
+        .layer(axum::middleware::from_fn(ratelimit::limit))
+        .layer(axum::Extension(limiter))
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     let listener = TcpListener::bind(&cfg.bind).await?;
     tracing::info!(bind = %cfg.bind, status = ?crate::http::status_json(&state).await, "amp-server listening");
 
-    // tick loop
+    // tick loop — pure matchmaking pairing, no I/O beyond the DB.
     {
         let st = state.clone();
         tokio::spawn(async move {
@@ -191,19 +205,39 @@ async fn main() -> anyhow::Result<()> {
                 if let Err(e) = tick_once(&st).await {
                     tracing::error!(error = format!("{e:#}"), "matchmaker tick failed");
                 }
-                // N-player lobby formation from revealed commits.
-                let mp_addr = st.cfg.multiplayer_address.clone().unwrap_or_default();
-                if let Err(e) = crate::lobby::form_lobbies_from_reveals(
-                    &st.store,
-                    &st.hub,
-                    &mp_addr,
-                    st.cfg.chain_id,
-                    &st.cfg.rpc_url,
-                )
-                .await
-                {
-                    tracing::warn!(error = format!("{e:#}"), "lobby formation failed");
+            }
+        });
+    }
+
+    // Lobby formation: its own cadence and a re-entrancy guard, so a slow
+    // chain RPC (blockhash fetch) can never stall 1v1 matchmaking.
+    {
+        let st = state.clone();
+        tokio::spawn(async move {
+            let busy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let mut interval = tokio::time::interval(Duration::from_millis(500));
+            loop {
+                interval.tick().await;
+                if busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    continue; // previous formation still in flight
                 }
+                let st = st.clone();
+                let busy = std::sync::Arc::clone(&busy);
+                tokio::spawn(async move {
+                    let mp_addr = st.cfg.multiplayer_address.clone().unwrap_or_default();
+                    if let Err(e) = crate::lobby::form_lobbies_from_reveals(
+                        &st.store,
+                        &st.hub,
+                        &mp_addr,
+                        st.cfg.chain_id,
+                        &st.cfg.rpc_url,
+                    )
+                    .await
+                    {
+                        tracing::warn!(error = format!("{e:#}"), "lobby formation failed");
+                    }
+                    busy.store(false, std::sync::atomic::Ordering::SeqCst);
+                });
             }
         });
     }
@@ -237,16 +271,38 @@ async fn main() -> anyhow::Result<()> {
                     Ok(_) => {}
                     Err(e) => tracing::warn!(error = %e, "challenge purge failed"),
                 }
+                match st.store.retention_sweep().await {
+                    Ok((0, 0, 0, 0)) => {}
+                    Ok((sessions, commits, certs, ladders)) => tracing::debug!(
+                        sessions, commits, certs, ladders, "retention sweep"
+                    ),
+                    Err(e) => tracing::warn!(error = %e, "retention sweep failed"),
+                }
             }
         });
     }
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-            tracing::info!("shutting down");
-        })
-        .await?;
+    // Shutdown signal shared with the WS loops so idle sockets don't hang
+    // graceful shutdown forever. (The AppState keeps its own watch pair,
+    // seeded pre-boot; the ctrl_c handler drives the same channel.)
+    let shutdown_tx = state
+        .shutdown_tx
+        .take()
+        .expect("shutdown_tx present until serve");
+    let mut shutdown_ack = shutdown_tx.subscribe();
+
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        tracing::info!("shutting down");
+        let _ = shutdown_tx.send(true);
+        // Wait (bounded) for sockets to observe the signal and close.
+        let _ = tokio::time::timeout(Duration::from_secs(3), shutdown_ack.changed()).await;
+    })
+    .await?;
 
     Ok(())
 }

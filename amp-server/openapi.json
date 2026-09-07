@@ -1,0 +1,269 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AMP — Avalanche Matchmaking Protocol",
+    "version": "1.0.0",
+    "description": "Ranked matchmaking, skill ratings (Glicko-2), parties, N-player staked lobbies, and on-chain settlement. One gasless EIP-191 signature per player; every signing path (reports, ladders, death certs) is automatic and free.\n\nConventions:\n- Auth: Bearer session token from /v1/auth/verify (7-day TTL).\n- Errors: `{ \"error\": <code>, \"message\": <human string> }` on every non-2xx.\n- Party endpoints use snake_case field names (historical); all others camelCase.\n- WebSocket: /v1/ws?token=<session> — events arrive as {type, data}; server pings every 30s, drops idle sockets at 90s.",
+    "contact": { "url": "https://playwithamp.xyz" },
+    "license": { "name": "Apache-2.0" }
+  },
+  "servers": [{ "url": "https://amp.playwithamp.xyz" }],
+  "security": [{ "bearerAuth": [] }],
+  "tags": [
+    { "name": "auth" }, { "name": "players" }, { "name": "games" },
+    { "name": "queue" }, { "name": "matches" }, { "name": "parties" },
+    { "name": "multi" }, { "name": "events" }, { "name": "discovery" }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": ["discovery"], "security": [], "summary": "Liveness probe",
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/v1/server": {
+      "get": {
+        "tags": ["discovery"], "security": [], "summary": "Server identity, chain, contracts, and limits",
+        "responses": {
+          "200": {
+            "description": "Capability discovery",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/v1/openapi.json": {
+      "get": {
+        "tags": ["discovery"], "security": [], "summary": "This document",
+        "responses": { "200": { "description": "OpenAPI 3.1 spec" } }
+      }
+    },
+    "/v1/auth/challenge": {
+      "post": {
+        "tags": ["auth"], "security": [], "summary": "Request a login challenge (gasless EIP-191)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["wallet"],
+          "properties": { "wallet": { "type": "string", "description": "0x address, checksummed or lowercase" } }
+        } } } },
+        "responses": {
+          "200": { "description": "Challenge message to sign (5 min TTL, single-use)" },
+          "429": { "description": "rate_limited — 10/min burst per IP; 6/5min per wallet" }
+        }
+      }
+    },
+    "/v1/auth/verify": {
+      "post": {
+        "tags": ["auth"], "security": [], "summary": "Verify signature, mint 7-day session",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["wallet", "signature", "challenge"],
+          "properties": {
+            "wallet": { "type": "string" },
+            "signature": { "type": "string", "description": "65-byte r|s|v hex, v in {27,28}" },
+            "challenge": { "type": "string", "description": "The exact challenge string from /challenge" }
+          }
+        } } } },
+        "responses": { "200": { "description": "{ token, expiresAt, player }" } }
+      }
+    },
+    "/v1/games": {
+      "get": {
+        "tags": ["games"], "security": [], "summary": "Registered games with live queue depths",
+        "responses": { "200": { "description": "{ games: [{ id, name, rulesets: [{ id, name, queueDepth }] }], chainId, stakingEnabled }" } }
+      }
+    },
+    "/v1/leaderboard": {
+      "get": {
+        "tags": ["games"], "security": [], "summary": "Skill ladder (Glicko-2), rank-ordered",
+        "parameters": [
+          { "name": "gameId", "in": "query", "schema": { "type": "string", "default": "amp-tactics" } },
+          { "name": "rulesetId", "in": "query", "schema": { "type": "string", "default": "ranked-1v1" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "minimum": 0, "default": 0 } }
+        ],
+        "responses": {
+          "200": { "description": "{ gameId, rulesetId, entries: [{ rank, wallet, rating, deviation, wins, losses, draws }] }" }
+        }
+      }
+    },
+    "/v1/me": {
+      "get": { "tags": ["players"], "summary": "Authenticated player: wallet, ratings, live match",
+        "responses": { "200": { "description": "{ wallet, ratings[], liveMatchId, queueTicket }" } } }
+    },
+    "/v1/players/{wallet}": {
+      "get": { "tags": ["players"], "security": [], "summary": "Public profile + match history",
+        "parameters": [{ "name": "wallet", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "{ wallet, ratings[], matches[] }" } } }
+    },
+    "/v1/queue/join": {
+      "post": { "tags": ["queue"], "summary": "Join a ranked queue (skill-window matchmaking)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["gameId", "rulesetId"],
+          "properties": {
+            "gameId": { "type": "string" }, "rulesetId": { "type": "string" },
+            "stakeWei": { "type": "integer", "description": "Required when staking is enabled" },
+            "intent": { "type": "object", "description": "EIP-712 stake intent (staked queues)" }
+          }
+        } } } },
+        "responses": {
+          "200": { "description": "{ ticketId, queueDepth, skillWindow }" },
+          "409": { "description": "conflict — already queued (one active ticket per wallet)" }
+        } }
+    },
+    "/v1/queue/leave": {
+      "post": { "tags": ["queue"], "summary": "Leave the queue",
+        "responses": { "200": { "description": "{ left: true }" } } }
+    },
+    "/v1/queue/status": {
+      "get": { "tags": ["queue"], "summary": "Ticket depth, wait, skill window",
+        "responses": { "200": { "description": "{ queued, depth, waitedMs, skillWindow }" } } }
+    },
+    "/v1/queue/play-bot": {
+      "post": { "tags": ["queue"], "summary": "Skip the wait — instant match vs the house bot",
+        "responses": { "200": { "description": "{ matchId, bot: true }" } } }
+    },
+    "/v1/matches/{id}": {
+      "get": { "tags": ["matches"], "summary": "Match view (you see your side)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "MatchView" }, "404": { "description": "not_found" } } }
+    },
+    "/v1/matches/history": {
+      "get": { "tags": ["matches"], "summary": "Your recent matches",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": { "200": { "description": "{ matches: MatchView[] }" } } }
+    },
+    "/v1/matches/{id}/report": {
+      "post": { "tags": ["matches"], "summary": "Report your 1v1 result (auto-signs EIP-191, gasless)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["result"],
+          "properties": {
+            "result": { "type": "string", "enum": ["win", "loss", "draw"] },
+            "transcriptHash": { "type": "string", "description": "keccak256 hex — dispute evidence" },
+            "signature": { "type": "string", "description": "EIP-191 over AMP_REPORT:v1:{id}:{result}; SDKs sign automatically" }
+          }
+        } } } },
+        "responses": { "200": { "description": "{ matchId, state }" } } }
+    },
+    "/v1/matches/{id}/escrow/verify": {
+      "post": { "tags": ["matches"], "summary": "Verify on-chain escrow for a staked 1v1 (flips escrow_pending → live)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "{ matchId, state, escrow }" } } }
+    },
+    "/v1/parties": {
+      "post": { "tags": ["parties"], "summary": "Create a party (returns shareable invite code)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["game_id", "ruleset_id"],
+          "properties": { "game_id": { "type": "string" }, "ruleset_id": { "type": "string" } }
+        } } } },
+        "responses": { "200": { "description": "{ partyId, inviteCode, leader }" } } }
+    },
+    "/v1/parties/join": {
+      "post": { "tags": ["parties"], "summary": "Join by invite code",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["invite_code"],
+          "properties": { "invite_code": { "type": "string", "description": "6 chars, case-insensitive" } }
+        } } } },
+        "responses": { "200": { "description": "{ partyId, members }" } } }
+    },
+    "/v1/parties/{id}": {
+      "get": { "tags": ["parties"], "summary": "Party details",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "PartyInfo" } } }
+    },
+    "/v1/parties/{id}/lock": {
+      "post": { "tags": ["parties"], "summary": "Leader locks the roster (ready to queue)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "{ state: locked }" } } }
+    },
+    "/v1/parties/{id}/disband": {
+      "post": { "tags": ["parties"], "summary": "Leader disbands",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "{ disbanded: true }" } } }
+    },
+    "/v1/multi/commit": {
+      "post": { "tags": ["multi"], "summary": "Commit into the N-player FFA queue (commit-reveal anti-collusion)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["commitHash"],
+          "properties": {
+            "gameId": { "type": "string" }, "rulesetId": { "type": "string" },
+            "commitHash": { "type": "string", "description": "keccak256(addr20 ‖ stake_u64_be(8) ‖ salt-utf8) — SDKs compute" },
+            "stakeWei": { "type": "integer", "default": 0 },
+            "lobbySize": { "type": "integer", "minimum": 2, "maximum": 64, "default": 4 }
+          }
+        } } } },
+        "responses": { "200": { "description": "{ committed, committedCount, ready }" } } }
+    },
+    "/v1/multi/reveal": {
+      "post": { "tags": ["multi"], "summary": "Reveal your salt once the lobby fills",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["salt"],
+          "properties": { "gameId": { "type": "string" }, "rulesetId": { "type": "string" }, "salt": { "type": "string" } }
+        } } } },
+        "responses": { "200": { "description": "{ revealed, revealedCount }" } } }
+    },
+    "/v1/multi/{id}": {
+      "get": { "tags": ["multi"], "summary": "Multiplayer match state",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "MultiMatch with canonical matchIdBytes32" } } }
+    },
+    "/v1/multi/{id}/report": {
+      "post": { "tags": ["multi"], "summary": "Submit the final ladder (auto-signs EIP-712, gasless; quorum settles)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["ranked", "transcriptHash", "sessionNonce"],
+          "properties": {
+            "ranked": { "type": "array", "items": { "type": "array", "items": {} }, "description": "[[wallet, place], …] best-first" },
+            "transcriptHash": { "type": "string", "description": "bytes32 hex" },
+            "sessionNonce": { "type": "integer" },
+            "signature": { "type": "string", "description": "EIP-712 MultiplayerLadder over matchIdBytes32" }
+          }
+        } } } },
+        "responses": { "200": { "description": "{ matchId, state, concordant, quorumNeeded }" } } }
+    },
+    "/v1/multi/{id}/claim": {
+      "post": { "tags": ["multi"], "summary": "Trigger settlement for a quorum-reached match",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "{ matchId, state }" }, "409": { "description": "conflict — already claimed" } } }
+    },
+    "/v1/multi/{id}/exit": {
+      "post": { "tags": ["multi"], "summary": "Submit a death certificate on elimination (auto-signs EIP-191; unlocks your reporting bond; then disconnect)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["rank", "exit_frame", "state_hash", "signature"],
+          "properties": {
+            "rank": { "type": "integer" }, "exit_frame": { "type": "integer" },
+            "state_hash": { "type": "string" }, "signature": { "type": "string" }
+          }
+        } } } },
+        "responses": { "200": { "description": "{ matchId, recorded }" } } }
+    },
+    "/v1/multi/{id}/exit/{wallet}": {
+      "post": { "tags": ["multi"], "summary": "Survivor countersigns an exit cert (verifies state hash)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "wallet", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["state_hash"],
+          "properties": { "state_hash": { "type": "string" } }
+        } } } },
+        "responses": { "200": { "description": "{ matchId, certified, countersigners }" } } }
+    },
+    "/v1/ws": {
+      "get": {
+        "tags": ["events"], "summary": "Live event stream (WebSocket)",
+        "description": "Auth via ?token=<session>. Events: hello, queue_status, match_found, match_result, match_update, multi_lobby_formed (carries matchIdBytes32 — sign THAT), multi_state, multi_result, multi_cancelled, pong. Server pings every 30s; idle sockets drop at 90s; 3 sockets max per wallet.",
+        "parameters": [{ "name": "token", "in": "query", "required": true, "schema": { "type": "string" } }],
+        "responses": { "101": { "description": "Switching Protocols" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
+    }
+  }
+}

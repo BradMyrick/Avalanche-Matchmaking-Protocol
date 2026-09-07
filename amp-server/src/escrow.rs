@@ -143,7 +143,7 @@ pub async fn multi_lobby_ready(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            if joinedUntil != 0 && now > u64::from(joinedUntil) {
+            if joinedUntil != 0 && now > joinedUntil {
                 LobbyPhase::Expired
             } else {
                 LobbyPhase::Funding

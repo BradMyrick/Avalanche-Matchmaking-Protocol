@@ -19,6 +19,8 @@ pub enum ApiError {
     NotFound(String),
     #[error("conflict: {0}")]
     Conflict(String),
+    #[error("{0}")]
+    TooManyRequests(String),
     #[error("staking is not enabled on this deployment")]
     StakingDisabled,
     #[error(transparent)]
@@ -34,6 +36,7 @@ impl IntoResponse for ApiError {
             ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
             ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+            ApiError::TooManyRequests(_) => (StatusCode::TOO_MANY_REQUESTS, "rate_limited"),
             ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             ApiError::StakingDisabled => (StatusCode::NOT_IMPLEMENTED, "staking_disabled"),
             ApiError::Database(e) => {

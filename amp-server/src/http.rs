@@ -37,6 +37,10 @@ pub struct AppState {
     pub verifier: Option<Arc<PrivateKeySigner>>,
     pub settlement: Option<Address>,
     pub live_matches: Arc<AtomicUsize>,
+    /// Set at boot; WS loops select on it so idle sockets can't hang
+    /// graceful shutdown.
+    pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    pub shutdown_rx: tokio::sync::watch::Receiver<bool>,
 }
 
 impl axum::extract::FromRef<AppState> for AuthService {
@@ -81,12 +85,20 @@ pub fn load_games() -> Vec<GameDef> {
 
 // ---- router -------------------------------------------------------------------
 
-pub fn router(state: AppState) -> Router {
-    Router::new()
+pub fn router(state: AppState) -> (Router, Router) {
+    // The WebSocket stream is long-lived: it must NOT inherit the API
+    // timeout layer. Returned as (ws_router, api_router).
+    let ws_router: Router = Router::new()
+        .route("/v1/ws", get(ws_upgrade))
+        .with_state(state.clone());
+    let router: Router = Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/auth/challenge", post(auth_challenge))
         .route("/v1/auth/verify", post(auth_verify))
         .route("/v1/games", get(list_games))
+        .route("/v1/leaderboard", get(leaderboard))
+        .route("/v1/server", get(server_info))
+        .route("/v1/openapi.json", get(openapi_spec))
         .route("/v1/me", get(me))
         .route("/v1/queue/join", post(queue_join))
         .route("/v1/queue/leave", post(queue_leave))
@@ -110,8 +122,9 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/multi/{id}/claim", post(multi_claim))
         .route("/v1/multi/{id}/exit", post(submit_exit_cert))
         .route("/v1/multi/{id}/exit/{wallet}", post(countersign_exit))
-        .route("/v1/ws", get(ws_upgrade))
-        .with_state(state)
+        .with_state(state);
+
+    (ws_router, router)
 }
 
 async fn healthz() -> impl IntoResponse {
@@ -416,7 +429,8 @@ async fn queue_join(
     let joined_at = chrono::Utc::now();
     let joined_ms = joined_at.timestamp_millis().max(0) as u64;
 
-    st.store
+    let inserted = st
+        .store
         .insert_ticket(&TicketRow {
             id: ticket_id,
             wallet: wallet.clone(),
@@ -432,6 +446,12 @@ async fn queue_join(
         })
         .await
         .map_err(ApiError::Database)?;
+    if !inserted {
+        // Unique-index race: another request queued this wallet first.
+        return Err(ApiError::Conflict(
+            "already queued — leave the queue before rejoining".into(),
+        ));
+    }
 
     let canonical_ruleset = ruleset_id.clone();
     st.queue.join(QueueEntry {
@@ -1623,13 +1643,21 @@ async fn countersign_exit(
         return Err(ApiError::Forbidden("not a participant".into()));
     }
 
-    // Fetch the existing certificate.
+    // Row-locked read-modify-write: concurrent countersigns can't lose
+    // an update on the countersigned_by JSONB.
+    let mut tx = st
+        .store
+        .pool()
+        .begin()
+        .await
+        .map_err(ApiError::Database)?;
     let row = sqlx::query(
-        "SELECT state_hash, countersigned_by FROM amp_exit_certs WHERE match_id = $1 AND wallet = $2",
+        "SELECT state_hash, countersigned_by FROM amp_exit_certs \
+         WHERE match_id = $1 AND wallet = $2 FOR UPDATE",
     )
     .bind(id)
     .bind(&cert_wallet)
-    .fetch_optional(st.store.pool())
+    .fetch_optional(&mut *tx)
     .await
     .map_err(ApiError::Database)?
     .ok_or_else(|| ApiError::NotFound("exit certificate not found".into()))?;
@@ -1653,9 +1681,10 @@ async fn countersign_exit(
         .bind(id)
         .bind(&cert_wallet)
         .bind(serde_json::to_string(&signed_by).unwrap())
-        .execute(st.store.pool())
+        .execute(&mut *tx)
         .await
         .map_err(ApiError::Database)?;
+    tx.commit().await.map_err(ApiError::Database)?;
 
     Ok(Json(json!({
         "matchId": id.to_string(),
@@ -1681,7 +1710,24 @@ async fn ws_upgrade(
 }
 
 async fn ws_loop(st: AppState, wallet: String, mut socket: WebSocket) {
-    let mut rx = st.hub.register(&wallet);
+    // Connection cap: a wallet gets a few sockets (multi-tab), not dozens.
+    let conn = match st.hub.register(&wallet) {
+        Ok(conn) => conn,
+        Err(_) => {
+            let _ = socket
+                .send(Message::Text(
+                    json!({ "type": "error", "data": { "code": "too_many_connections",
+                        "message": "connection cap for this wallet" } })
+                        .to_string()
+                        .into(),
+                ))
+                .await;
+            return;
+        }
+    };
+    let conn_id = conn.id;
+    let mut rx = conn.rx;
+
     // Tell the client who they are (useful for multi-tab debugging).
     if socket
         .send(Message::Text(
@@ -1692,11 +1738,23 @@ async fn ws_loop(st: AppState, wallet: String, mut socket: WebSocket) {
         .await
         .is_err()
     {
+        st.hub.unregister(&wallet, conn_id);
         return;
     }
 
+    // Server-side keepalive + idle timeout: a dead client is dropped after
+    // IDLE_SECS without traffic, freeing its hub slot and letting graceful
+    // shutdown complete.
+    const IDLE_SECS: u64 = 90;
+    const PING_SECS: u64 = 30;
+    let mut ping = tokio::time::interval(std::time::Duration::from_secs(PING_SECS));
+    ping.tick().await; // first tick is immediate
+    let mut last_activity = std::time::Instant::now();
+    let mut shutdown = st.shutdown_rx.clone();
+
     loop {
         tokio::select! {
+            _ = shutdown.changed() => break,
             event = rx.recv() => match event {
                 Some(msg) => {
                     if socket.send(Message::Text(msg.into())).await.is_err() {
@@ -1707,17 +1765,115 @@ async fn ws_loop(st: AppState, wallet: String, mut socket: WebSocket) {
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(t))) => {
+                    last_activity = std::time::Instant::now();
                     // Lightweight client→server ping: {"type":"ping"}
                     if t.as_str().starts_with("{\"type\":\"ping\"") {
                         let _ = socket.send(Message::Text(json!({ "type": "pong", "data": {} }).to_string().into())).await;
                     }
                 }
+                Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => {
+                    last_activity = std::time::Instant::now();
+                }
                 Some(Ok(_)) => {}
                 Some(Err(_)) | None => break,
             },
+            _ = ping.tick() => {
+                if last_activity.elapsed().as_secs() > IDLE_SECS {
+                    break; // idle socket — drop it
+                }
+                if socket.send(Message::Ping(vec![].into())).await.is_err() {
+                    break;
+                }
+            }
         }
     }
+    st.hub.unregister(&wallet, conn_id);
     // Dropping the socket closes the connection.
+}
+
+// ---- discovery & leaderboard -----------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+struct LeaderboardParams {
+    #[serde(rename = "gameId")]
+    game_id: Option<String>,
+    #[serde(rename = "rulesetId")]
+    ruleset_id: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+/// Public skill ladder for a game/ruleset. Ties break on lower deviation,
+/// then wallet — deterministic ordering for pagination.
+async fn leaderboard(
+    State(st): State<AppState>,
+    axum::extract::Query(p): axum::extract::Query<LeaderboardParams>,
+) -> ApiResult<Json<Value>> {
+    let game_id = p.game_id.unwrap_or_else(|| "amp-tactics".into());
+    let ruleset_id = p.ruleset_id.unwrap_or_else(|| "ranked-1v1".into());
+    let limit = p.limit.unwrap_or(20).clamp(1, 100);
+    let offset = p.offset.unwrap_or(0).max(0);
+
+    let rows = st
+        .store
+        .leaderboard(&game_id, &ruleset_id, limit, offset)
+        .await
+        .map_err(ApiError::Database)?;
+
+    let entries: Vec<Value> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, (wallet, rating, rd, w, l, d))| {
+            json!({
+                "rank": offset + i as i64 + 1,
+                "wallet": wallet,
+                "rating": rating.round() as i64,
+                "deviation": (rd * 10.0).round() / 10.0,
+                "wins": w,
+                "losses": l,
+                "draws": d,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "gameId": game_id,
+        "rulesetId": ruleset_id,
+        "entries": entries,
+    })))
+}
+
+/// Server identity + capability discovery. Everything a client needs to
+/// configure itself: versions, chain, contract addresses, limits.
+async fn server_info(State(st): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "name": "amp-server",
+        "version": env!("CARGO_PKG_VERSION"),
+        "chainId": st.cfg.chain_id,
+        "contracts": {
+            "registry": st.cfg.registry_address,
+            "settlement": st.cfg.settlement_address,
+            "multiplayer": st.cfg.multiplayer_address,
+        },
+        "stakingEnabled": st.cfg.staking_enabled,
+        "verifierConfigured": st.verifier.is_some(),
+        "rpcUrl": st.cfg.rpc_url,
+        "limits": {
+            "maxLiveMatches": st.cfg.max_active_matches,
+            "challengeBurstPerIp": 10,
+            "requestBurstPerIp": 300,
+            "wsIdleSeconds": 90,
+            "maxWsPerWallet": crate::ws::MAX_CONNS_PER_WALLET,
+        },
+    }))
+}
+
+/// The frozen API contract, served for tooling and SDK codegen.
+async fn openapi_spec() -> impl IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        include_str!("../openapi.json"),
+    )
 }
 
 // ---- status helper used by main's readiness log ---------------------------------------

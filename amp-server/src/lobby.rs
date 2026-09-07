@@ -287,7 +287,7 @@ pub async fn multi_sweep(store: &Store, hub: &crate::ws::WsHub) -> Result<(), Ap
                     .await
                     .unwrap_or(false)
                 {
-                    notify_multi_state(hub, &row, id, "live");
+                    notify_multi_state(hub, row, id, "live");
                 }
             }
             Ok(crate::escrow::LobbyPhase::Expired) => {
@@ -305,7 +305,7 @@ pub async fn multi_sweep(store: &Store, hub: &crate::ws::WsHub) -> Result<(), Ap
                     .await
                     .unwrap_or(false)
                 {
-                    notify_multi_state(hub, &row, id, "escrow_expired");
+                    notify_multi_state(hub, row, id, "escrow_expired");
                 }
             }
             Ok(crate::escrow::LobbyPhase::Funding)

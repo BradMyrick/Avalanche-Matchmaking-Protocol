@@ -30,12 +30,18 @@ pub fn challenge_message(site_name: &str, nonce: &str) -> String {
 }
 const CHALLENGE_TTL_SECS: i64 = 300;
 const MAX_OUTSTANDING_PER_WALLET: i64 = 5;
+/// Challenge creations per wallet per window.
+const MAX_CREATIONS_PER_WINDOW: usize = 6;
+const CHALLENGE_WINDOW: std::time::Duration = std::time::Duration::from_secs(300);
 
 #[derive(Clone)]
 pub struct AuthService {
     store: Store,
     session_ttl_hours: i64,
     site_name: String,
+
+    /// Per-wallet challenge-creation log (sliding window, anti-spam).
+    challenge_log: dashmap::DashMap<String, std::collections::VecDeque<std::time::Instant>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -51,6 +57,8 @@ impl AuthService {
             store,
             session_ttl_hours,
             site_name,
+        
+            challenge_log: dashmap::DashMap::new(),
         }
     }
 
@@ -59,15 +67,35 @@ impl AuthService {
         wallet: &str,
     ) -> Result<(String, chrono::DateTime<Utc>), ApiError> {
         let wallet = normalize_wallet(wallet)?;
+
+        // Per-wallet creation budget (in-memory sliding window). Combined
+        // with per-IP limiting this defeats challenge-spam lockouts: a
+        // spammer shares the victim's budget, and trimming (below) means
+        // the newest challenge always belongs to the most recent caller.
+        {
+            let mut log = self.challenge_log.entry(wallet.clone()).or_default();
+            let cutoff = std::time::Instant::now() - CHALLENGE_WINDOW;
+            log.retain(|t| *t > cutoff);
+            if log.len() >= MAX_CREATIONS_PER_WINDOW {
+                return Err(ApiError::TooManyRequests(
+                    "challenge rate limit for this wallet — retry in a few minutes".into(),
+                ));
+            }
+            log.push_back(std::time::Instant::now());
+        }
+
+        // Anti-starvation: when the wallet's slots are full, age out the
+        // OLDEST outstanding challenge rather than rejecting the caller.
         let outstanding = self
             .store
             .outstanding_challenges(&wallet)
             .await
             .map_err(ApiError::Database)?;
         if outstanding >= MAX_OUTSTANDING_PER_WALLET {
-            return Err(ApiError::BadRequest(
-                "too many outstanding challenges; finish or wait for one to expire".into(),
-            ));
+            self.store
+                .trim_outstanding_challenges(&wallet, outstanding - MAX_OUTSTANDING_PER_WALLET + 1)
+                .await
+                .map_err(ApiError::Database)?;
         }
         let nonce = uuid::Uuid::new_v4().to_string();
         let message = challenge_message(&self.site_name, &nonce);
