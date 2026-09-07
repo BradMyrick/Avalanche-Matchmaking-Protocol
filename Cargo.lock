@@ -608,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "amp-match-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "serde",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "amp-relayer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "dotenvy",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "amp-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alloy-contract",
  "alloy-primitives",
