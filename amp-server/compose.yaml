@@ -46,9 +46,33 @@ services:
       # Arbitration API token. Generate: openssl rand -hex 24
       AMP_ADMIN_TOKEN: ${AMP_ADMIN_TOKEN:-}
       AMP_CORS_ORIGINS: ${AMP_CORS_ORIGINS:-*}
+      # N-player pipeline: chain reads (escrow phase polling) + the
+      # multiplayer contract the relayer targets. Unset ⇒ free-play mode.
+      AMP_RPC_URL: ${AMP_RPC_URL:-https://api.avax-test.network/ext/bc/C/rpc}
+      AMP_MULTIPLAYER_ADDRESS: ${AMP_MULTIPLAYER_ADDRESS:-}
       RUST_LOG: info
     ports:
       - "${AMP_HOST_PORT:-8080}:8080"
+
+  # N-player settlement relayer: processes create_lobby / settle_multi /
+  # expire_multi jobs from the shared relayer_jobs table. Custody-isolated:
+  # holds only the relayer gas key; never serves HTTP.
+  amp-relayer:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      amp-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://amp:${AMP_DB_PASSWORD}@amp-db:5432/amp
+      AMP_RELAYER_KEY: ${AMP_RELAYER_KEY:?set AMP_RELAYER_KEY}
+      AMP_RPC_URL: ${AMP_RPC_URL:-https://api.avax-test.network/ext/bc/C/rpc}
+      AMP_CHAIN_ID: "43113"
+      AMP_MULTIPLAYER_ADDRESS: ${AMP_MULTIPLAYER_ADDRESS:-}
+      AMP_POLL_IDLE_MS: "3000"
+      RUST_LOG: info
 
   # Optional TLS terminator. Uncomment once DNS points at this host, e.g.
   # amp.playwithamp.xyz → this machine's public IPv4.

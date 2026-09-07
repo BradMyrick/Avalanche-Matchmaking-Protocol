@@ -1,16 +1,17 @@
 {
   "chain_id": 43113,
   "chain_name": "Avalanche Fuji Testnet",
-  "version": "v2-n-player-m2",
-  "deployed_at": "2026-09-06T15:10:00Z",
+  "version": "v2.1-n-player-phase0",
+  "deployed_at": "2026-09-07T00:00:00Z",
   "contracts": {
     "AMPMultiplayer": {
-      "address": "0xcabf7b626172fE55d54f03c346563671AbcC77f7",
+      "address": "0x3BBb1812Ccafc4a8c849BfA340174a271e43B7D1",
       "source": "contracts/src/AMPMultiplayer.sol",
       "verified": true,
-      "verification_provider": "sourcify (full match)",
-      "runtime_bytes": 14345,
-      "note": "N-player dual-deposit escrow + K-of-N quorum settlement + grace/dispute machine + prove-your-payout claims"
+      "verification_provider": "pending sourcify",
+      "runtime_bytes": 14591,
+      "note": "v2.1: N-player escrow + K-of-N quorum + grace/dispute + prove-your-payout + getMatchPhase view; unilateralClaim now grace-window-bounded and permutation-checked (R6/R7 guards)",
+      "replaces": "0xcabf7b626172fE55d54f03c346563671AbcC77f7 (v2.0 \u2014 retired clean: the multi pipeline never went live on it, zero state)"
     }
   },
   "configuration": {
