@@ -275,7 +275,7 @@ impl Store {
                WHERE ctid IN (
                  SELECT ctid FROM amp_auth_challenges
                  WHERE wallet = $1 AND used = false AND expires_at > now()
-                 ORDER BY created_at ASC
+                 ORDER BY expires_at ASC, nonce ASC
                  LIMIT GREATEST($2, 0)
                )"#,
         )
