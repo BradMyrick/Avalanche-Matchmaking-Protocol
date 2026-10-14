@@ -11,7 +11,7 @@ import { ethers } from "ethers";
  */
 export const CUP_ADDRESS =
   process.env.NEXT_PUBLIC_AMP_CUP_ADDRESS ||
-  "0x7c743c1c9ae3e7a65d030098f2249b7787d66dff";
+  "0x7C743c1C9AE3e7A65d030098F2249B7787d66dfF";
 export const FUJI_CHAIN_ID = Number(
   process.env.NEXT_PUBLIC_AMP_CHAIN_ID || "43113",
 );

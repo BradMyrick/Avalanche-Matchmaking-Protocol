@@ -33,9 +33,10 @@ export interface QuickDrawProps {
   opponentName: string;
   isBot: boolean;
   onFinish: (result: { won: boolean; roundsWon: number; avgReactionMs: number }) => void;
+  onClose?: () => void;
 }
 
-export default function QuickDraw({ opponentName, isBot, onFinish }: QuickDrawProps) {
+export default function QuickDraw({ opponentName, isBot, onFinish, onClose }: QuickDrawProps) {
   const [round, setRound] = useState(0);
   const [roundState, setRoundState] = useState<RoundState>("waiting");
   const [rounds, setRounds] = useState<RoundResult[]>([]);
@@ -187,7 +188,7 @@ export default function QuickDraw({ opponentName, isBot, onFinish }: QuickDrawPr
         style={{ cursor: roundState === "signal" ? "crosshair" : roundState === "waiting" ? "not-allowed" : "default" }}
       >
         {/* HUD */}
-        <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between">
+        <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
             <span className={`text-sm font-bold px-3 py-1 rounded-full ${playerWins > botWins ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 text-zinc-400"}`}>
               YOU {playerWins}
@@ -197,9 +198,23 @@ export default function QuickDraw({ opponentName, isBot, onFinish }: QuickDrawPr
               {isBot ? "BOT" : opponentName.slice(0, 6)} {botWins}
             </span>
           </div>
-          <span className="text-xs text-zinc-500 font-mono">
-            Round {Math.min(round, TOTAL_ROUNDS)}/{TOTAL_ROUNDS}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-zinc-500 font-mono">
+              Round {Math.min(round, TOTAL_ROUNDS)}/{TOTAL_ROUNDS}
+            </span>
+            {onClose && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose();
+                }}
+                className="px-3 py-1 rounded-full bg-black/60 hover:bg-black/90 border border-white/20 text-xs font-semibold text-zinc-300 hover:text-white transition-all shadow-md pointer-events-auto"
+              >
+                Exit Duel
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Center content */}
