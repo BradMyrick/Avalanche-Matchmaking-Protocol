@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ethers } from "ethers";
 import {
-  ArrowLeft,
   Trophy,
   Wallet,
   Loader2,
@@ -14,6 +13,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { connectWallet } from "@/lib/ampCup";
+import SiteHeader from "@/app/components/SiteHeader";
 
 interface Tournament {
   tournamentId: number;
@@ -99,16 +99,14 @@ export default function DashboardPage() {
       <div className="absolute top-0 -left-1/4 w-[150%] h-[500px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 -right-1/4 w-[150%] h-[500px] bg-brand-red/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <header className="relative z-10 max-w-5xl mx-auto px-6 pt-8 flex items-center justify-between">
-        <Link href="/" className="inline-flex items-center gap-2 text-zinc-400 hover:text-brand-cyan text-sm">
-          <ArrowLeft className="w-4 h-4" /> AMP
-        </Link>
-        <Link href="/setup" className="text-xs text-brand-cyan hover:underline flex items-center gap-1">
-          <Plus className="w-3 h-3" /> New Tournament
-        </Link>
-      </header>
+      <SiteHeader />
 
-      <main className="relative z-10 max-w-5xl mx-auto px-6 py-10">
+      <main className="relative z-10 max-w-5xl mx-auto px-6 pt-20 pb-10">
+        <div className="flex justify-end mb-4">
+          <Link href="/setup" className="text-xs text-brand-cyan hover:underline flex items-center gap-1">
+            <Plus className="w-3 h-3" /> New Tournament
+          </Link>
+        </div>
         <div className="mb-8">
           <h1 className="text-3xl font-black uppercase tracking-tight mb-1">
             Organizer <span className="text-brand-cyan">Dashboard</span>
@@ -198,10 +196,7 @@ export default function DashboardPage() {
 
         <div className="mt-10 pt-6 border-t border-white/10">
           <p className="text-xs text-zinc-600 text-center">
-            Building your own integration? The AMP HTTP API is documented at{" "}
-            <a href="https://docs.page/bradmyrick/Avalanche-Matchmaking-Protocol" target="_blank" rel="noreferrer" className="text-brand-cyan hover:underline">
-              docs.page
-            </a>. Every action on this dashboard is also available via <code className="text-zinc-500">/api/*</code>.
+            SDK docs are on <Link href="/docs" className="text-brand-cyan hover:underline">/docs</Link>.
           </p>
         </div>
       </main>

@@ -1,104 +1,101 @@
 import Link from "next/link";
-import { Copy, Rocket, Key, Swords, Trophy, Zap } from "lucide-react";
+import { Rocket, Key, Trophy, Coins, Cpu, ShieldCheck } from "lucide-react";
+import { CUP_ADDRESS, EXPLORER_URL } from "@/lib/ampCup";
+import SiteHeader from "@/app/components/SiteHeader";
+import CodeSample from "@/app/components/CodeSample";
 
 export const metadata = {
-  title: "AMP Quickstart — Connect Your Game in 5 Minutes",
-  description: "Step-by-step guide to integrate AMP matchmaking: wallet login, queue, match, report, settle.",
+  title: "AMP Quickstart — Tournament Protocol Integration",
+  description: "Step-by-step guide to integrate AMP tournament prize pools and claims: Unity, Unreal, and Web.",
 };
 
 const steps = [
   {
-    icon: Key,
-    title: "Connect a Wallet",
-    code: `// 1. Request a challenge from the matchmaker
-const res = await fetch(\`\${AMP_SERVER_URL}/v1/auth/challenge\`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ wallet: userAddress }),
-});
-const { challenge } = await res.json();
+    icon: Cpu,
+    title: "1. Install the SDK For Your Engine",
+    code: `// Unity: Add via Package Manager git URL:
+// https://github.com/BradMyrick/amp-sdk-unity.git?path=com.amp.sdk
 
-// 2. Ask the player to sign it (free — no gas, no transaction)
-const signature = await window.ethereum.request({
-  method: "personal_sign",
-  params: [toHex(challenge), userAddress],
-});
+// Unreal Engine 5: Clone AmpUnreal into your project's Plugins/ folder:
+// git clone https://github.com/BradMyrick/amp-sdk-cpp.git Plugins/AmpUnreal
 
-// 3. Exchange the signature for a session token
-const login = await fetch(\`\${AMP_SERVER_URL}/v1/auth/verify\`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ wallet: userAddress, signature, challenge }),
-});
-const { token } = await login.json();
-
-// Store the token — it's valid for 7 days
-localStorage.setItem("amp_token", token);`,
-    note: "One signature. No gas. No transaction. The player signs a human-readable message that proves wallet ownership.",
-  },
-  {
-    icon: Zap,
-    title: "Join the Queue",
-    code: `// Join a ranked queue (free play)
-const queue = await fetch(\`\${AMP_SERVER_URL}/v1/queue/join\`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: \`Bearer \${token}\`,
-  },
-  body: JSON.stringify({
-    gameId: "amp-tactics",
-    rulesetId: "ranked-1v1",
-  }),
-});
-const { ticketId, queueDepth, skillWindow } = await queue.json();`,
-    note: "The matchmaker pairs players by Glicko-2 skill rating with an expanding window — tight matches first, fair matches eventually.",
-  },
-  {
-    icon: Swords,
-    title: "Receive Your Match",
-    code: `// Connect the WebSocket for real-time events
-const ws = new WebSocket(
-  \`\${AMP_SERVER_URL.replace("http", "ws")}/v1/ws?token=\${token}\`
-);
-
-ws.onmessage = (event) => {
-  const { type, data } = JSON.parse(event.data);
-  
-  if (type === "match_found") {
-    // data.matchId, data.opponent.wallet, data.opponent.rating
-    // data.expiresAt — report your result before this
-    startMatch(data);
-  }
-  
-  if (type === "queue_status") {
-    // data.depth, data.waitedMs, data.skillWindow
-    updateQueueUI(data);
-  }
-};`,
-    note: "The WebSocket pushes match assignments, queue status, and results in real time. No polling required.",
+// Web / Node.js: Install via npm:
+npm install @amp/sdk ethers@^6`,
+    note: "The SDK calls Avalanche RPC and AMPTournamentCup. It does not need this site.",
   },
   {
     icon: Trophy,
-    title: "Report the Result",
-    code: `// Both players confirm the outcome
-await fetch(\`\${AMP_SERVER_URL}/v1/matches/\${matchId}/report\`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: \`Bearer \${token}\`,
-  },
-  body: JSON.stringify({
-    result: "win", // "win" | "loss" | "draw"
-    transcriptHash: gameHash, // optional: deterministic replay hash
-    signature: signedResult, // optional: EIP-191 for staked matches
-  }),
-});
+    title: "2. Inspect a Tournament Cup",
+    code: `import { AMPTournamentClient } from "@amp/sdk";
 
-// If both players agree → instant settlement
-// If they disagree → operator arbitration
-// If one goes silent → the reporter's result stands`,
-    note: "Two agreeing reports settle instantly. The EIP-712 attestation is portable — anyone can verify the match result on-chain.",
+// Initialize client pointing to Avalanche Fuji testnet
+const amp = new AMPTournamentClient();
+
+// Query Tournament Cup #1
+const cup = await amp.getTournament(1n);
+
+console.log(\`Sponsor: \${cup.sponsor}\`);
+console.log(\`Prize Pool: \${cup.prizePoolAvax} AVAX\`);
+console.log(\`Payout Split: \${cup.payoutBps.map(b => b / 100 + "%").join(" / ")}\`);`,
+    note: "Reads on-chain state directly via getTournament(uint256) on AMPTournamentCup.sol.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "3. Run Brackets Locally with @amp/sdk",
+    code: `import { Tournament, TournamentState, Outcome } from "@amp/sdk";
+
+// Seed 8 players into a Single Elimination or Swiss bracket
+const entrants = [
+  { id: 1, seed: 1 },
+  { id: 2, seed: 2 },
+  { id: 3, seed: 3 },
+  { id: 4, seed: 4 },
+];
+
+const bracket = Tournament.new({ kind: TournamentState.SingleElimination }, entrants);
+
+// Record match results as games finish
+bracket.record(0, Outcome.A); // Player 1 defeats Player 4
+
+// Get final standings when complete
+const standings = bracket.standings();
+console.log(\`Champion: Player #\${standings[0].playerId}\`);`,
+    note: "Runs in the SDK.",
+  },
+  {
+    icon: Key,
+    title: "4. Settle with EIP-712 Attestation",
+    code: `import { PrivateKeySigner } from "@amp/sdk";
+
+// Verifier signs the final winner placements
+const verifierSigner = new PrivateKeySigner(verifierPrivateKey);
+
+const signature = await amp.signTournamentResult(
+  1n, // tournamentId
+  [winner1Address, winner2Address, winner3Address], // winner addresses
+  verifierSigner
+);
+
+// Finalize on-chain (can be submitted by organizer or verifier)
+await amp.finalizeTournament(1n, [winner1Address, winner2Address, winner3Address], signature);`,
+    note: "Verifies against domain: { name: 'AMPTournamentCup', version: '1', chainId: 43113, verifyingContract: '0x7C743c1C9AE3e7A65d030098F2249B7787d66dfF' }.",
+  },
+  {
+    icon: Coins,
+    title: "5. In-Game Pull-Claim Payouts",
+    code: `// Unity C# In-Game Prize Claim:
+var amp = AmpTournamentManager.Instance;
+var check = await amp.CanClaimAsync(tournamentId: 1, playerWallet);
+
+if (check.CanClaim) {
+    Debug.Log($"You won {check.EstimatedPrizeAvax} AVAX! Claiming...");
+    var tx = await amp.ClaimPrizeAsync(tournamentId: 1, check.Placement);
+    Debug.Log($"Claim confirmed in tx: {tx.Hash}");
+}
+
+// Unreal Engine 5 Blueprint:
+// Use the "AMP Async Action: Check Can Claim" node -> wire into "AMP Async Action: Claim Prize"!`,
+    note: "Winners call claimPrize from their wallet.",
   },
 ];
 
@@ -107,7 +104,8 @@ export default function QuickstartPage() {
     <div className="min-h-screen bg-black text-white antialiased">
       <div className="absolute top-0 -left-1/4 w-[150%] h-[300px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 py-16">
+      <SiteHeader />
+      <div className="relative z-10 max-w-4xl mx-auto px-6 pt-24 pb-16">
         {/* Header */}
         <div className="mb-12">
           <Link
@@ -121,24 +119,31 @@ export default function QuickstartPage() {
             Quickstart
           </div>
           <h1 className="text-4xl font-black uppercase tracking-tight mb-4">
-            Connect Your Game in <span className="text-brand-cyan">5 Minutes</span>
+            Quickstart
           </h1>
-          <p className="text-lg text-zinc-400 leading-relaxed">
-            Four API calls and a WebSocket connection. That&apos;s the entire
-            integration. AMP handles the matchmaking, ratings, escrow, and
-            settlement.
+          <p className="text-zinc-400">
+            SDK and AMPTournamentCup.
           </p>
         </div>
 
-        {/* Environment */}
-        <div className="glass-panel rounded-2xl border border-white/10 p-6 mb-10">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-brand-cyan mb-3">
-            Environment
-          </h2>
-          <pre className="bg-black/60 border border-white/10 rounded-xl px-4 py-3 text-sm font-mano text-zinc-300">
-            <code>{`AMP_SERVER_URL=https://amp.playwithamp.xyz  # production matchmaker
-AMP_SERVER_URL=http://localhost:8080        # local development`}</code>
-          </pre>
+        {/* Contract Reference Banner */}
+        <div className="glass-panel rounded-2xl border border-white/10 p-5 mb-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+              Verified Fuji Contract
+            </div>
+            <div className="font-mono text-sm text-brand-cyan font-bold">
+              {CUP_ADDRESS}
+            </div>
+          </div>
+          <a
+            href={`${EXPLORER_URL}/address/${CUP_ADDRESS}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white transition-all border border-white/10"
+          >
+            Snowtrace Explorer ↗
+          </a>
         </div>
 
         {/* Steps */}
@@ -146,68 +151,38 @@ AMP_SERVER_URL=http://localhost:8080        # local development`}</code>
           {steps.map((step, i) => (
             <div
               key={step.title}
-              className="glass-panel rounded-3xl border border-white/10 overflow-hidden"
+              className="glass-panel rounded-3xl border border-white/10 p-8 relative overflow-hidden"
             >
-              <div className="flex items-center gap-4 px-6 py-5 border-b border-white/10">
-                <div className="w-10 h-10 rounded-xl bg-brand-cyan/10 border border-brand-cyan/20 flex items-center justify-center shrink-0">
-                  <step.icon className="w-5 h-5 text-brand-cyan" />
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-brand-cyan/15 border border-brand-cyan/30 flex items-center justify-center text-brand-cyan">
+                  <step.icon className="w-5 h-5" />
                 </div>
-                <div>
-                  <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                    Step {i + 1}
-                  </div>
-                  <h2 className="text-lg font-bold">{step.title}</h2>
-                </div>
+                <h2 className="text-xl font-bold uppercase tracking-tight text-white">
+                  {step.title}
+                </h2>
               </div>
-              <div className="p-6">
-                <div className="relative group">
-                  <pre className="bg-black/60 border border-white/10 rounded-xl px-4 py-4 text-xs md:text-sm font-mono text-zinc-300 overflow-x-auto leading-relaxed">
-                    <code>{step.code}</code>
-                  </pre>
-                  <button
-                    className="absolute top-3 right-3 p-2 rounded-lg bg-white/5 border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                    aria-label="Copy code"
-                  >
-                    <Copy className="w-4 h-4 text-zinc-400" />
-                  </button>
-                </div>
-                <p className="mt-4 text-sm text-zinc-400 leading-relaxed">
-                  {step.note}
-                </p>
+
+              <div className="bg-black/70 border border-white/10 rounded-2xl p-5 mb-4">
+                <CodeSample code={step.code} />
+              </div>
+
+              <div className="text-xs text-zinc-400 border-l-2 border-brand-cyan/50 pl-3">
+                {step.note}
               </div>
             </div>
           ))}
         </div>
 
-        {/* Next steps */}
-        <div className="mt-12 flex flex-col sm:flex-row gap-4">
-          <Link
-            href="/docs/api"
-            className="flex-1 glass-panel rounded-2xl border border-brand-cyan/30 p-6 hover:border-brand-cyan/60 transition-all group"
-          >
-            <div className="text-xs font-black uppercase tracking-widest text-brand-cyan mb-2">
-              Next
-            </div>
-            <div className="font-bold text-lg group-hover:text-brand-cyan transition-colors">
-              Full API Reference →
-            </div>
-            <p className="text-sm text-zinc-500 mt-1">
-              Every endpoint, WebSocket event, and EIP-712 type.
-            </p>
+        {/* Next Links */}
+        <div className="mt-16 pt-8 border-t border-white/10 flex justify-between items-center text-sm">
+          <Link href="/docs" className="text-zinc-500 hover:text-white transition-colors">
+            ← Overview
           </Link>
           <Link
             href="/docs/contracts"
-            className="flex-1 glass-panel rounded-2xl border border-white/10 p-6 hover:border-brand-cyan/40 transition-all group"
+            className="text-brand-cyan hover:underline font-bold"
           >
-            <div className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-2">
-              On-chain
-            </div>
-            <div className="font-bold text-lg group-hover:text-brand-cyan transition-colors">
-              Contracts & Addresses →
-            </div>
-            <p className="text-sm text-zinc-500 mt-1">
-              Deployed addresses, ABIs, and gas costs.
-            </p>
+            Contracts & Addresses →
           </Link>
         </div>
       </div>

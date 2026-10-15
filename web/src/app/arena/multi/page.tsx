@@ -366,6 +366,7 @@ export default function MultiArenaPage() {
             </span>
           </div>
         </div>
+        <p className="text-[11px] text-zinc-500 -mt-6 mb-6">Ranked matchmaking is a separate hosted service.</p>
 
         {error && (
           <div className="mb-6 rounded-2xl border border-brand-red/30 bg-brand-red/10 px-5 py-4 text-sm text-red-200">

@@ -10,9 +10,9 @@ export default function GrantBadge() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.8, delay: 0.3 }}
-      className="mb-10"
+      className="mb-3"
     >
-      <div className="inline-flex items-center gap-3 px-5 py-3 rounded-full bg-gradient-to-r from-brand-red/20 via-black/60 to-brand-cyan/20 border border-brand-red/30 shadow-[0_0_30px_rgba(232,65,66,0.15)] hover:shadow-[0_0_40px_rgba(232,65,66,0.3)] transition-shadow duration-500">
+      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-brand-red/20 via-black/60 to-brand-cyan/20 border border-brand-red/30">
         <div className="w-10 h-10 rounded-full overflow-hidden bg-black flex items-center justify-center border border-brand-red/40 shadow-[0_0_15px_rgba(232,65,66,0.3)]">
           <Image
             src="/grant_badge.png"

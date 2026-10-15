@@ -1,14 +1,12 @@
-# AMP — Avalanche Matchmaking Protocol
+# AMP — Avalanche Tournament & Match Protocol
 
-### Ranked matchmaking for multiplayer games, with verifiable settlement on Avalanche.
+### Trustless tournament prize pools, competitive brackets, and ranked matchmaking on Avalanche.
 
-AMP is a multiplayer matchmaking protocol. Players log in with one wallet
-signature (no gas), enter a skill-rated queue, get matched, and report the
-result. Every settled match updates a Glicko-2 rating and — when it matters —
-is attested with an EIP-712 signature and settled on-chain through escrow
-contracts on Avalanche, with the protocol taking a fee in basis points.
+AMP provides open, verifiable competitive rails for game builders on Avalanche. Sponsors, DAOs, and game studios fund prize pools on-chain in AVAX or ERC-20 (USDC), run automated tournament brackets (Single Elimination, Swiss, Round Robin), and attest standings with EIP-712 signatures. Winners pull-claim their prizes directly in-game or via the web portal.
 
-**Try it:** [playwithamp.xyz](https://playwithamp.xyz) → *Play Ranked*.
+For multiplayer games requiring on-chain lobbies, AMP also provides N-player dual-deposit escrow and $K$-of-$N$ Byzantine quorum settlement.
+
+**Try it:** [playwithamp.xyz](https://playwithamp.xyz) → *Tournaments & Ranked Arena*.
 
 ---
 
