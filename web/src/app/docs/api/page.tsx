@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { Code2, Terminal, Cpu, FileJson, Shield, Trophy } from "lucide-react";
+import { Code2, Cpu, Trophy } from "lucide-react";
+import SiteHeader from "@/app/components/SiteHeader";
+import CodeSample from "@/app/components/CodeSample";
 
 export const metadata = {
   title: "AMP API & SDK Reference — Tournament Protocol",
@@ -26,9 +28,9 @@ function ApiMethod({
         </span>
       </div>
       <p className="text-sm text-zinc-300 mb-3">{desc}</p>
-      <pre className="bg-black/60 border border-white/10 rounded-xl p-3 text-xs font-mono text-zinc-300 overflow-x-auto">
-        <code>{example}</code>
-      </pre>
+      <div className="bg-black/60 border border-white/10 rounded-xl p-3">
+        <CodeSample code={example} />
+      </div>
     </div>
   );
 }
@@ -38,7 +40,8 @@ export default function ApiReferencePage() {
     <div className="min-h-screen bg-black text-white antialiased">
       <div className="absolute top-0 -left-1/4 w-[150%] h-[300px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 py-16">
+      <SiteHeader />
+      <div className="relative z-10 max-w-4xl mx-auto px-6 pt-24 pb-16">
         <div className="mb-12">
           <Link href="/docs" className="text-sm text-zinc-500 hover:text-brand-cyan transition-colors">
             ← Docs
@@ -50,9 +53,8 @@ export default function ApiReferencePage() {
           <h1 className="text-4xl font-black uppercase tracking-tight mb-4">
             AMP Tournament <span className="text-brand-cyan">SDK Reference</span>
           </h1>
-          <p className="text-lg text-zinc-400 leading-relaxed">
-            Consistent method signatures across TypeScript (`@amp/sdk`), Unity (`com.amp.sdk`),
-            Unreal Engine 5 (`AmpUnreal`), C# (`Amp.Sdk`), and Rust (`amp-sdk`).
+          <p className="text-zinc-400">
+            Same calls in TypeScript, Unity, Unreal, C#, and Rust.
           </p>
         </div>
 
@@ -104,7 +106,7 @@ console.log(\`Prize claimed in block: \${receipt.blockNumber}\`);`}
           Bracket Engine (@amp/sdk)
         </h2>
         <p className="text-sm text-zinc-400 mb-6">
-          Zero-dependency local tournament calculation engine for Single Elimination, Swiss, and Round Robin:
+          Local single elimination and Swiss:
         </p>
 
         <ApiMethod

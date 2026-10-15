@@ -22,6 +22,10 @@ export const FUJI_RPC =
 export const EXPLORER_URL =
   process.env.NEXT_PUBLIC_AMP_EXPLORER_URL || "https://testnet.snowtrace.io";
 
+/** Deployed Fuji AMPTournamentCup.protocolFeeBps. 200 = 2%. */
+export const PROTOCOL_FEE_BPS = 200;
+export const PROTOCOL_FEE_LABEL = `${PROTOCOL_FEE_BPS / 100}%`;
+
 export const AMPCUP_ABI = [
   "function createTournament(uint16[] payoutBps, address verifier, uint64 finalizeDeadline) payable returns (uint256)",
   "function createTournamentERC20(address token, uint256 amount, uint16[] payoutBps, address verifier, uint64 finalizeDeadline) returns (uint256)",

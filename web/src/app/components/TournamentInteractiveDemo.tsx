@@ -19,7 +19,7 @@ import {
   BracketMatch,
   isReady,
 } from "@/lib/engine";
-import { CUP_ADDRESS, FUJI_RPC, EXPLORER_URL } from "@/lib/ampCup";
+import { AMPCUP_ABI, CUP_ADDRESS, FUJI_RPC, EXPLORER_URL, PROTOCOL_FEE_BPS, PROTOCOL_FEE_LABEL } from "@/lib/ampCup";
 import { ethers } from "ethers";
 
 interface DemoPlayer {
@@ -128,20 +128,17 @@ export default function TournamentInteractiveDemo() {
     setInspectData(null);
     try {
       const provider = new ethers.JsonRpcProvider(FUJI_RPC);
-      const abi = [
-        "function getTournament(uint256) view returns (tuple(uint256 id, address sponsor, address token, uint256 prizePool, uint16[] payoutBps, address verifier, address[] winners, uint8 state, uint64 createdAt, uint64 finalizeDeadline))",
-      ];
-      const contract = new ethers.Contract(CUP_ADDRESS, abi, provider);
+      const contract = new ethers.Contract(CUP_ADDRESS, AMPCUP_ABI, provider);
       const cup = await contract.getTournament(BigInt(inspectId));
 
       const states = ["Open", "Finalized", "Complete", "Cancelled"];
       setInspectData({
-        id: cup.id.toString(),
+        id: inspectId,
         sponsor: cup.sponsor,
         prizePoolAvax: ethers.formatEther(cup.prizePool),
         state: states[Number(cup.state)] ?? "Unknown",
-        payoutBps: Array.from(cup.payoutBps).map((n) => Number(n)),
-        winners: Array.from(cup.winners),
+        payoutBps: Array.from(cup.payoutBps as ArrayLike<number>).map((n) => Number(n)),
+        winners: Array.from(cup.winners as ArrayLike<string>),
       });
     } catch (err: unknown) {
       setInspectError((err as Error).message || "Failed to query Fuji contract");
@@ -150,9 +147,8 @@ export default function TournamentInteractiveDemo() {
     }
   };
 
-  // Payout calculation for 5.0 AVAX sponsored pool
   const prizePoolAvax = 5.0;
-  const netPoolAvax = prizePoolAvax * 0.975; // 2.5% protocol fee
+  const netPoolAvax = prizePoolAvax * (1 - PROTOCOL_FEE_BPS / 10000);
   const prizes = [
     { place: "1st", bps: 6000, avax: (netPoolAvax * 0.6).toFixed(3) },
     { place: "2nd", bps: 3000, avax: (netPoolAvax * 0.3).toFixed(3) },
@@ -174,11 +170,11 @@ export default function TournamentInteractiveDemo() {
               Interactive Protocol Demo
             </span>
           </div>
-          <h2 className="text-3xl sm:text-5xl font-black uppercase tracking-tight text-white mb-4">
-            Test The <span className="text-brand-cyan">Tournament Engine</span> Live
+                    <h2 className="text-3xl sm:text-5xl font-black uppercase tracking-tight text-white mb-3">
+            Tournament <span className="text-brand-cyan">Engine</span>
           </h2>
-          <p className="text-zinc-400 text-base sm:text-lg">
-            Experience how tournaments run: advance bracket rounds, compute cryptographic EIP-712 winner attestations, and inspect live on-chain cups.
+          <p className="text-zinc-400">
+            Local bracket. Then the cup on Fuji.
           </p>
 
           {/* Toggle Tabs */}
@@ -331,7 +327,7 @@ export default function TournamentInteractiveDemo() {
                       Champion: {playerMap.get(standings[0]?.id)?.name}
                     </h4>
                     <p className="text-sm text-zinc-400 mb-6">
-                      Bracket finalized locally with zero server dependencies. Ready for EIP-712 verifier attestation and on-chain pull-claim!
+                      Bracket finished in the SDK.
                     </p>
                     <button
                       onClick={handleReset}
@@ -347,17 +343,16 @@ export default function TournamentInteractiveDemo() {
               <div className="lg:col-span-5 flex flex-col justify-between space-y-6">
                 {/* Standings */}
                 <div className="p-5 rounded-2xl bg-white/5 border border-white/10">
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="mb-4">
                     <span className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
                       <Coins className="w-4 h-4 text-yellow-400" />
-                      Prize Payouts (5.0 AVAX Pool)
+                      5 AVAX pool · {PROTOCOL_FEE_LABEL} fee
                     </span>
-                    <span className="text-[10px] font-mono text-zinc-500">2.5% protocol fee</span>
                   </div>
 
                   <div className="space-y-2.5">
                     {prizes.map((prize, idx) => {
-                      const winnerPlayer = playerMap.get(standings[idx]?.id);
+                      const winnerPlayer = isComplete ? playerMap.get(standings[idx]?.id) : undefined;
                       return (
                         <div
                           key={prize.place}

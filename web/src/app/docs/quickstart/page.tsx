@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { Copy, Rocket, Key, Trophy, Coins, Cpu, ShieldCheck } from "lucide-react";
+import { Rocket, Key, Trophy, Coins, Cpu, ShieldCheck } from "lucide-react";
 import { CUP_ADDRESS, EXPLORER_URL } from "@/lib/ampCup";
+import SiteHeader from "@/app/components/SiteHeader";
+import CodeSample from "@/app/components/CodeSample";
 
 export const metadata = {
   title: "AMP Quickstart — Tournament Protocol Integration",
@@ -19,7 +21,7 @@ const steps = [
 
 // Web / Node.js: Install via npm:
 npm install @amp/sdk ethers@^6`,
-    note: "All SDKs connect directly to Avalanche C-Chain / Subnet RPCs. No hosted backend servers required.",
+    note: "The SDK calls Avalanche RPC and AMPTournamentCup. It does not need this site.",
   },
   {
     icon: Trophy,
@@ -58,7 +60,7 @@ bracket.record(0, Outcome.A); // Player 1 defeats Player 4
 // Get final standings when complete
 const standings = bracket.standings();
 console.log(\`Champion: Player #\${standings[0].playerId}\`);`,
-    note: "Bracket calculations run locally with zero network latency and no external server dependencies.",
+    note: "Runs in the SDK.",
   },
   {
     icon: Key,
@@ -93,7 +95,7 @@ if (check.CanClaim) {
 
 // Unreal Engine 5 Blueprint:
 // Use the "AMP Async Action: Check Can Claim" node -> wire into "AMP Async Action: Claim Prize"!`,
-    note: "Winners pull-claim their prize directly into their own wallet. Funds are never held in custodial limbo.",
+    note: "Winners call claimPrize from their wallet.",
   },
 ];
 
@@ -102,7 +104,8 @@ export default function QuickstartPage() {
     <div className="min-h-screen bg-black text-white antialiased">
       <div className="absolute top-0 -left-1/4 w-[150%] h-[300px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 py-16">
+      <SiteHeader />
+      <div className="relative z-10 max-w-4xl mx-auto px-6 pt-24 pb-16">
         {/* Header */}
         <div className="mb-12">
           <Link
@@ -116,11 +119,10 @@ export default function QuickstartPage() {
             Quickstart
           </div>
           <h1 className="text-4xl font-black uppercase tracking-tight mb-4">
-            Integrate Tournaments in <span className="text-brand-cyan">5 Minutes</span>
+            Quickstart
           </h1>
-          <p className="text-lg text-zinc-400 leading-relaxed">
-            Drop-in tournament brackets, verifiable prize pools, and in-game pull-claims on Avalanche.
-            No server bills. No Solidity required.
+          <p className="text-zinc-400">
+            SDK and AMPTournamentCup.
           </p>
         </div>
 
@@ -160,9 +162,9 @@ export default function QuickstartPage() {
                 </h2>
               </div>
 
-              <pre className="bg-black/70 border border-white/10 rounded-2xl p-5 text-xs sm:text-sm font-mono text-zinc-300 overflow-x-auto mb-4">
-                <code>{step.code}</code>
-              </pre>
+              <div className="bg-black/70 border border-white/10 rounded-2xl p-5 mb-4">
+                <CodeSample code={step.code} />
+              </div>
 
               <div className="text-xs text-zinc-400 border-l-2 border-brand-cyan/50 pl-3">
                 {step.note}

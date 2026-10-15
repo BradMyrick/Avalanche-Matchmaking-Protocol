@@ -330,21 +330,14 @@ export default function ArenaPage() {
             the technical detail is in the browser console only. */}
         {misconfigured && (
           <div className="glass-panel rounded-3xl border border-brand-cyan/20 p-10 text-center">
-            <span className="inline-block rounded-full border border-yellow-400/40 bg-yellow-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-yellow-400 mb-4">
-              Coming Soon
-            </span>
-            <h2 className="text-2xl font-black uppercase tracking-tight mb-3">
-              Ranked matchmaking is almost here
-            </h2>
-            <p className="text-zinc-400 max-w-md mx-auto">
-              The arena is being prepared. Check back soon to connect your
-              wallet, queue up, and climb the ladder.
+            <p className="text-zinc-300">
+              Ranked matchmaking is a separate hosted service.
             </p>
             <Link
-              href="/"
+              href="/docs"
               className="inline-flex items-center gap-2 mt-6 text-sm text-brand-cyan hover:underline"
             >
-              Back to home
+              Tournament docs
             </Link>
           </div>
         )}
@@ -358,8 +351,8 @@ export default function ArenaPage() {
             </div>
             <div className="flex flex-col">
               <span className="text-xl font-black tracking-widest uppercase">AMP Arena</span>
-              <span className="text-[10px] text-zinc-400 font-medium tracking-widest uppercase">
-                1v1 · <Link href="/arena/multi" className="text-brand-cyan hover:underline">N-Player →</Link>
+              <span className="text-[11px] text-zinc-400 normal-case tracking-normal">
+                Ranked matchmaking is a separate hosted service.
               </span>
             </div>
           </Link>

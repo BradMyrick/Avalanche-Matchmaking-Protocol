@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { FileText, ExternalLink, Shield, Trophy, Gauge, Layers, Coins } from "lucide-react";
+import { FileText, ExternalLink, Shield } from "lucide-react";
 import { CUP_ADDRESS, EXPLORER_URL } from "@/lib/ampCup";
+import SiteHeader from "@/app/components/SiteHeader";
+import CodeSample from "@/app/components/CodeSample";
 
 export const metadata = {
   title: "AMP Contracts — Deployed Addresses & ABI Reference",
@@ -25,8 +27,8 @@ const contracts = [
       { name: "getTournament(uint256)", selector: "0x1a5bd7fc", desc: "Read tournament escrow, state, and winners" },
       { name: "claimPrize(uint256,uint256)", selector: "0x7b154140", desc: "Winner pulls prize payout to their wallet" },
       { name: "claimed(uint256,uint256)", selector: "0xa54ab457", desc: "Check if placement prize was claimed" },
-      { name: "createTournament(...)", selector: "0x...", desc: "Sponsor funds prize pool with basis-point payouts" },
-      { name: "finalizeTournament(...)", selector: "0x...", desc: "Submit EIP-712 verifier attestation signature" },
+      { name: "createTournament(...)", selector: "0x39d87eda", desc: "Sponsor funds prize pool with basis-point payouts" },
+      { name: "finalizeTournament(...)", selector: "0x8ef13499", desc: "Submit EIP-712 verifier attestation signature" },
     ],
   },
   {
@@ -52,7 +54,8 @@ export default function ContractsPage() {
     <div className="min-h-screen bg-black text-white antialiased">
       <div className="absolute top-0 -left-1/4 w-[150%] h-[300px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 py-16">
+      <SiteHeader />
+      <div className="relative z-10 max-w-4xl mx-auto px-6 pt-24 pb-16">
         <div className="mb-12">
           <Link href="/docs" className="text-sm text-zinc-500 hover:text-brand-cyan transition-colors">
             ← Docs
@@ -64,9 +67,8 @@ export default function ContractsPage() {
           <h1 className="text-4xl font-black uppercase tracking-tight mb-4">
             Smart Contracts & <span className="text-brand-cyan">ABIs</span>
           </h1>
-          <p className="text-lg text-zinc-400 leading-relaxed">
-            All contracts deployed and verified on Avalanche Fuji testnet (Chain ID 43113).
-            Compatible with Avalanche C-Chain and custom Avalanche L1s (Subnets).
+          <p className="text-zinc-400">
+            Source-verified on Fuji (chain 43113).
           </p>
         </div>
 
@@ -157,19 +159,16 @@ export default function ContractsPage() {
           <p className="text-sm text-zinc-400 mb-4 leading-relaxed">
             Tournament outcomes are attested by designated verifiers using typed data matching OpenZeppelin EIP-712:
           </p>
-          <pre className="bg-black/60 border border-white/10 rounded-2xl p-4 text-xs font-mono text-zinc-300 overflow-x-auto">
-            <code>{`Domain:
+          <div className="bg-black/60 border border-white/10 rounded-2xl p-4">
+            <CodeSample code={`Domain:
   name: "AMPTournamentCup"
   version: "1"
   chainId: 43113
   verifyingContract: "${CUP_ADDRESS}"
 
 Type:
-  TournamentResult(uint256 tournamentId, address[] winners)
-
-TypeHash:
-  keccak256("TournamentResult(uint256 tournamentId,address[] winners)")`}</code>
-          </pre>
+  TournamentResult(uint256 tournamentId, address[] winners)`} />
+          </div>
         </div>
 
         {/* Back Link */}

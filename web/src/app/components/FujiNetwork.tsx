@@ -1,138 +1,64 @@
 "use client";
-import { EXPLORER_URL, FUJI_RPC, CUP_ADDRESS } from "@/lib/ampCup";
+import { EXPLORER_URL, FUJI_RPC, CUP_ADDRESS, PROTOCOL_FEE_LABEL } from "@/lib/ampCup";
 import React, { useState, useEffect } from 'react';
-import { ExternalLink, Hash, Activity, ShieldCheck, RefreshCw, Coins } from 'lucide-react';
+import { ExternalLink, Hash, RefreshCw, Coins } from 'lucide-react';
 import { ethers } from 'ethers';
 
 type TxDisplay = { id: string; type: string; status: string; time: string };
 
-const FALLBACK_TXS: TxDisplay[] = [
-    { id: '0x2d47...a5de', type: 'Prize Payout (AMP Cup #1) · 0.035 AVAX', status: 'Confirmed', time: 'Fuji L1' },
-    { id: '0x2d47...a5de', type: 'Prize Payout (AMP Cup #1) · 0.015 AVAX', status: 'Confirmed', time: 'Fuji L1' },
-    { id: '0x9f3c...1b02', type: 'Tournament Finalized (AMP Cup #1)', status: 'Confirmed', time: 'Fuji L1' },
-    { id: '0x2d47...a5de', type: 'Sponsor Deposit (AMP Cup #1) · 0.05 AVAX', status: 'Confirmed', time: 'Fuji L1' },
-    { id: '0x2d47...a5de', type: 'AMPTournamentCup Deployed', status: 'Confirmed', time: 'Fuji L1' },
-];
-
-// Live contract on Fuji — the sponsored-prize tournament escrow.
 export default function FujiNetwork() {
-    // Always start with FALLBACK_TXS for SSR/client hydration parity.
-    // localStorage data loads in useEffect (client-only, post-hydration).
-    const [transactions, setTransactions] = useState<TxDisplay[]>(FALLBACK_TXS);
-
-    // Hydrate stored simulations after mount — never during SSR render.
-    // Defers setState via queueMicrotask to satisfy the React 19
-    // set-state-in-effect lint (prevents cascading renders).
-    useEffect(() => {
-        const stored = localStorage.getItem('amp-simulations');
-        if (stored) {
-            try {
-                const parsed = JSON.parse(stored);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    queueMicrotask(() => setTransactions(parsed.slice(0, 5)));
-                }
-            } catch {
-                // corrupted localStorage — keep fallback
-            }
-        }
-    }, []);
+    const [transactions, setTransactions] = useState<TxDisplay[]>([]);
 
     useEffect(() => {
+        let cancelled = false;
         const fetchLogs = async () => {
             try {
-                // Use public Fuji RPC for on-chain live data
                 const provider = new ethers.JsonRpcProvider(FUJI_RPC);
                 const currentBlock = await provider.getBlockNumber();
-
-                // Fetch in chunks to respect Fuji RPC 2048-block limit
                 const chunkSize = 2000;
-                const maxLookback = 50000; // Look back significantly further (~14 hours)
+                const maxLookback = 50000;
                 let allLogs: ethers.Log[] = [];
 
                 for (let offset = 0; offset < maxLookback; offset += chunkSize) {
                     const from = Math.max(0, currentBlock - (offset + chunkSize));
                     const to = currentBlock - offset;
-
                     const logs = await provider.getLogs({
                         address: CUP_ADDRESS,
                         fromBlock: from,
                         toBlock: to
                     });
-
-                    if (logs.length > 0) {
-                        allLogs = [...allLogs, ...logs];
-                    }
+                    if (logs.length > 0) allLogs = [...allLogs, ...logs];
                     if (allLogs.length >= 10) break;
                 }
 
-                // PrizeClaimed(uint256 indexed tournamentId, uint256 indexed placement, address indexed winner, uint256 amount)
                 const txs = allLogs.map(l => {
                     const tournamentIdRaw = l.topics[1];
-                    const tournamentId = tournamentIdRaw ? parseInt(tournamentIdRaw, 16).toString() : '1';
+                    const tournamentId = tournamentIdRaw ? parseInt(tournamentIdRaw, 16).toString() : '?';
                     const amountHex = l.data && l.data !== '0x' ? parseInt(l.data.slice(0, 66), 16) : 0;
                     const amountAvax = amountHex ? (amountHex / 1e18).toFixed(3) : null;
                     const label = amountAvax
-                        ? `Prize Payout (AMP Cup #${tournamentId}) · ${amountAvax} AVAX`
-                        : `Tournament Event (AMP Cup #${tournamentId})`;
-
+                        ? `Prize (Cup #${tournamentId}) · ${amountAvax} AVAX`
+                        : `Cup #${tournamentId}`;
                     return {
-                        id: l.transactionHash.slice(0, 8) + '...',
+                        id: l.transactionHash,
                         type: label,
                         status: 'Confirmed',
-                        time: 'Fuji L1'
+                        time: 'Fuji'
                     };
                 }).reverse();
 
-                setTransactions(prev => {
-                    const simulations = prev.filter(tx => tx.status === 'Verifying');
-                    const stored = JSON.parse(localStorage.getItem('amp-simulations') || '[]');
-
-                    const combined = [...simulations, ...stored, ...txs];
-                    const unique = combined.filter((v, i, a) =>
-                        a.findIndex(t => t.id === v.id) === i
-                    );
-
-                    const final = unique.length > 0 ? unique : FALLBACK_TXS;
-                    return final.slice(0, 5);
-                });
+                if (!cancelled) setTransactions(txs.slice(0, 5));
             } catch (e) {
-                console.warn("Fuji RPC fetch failed, retrying...", e);
+                console.warn("Fuji RPC fetch failed", e);
+                if (!cancelled) setTransactions([]);
             }
         };
 
-        const handleSimulation = (e: Event) => {
-            const { tournamentId } = (e as CustomEvent).detail;
-            const newTx = {
-                id: '0x' + Math.random().toString(16).slice(2, 10).toUpperCase() + '...',
-                type: `Champion Payout (${tournamentId})`,
-                status: 'Verifying',
-                time: 'Just now'
-            };
-
-            setTransactions(prev => [newTx, ...prev].slice(0, 5));
-
-            // Simulating payout settlement delay
-            setTimeout(() => {
-                setTransactions(prev => {
-                    const updated = prev.map(tx =>
-                        tx.id === newTx.id ? { ...tx, status: 'Confirmed', time: '1s ago' } : tx
-                    );
-
-                    // Persist newly confirmed payout
-                    const confirmedOnly = updated.filter(tx => tx.status === 'Confirmed');
-                    localStorage.setItem('amp-simulations', JSON.stringify(confirmedOnly.slice(0, 10)));
-
-                    return updated;
-                });
-            }, 6000);
-        };
-
-        window.addEventListener('amp-tournament-payout', handleSimulation as EventListener);
         fetchLogs();
         const interval = setInterval(fetchLogs, 10000);
         return () => {
+            cancelled = true;
             clearInterval(interval);
-            window.removeEventListener('amp-tournament-payout', handleSimulation as EventListener);
         };
     }, []);
     return (
@@ -144,9 +70,9 @@ export default function FujiNetwork() {
                             <div className="w-2 h-2 rounded-full bg-brand-red animate-pulse" />
                             <span className="text-xs font-bold text-brand-red tracking-widest uppercase">Open Beta · Fuji Testnet</span>
                         </div>
-                        <h2 className="text-4xl md:text-5xl font-black mb-4 uppercase tracking-tight">On-Chain Prize Pools</h2>
-                        <p className="text-zinc-400 text-lg">
-                            Every prize pool is escrowed on Avalanche. Every payout is verifiable. Watch champions claim in real time.
+                        <h2 className="text-4xl md:text-5xl font-black mb-3 uppercase tracking-tight">Prize Pools</h2>
+                        <p className="text-zinc-400">
+                            Escrowed on Fuji. {PROTOCOL_FEE_LABEL} protocol fee.
                         </p>
                     </div>
 
@@ -168,7 +94,7 @@ export default function FujiNetwork() {
                                 <Coins className="w-5 h-5 text-yellow-400" />
                                 <span className="font-bold">AMPTournamentCup</span>
                             </div>
-                            <div className="text-[11px] text-zinc-500 mb-3">Live · sponsor-funded prize pools · 2% protocol fee</div>
+                            <div className="text-[11px] text-zinc-500 mb-3">Source-verified · {PROTOCOL_FEE_LABEL} protocol fee</div>
                             <a
                                 href={`${EXPLORER_URL}/address/${CUP_ADDRESS}`}
                                 target="_blank"
@@ -197,18 +123,23 @@ export default function FujiNetwork() {
                     <div className="lg:col-span-2 glass-panel p-6 overflow-hidden relative">
                         <div className="flex items-center justify-between mb-6">
                             <h3 className="font-bold text-white flex items-center gap-2">
-                                Live Tournament Feed
+                                Recent events
+                                {transactions.length > 0 && (
                                 <span className="flex h-2 w-2 relative">
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                                 </span>
+                                )}
                             </h3>
                             <div className="text-xs text-zinc-500">Refreshes every 10s</div>
                         </div>
 
                         <div className="space-y-3">
-                            {transactions.map((tx, idx) => (
-                                <div key={idx} className="flex items-center gap-4 p-4 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors">
+                            {transactions.length === 0 && (
+                                <p className="text-sm text-zinc-500 py-6 text-center">No recent Fuji events.</p>
+                            )}
+                            {transactions.map((tx) => (
+                                <div key={tx.id} className="flex items-center gap-4 p-4 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors">
                                     <div className={`w-10 h-10 rounded-full flex items-center justify-center ${tx.status === 'Verifying' ? 'bg-brand-red/20 text-brand-red' : 'bg-green-500/10 text-green-500'
                                         }`}>
                                         {tx.status === 'Verifying' ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}
@@ -216,7 +147,7 @@ export default function FujiNetwork() {
                                     <div className="flex-1">
                                         <div className="flex justify-between items-start">
                                             <span className="text-sm font-bold text-white">{tx.type}</span>
-                                            <span className="text-[10px] text-zinc-500 font-mono">{tx.id}</span>
+                                            <span className="text-[10px] text-zinc-500 font-mono">{tx.id.slice(0, 8)}…</span>
                                         </div>
                                         <div className="flex justify-between items-center mt-1">
                                             <span className={`text-[10px] font-medium ${tx.status === 'Verifying' ? 'text-brand-red' : 'text-green-500'

@@ -1,6 +1,6 @@
 import Link from "next/link";
+import SiteHeader from "@/app/components/SiteHeader";
 import {
-  BookOpen,
   Rocket,
   Code2,
   FileText,
@@ -23,7 +23,7 @@ const sections = [
     href: "/docs/quickstart",
     icon: Rocket,
     title: "Quickstart Guide",
-    desc: "Integrate tournament prize pools and claims into your game in 5 minutes. No backend servers required.",
+    desc: "SDK and AMPTournamentCup. The library does not need this site.",
     tag: "Start here",
   },
   {
@@ -44,7 +44,7 @@ const sections = [
     href: "/docs/faq",
     icon: HelpCircle,
     title: "FAQ & Architecture",
-    desc: "Common questions about sponsor escrow, basis-point fee splits, pull-claims, and engine integration.",
+    desc: "Fees, claims, and SDKs.",
     tag: "Answers",
   },
 ];
@@ -53,12 +53,12 @@ const features = [
   {
     icon: Coins,
     title: "Non-Custodial Prize Escrow",
-    desc: "Sponsors fund prize pools directly in AVAX or USDC into audited smart contracts on Avalanche.",
+    desc: "Sponsors fund AVAX in the source-verified cup contract.",
   },
   {
     icon: Trophy,
     title: "Verifiable Brackets",
-    desc: "Single Elimination, Swiss pairings, and Round Robin run locally and settle via EIP-712 attestations.",
+    desc: "Single elimination and Swiss run locally, then settle with EIP-712.",
   },
   {
     icon: Cpu,
@@ -78,19 +78,14 @@ export default function DocsHub() {
       <div className="absolute top-0 -left-1/4 w-[150%] h-[400px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 -right-1/4 w-[150%] h-[400px] bg-brand-red/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <div className="relative z-10 max-w-6xl mx-auto px-6 py-16">
-        {/* Header */}
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center gap-2 rounded-full border border-brand-cyan/30 bg-brand-cyan/5 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-brand-cyan mb-6">
-            <BookOpen className="w-3.5 h-3.5" />
-            Developer Documentation
-          </div>
+      <SiteHeader />
+      <div className="relative z-10 max-w-6xl mx-auto px-6 pt-24 pb-16">
+        <div className="text-center mb-12">
           <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tight mb-4">
-            Build with <span className="text-brand-cyan">AMP Protocol</span>
+            Build with <span className="text-brand-cyan">AMP</span>
           </h1>
-          <p className="max-w-2xl mx-auto text-lg text-zinc-400 leading-relaxed">
-            AMP is the decentralized tournament and competitive prize protocol for games on Avalanche.
-            Create cups, automate brackets, and let players claim real prizes directly inside your game engine.
+          <p className="max-w-2xl mx-auto text-zinc-400">
+            SDK and AMPTournamentCup. Local brackets, on-chain prizes.
           </p>
         </div>
 
@@ -123,9 +118,6 @@ export default function DocsHub() {
 
         {/* What AMP provides */}
         <div className="mb-16">
-          <h2 className="text-2xl font-black uppercase tracking-tight text-center mb-8">
-            Core Architecture Pillars
-          </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {features.map((f) => (
               <div

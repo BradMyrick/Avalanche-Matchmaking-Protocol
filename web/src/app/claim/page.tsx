@@ -1,18 +1,15 @@
 "use client";
 
 import { useState, Suspense } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ethers } from "ethers";
 import {
-  Wallet,
-  KeyRound,
-  ArrowLeft,
   Check,
   ExternalLink,
   Coins,
 } from "lucide-react";
 import { CUP_ADDRESS, connectWallet, AMPCUP_ABI, FUJI_RPC, EXPLORER_URL } from "@/lib/ampCup";
+import SiteHeader from "@/app/components/SiteHeader";
 
 type Mode = "wallet" | "key";
 type Status = "idle" | "claiming" | "done" | "error";
@@ -86,22 +83,15 @@ function ClaimContent() {
       <div className="absolute top-0 -left-1/4 w-[150%] h-[500px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 -right-1/4 w-[150%] h-[500px] bg-brand-red/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <header className="relative z-10 max-w-5xl mx-auto px-6 pt-10">
-        <Link href="/" className="inline-flex items-center gap-2 text-zinc-400 hover:text-brand-cyan transition-colors text-sm">
-          <ArrowLeft className="w-4 h-4" /> Back to AMP
-        </Link>
-      </header>
+      <SiteHeader />
 
-      <main className="relative z-10 max-w-xl mx-auto px-6 py-12">
-        <div className="text-center mb-10">
-          <div className="w-16 h-16 rounded-2xl bg-yellow-400/15 border border-yellow-400/30 flex items-center justify-center mx-auto mb-4 text-yellow-400">
-            <Coins className="w-8 h-8" />
-          </div>
+      <main className="relative z-10 max-w-xl mx-auto px-6 pt-24 pb-12">
+        <div className="text-center mb-8">
           <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tight mb-3">
             Claim Your <span className="text-brand-cyan">Prize</span>
           </h1>
           <p className="text-zinc-400">
-            Pull your escrowed payout from an AMP tournament on Avalanche.
+            Pull the payout from AMPTournamentCup.
           </p>
         </div>
 
@@ -131,27 +121,18 @@ function ClaimContent() {
             </div>
           </div>
 
-          <div>
-            <label className="text-xs uppercase tracking-wider text-zinc-500 block mb-2">Claim with</label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setMode("wallet")}
-                className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-sm transition-colors ${mode === "wallet" ? "bg-brand-cyan/10 border-brand-cyan/50 text-white" : "bg-white/5 border-white/10 text-zinc-400"}`}
-              >
-                <Wallet className="w-4 h-4 text-brand-cyan" /> Connect wallet
-              </button>
-              <button
-                onClick={() => setMode("key")}
-                className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-sm transition-colors ${mode === "key" ? "bg-brand-cyan/10 border-brand-cyan/50 text-white" : "bg-white/5 border-white/10 text-zinc-400"}`}
-              >
-                <KeyRound className="w-4 h-4 text-brand-cyan" /> Import private key
-              </button>
-            </div>
-          </div>
-
-          {mode === "key" && (
+          {mode === "wallet" ? (
+            <button
+              type="button"
+              onClick={() => setMode("key")}
+              className="text-xs text-zinc-500 hover:text-zinc-300"
+            >
+              Fuji testnet: import a key
+            </button>
+          ) : (
             <div>
-              <label className="text-xs uppercase tracking-wider text-zinc-500">Winner&rsquo;s private key</label>
+              <p className="text-[11px] text-yellow-400 mb-2">Fuji testnet only. The key stays in this browser.</p>
+              <label className="text-xs uppercase tracking-wider text-zinc-500">Private key</label>
               <input
                 value={privateKey}
                 onChange={(e) => setPrivateKey(e.target.value)}
@@ -159,9 +140,13 @@ function ClaimContent() {
                 placeholder="0x…"
                 className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2.5 text-white focus:border-brand-cyan outline-none mt-1 font-mono text-xs"
               />
-              <p className="text-[11px] text-zinc-500 mt-1">
-                The key generated for your placement. It signs the claim directly — never sent anywhere except Avalanche.
-              </p>
+              <button
+                type="button"
+                onClick={() => { setMode("wallet"); setPrivateKey(""); }}
+                className="text-xs text-zinc-500 hover:text-zinc-300 mt-2"
+              >
+                Use wallet instead
+              </button>
             </div>
           )}
 
