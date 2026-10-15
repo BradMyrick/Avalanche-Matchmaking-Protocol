@@ -3,22 +3,21 @@
 import React, { useState, useEffect } from "react";
 
 const baseGames = [
-  "Chess",
-  "Fighters",
-  "Card Games",
-  "Shooters",
-  "RTS",
-  "Arcade",
-  "Racing",
-  "Strategy",
-  "Auto-Battlers",
-  "Esports",
-  "Web3",
   "Unity",
   "Unreal",
-  "Godot",
-  "PyGame",
+  "TypeScript",
+  "C#",
+  "C++",
   "Rust",
+  "Godot",
+  "Python",
+  "Bevy",
+  "Shooters",
+  "Fighters",
+  "Card Games",
+  "Strategy",
+  "Esports",
+  "Web3",
 ];
 
 // Combine the list twice, then end on the punchy landing word
