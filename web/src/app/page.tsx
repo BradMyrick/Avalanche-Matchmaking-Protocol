@@ -173,22 +173,19 @@ export default function Home() {
             <RotatingText />
           </h1>
 
-          {/* Crisp, Punchy Subtitle - No Slop */}
-          <p className="max-w-3xl text-lg sm:text-xl md:text-2xl text-zinc-300 mb-10 leading-relaxed font-medium">
-            Automated tournament brackets, non-custodial prize pools, and competitive matchmaking on Avalanche.{" "}
-            <br className="hidden md:block" />
-            <strong className="text-brand-cyan font-bold">Zero servers to host.</strong> Drop-in SDKs for Unity, Unreal Engine 5, TypeScript, C#, and Rust.
+          {/* Concise Subtitle Under ANY GAME */}
+          <p className="max-w-3xl text-xl sm:text-2xl md:text-3xl text-zinc-300 mb-10 font-medium tracking-tight">
+            Drop-in tournament SDKs for Unity, Unreal Engine, or Web.
           </p>
 
           {/* Hero CTAs */}
-          <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-4 sm:gap-5 mb-24 w-full max-w-3xl">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20 w-full max-w-md">
             <Link
               href="/setup"
-              className="w-full sm:w-auto group px-8 py-4 rounded-xl font-bold text-black bg-brand-cyan hover:bg-white transition-all flex items-center justify-center gap-2.5 shadow-[0_0_30px_rgba(0,229,255,0.5)] hover:shadow-[0_0_50px_rgba(0,229,255,0.8)] hover:-translate-y-1 transform duration-300 uppercase tracking-wider text-sm border-b-4 border-brand-dark-cyan active:border-b-0 active:translate-y-1"
+              className="w-full sm:w-auto px-8 py-4 rounded-xl font-bold text-black bg-brand-cyan hover:bg-white transition-all flex items-center justify-center gap-2.5 shadow-[0_0_30px_rgba(0,229,255,0.5)] hover:shadow-[0_0_50px_rgba(0,229,255,0.8)] hover:-translate-y-1 transform duration-300 uppercase tracking-wider text-sm border-b-4 border-brand-dark-cyan active:border-b-0 active:translate-y-1"
             >
               <Trophy className="w-5 h-5 text-black" />
-              Host a Tournament Cup
-              <Sparkles className="w-4 h-4 text-black opacity-60 group-hover:opacity-100 transition-opacity" />
+              Host a Cup
             </Link>
 
             <Link
@@ -196,72 +193,8 @@ export default function Home() {
               className="w-full sm:w-auto px-8 py-4 rounded-xl font-bold text-white bg-black/60 hover:bg-brand-cyan/10 border border-brand-cyan/40 hover:border-brand-cyan transition-all flex items-center justify-center gap-2.5 shadow-[0_0_20px_rgba(0,229,255,0.15)] hover:-translate-y-1 transform duration-300 uppercase tracking-wider text-sm backdrop-blur-md"
             >
               <Coins className="w-5 h-5 text-yellow-400" />
-              Claim Your Prize
+              Claim Prize
             </Link>
-
-            <Link
-              href="#demo"
-              className="w-full sm:w-auto px-7 py-4 rounded-xl font-semibold text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/30 transition-all flex items-center justify-center gap-2 uppercase tracking-wider text-xs backdrop-blur-md"
-            >
-              <Zap className="w-4 h-4 text-brand-cyan" />
-              Test Live Duel (&lt;250ms)
-            </Link>
-
-            <Link
-              href="#tools"
-              className="w-full sm:w-auto px-7 py-4 rounded-xl font-semibold text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/30 transition-all flex items-center justify-center gap-2 uppercase tracking-wider text-xs backdrop-blur-md"
-            >
-              <Code2 className="w-4 h-4 text-yellow-400" />
-              View Game SDKs
-            </Link>
-          </div>
-
-          {/* Three Core Pillars: Fast & Direct */}
-          <div
-            id="features"
-            className="w-full grid grid-cols-1 md:grid-cols-3 gap-6 text-left scroll-mt-32 relative z-10"
-          >
-            {/* Pillar 1 */}
-            <div className="glass-panel p-8 hover:bg-yellow-400/5 transition-all duration-300 group border border-white/10 hover:border-yellow-400/40 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-400/10 rounded-full blur-2xl -mr-16 -mt-16 pointer-events-none group-hover:bg-yellow-400/20 transition-colors" />
-              <div className="w-12 h-12 rounded-xl bg-yellow-400/20 flex items-center justify-center mb-6 text-yellow-400 group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(250,204,21,0.25)] border border-yellow-400/30">
-                <Coins className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-bold mb-3 text-white uppercase tracking-wide group-hover:text-yellow-400 transition-colors">
-                Trustless Prize Escrow
-              </h3>
-              <p className="text-zinc-400 text-sm leading-relaxed font-medium">
-                Sponsors fund AVAX or USDC into <code className="text-yellow-300 font-mono text-xs">AMPTournamentCup.sol</code>. Payouts split by basis points with automated refund protection if abandoned.
-              </p>
-            </div>
-
-            {/* Pillar 2 */}
-            <div className="glass-panel p-8 hover:bg-brand-cyan/5 transition-all duration-300 group border border-white/10 hover:border-brand-cyan/40 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-brand-cyan/10 rounded-full blur-2xl -mr-16 -mt-16 pointer-events-none group-hover:bg-brand-cyan/20 transition-colors" />
-              <div className="w-12 h-12 rounded-xl bg-brand-cyan/20 flex items-center justify-center mb-6 text-brand-cyan group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(0,229,255,0.25)] border border-brand-cyan/30">
-                <Rocket className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-bold mb-3 text-white uppercase tracking-wide group-hover:text-brand-cyan transition-colors">
-                Verifiable Outcomes
-              </h3>
-              <p className="text-zinc-400 text-sm leading-relaxed font-medium">
-                Swiss rounds, single elimination brackets, and 1v1 duels attested on Avalanche via EIP-712 signatures. Zero central custody or operator bias.
-              </p>
-            </div>
-
-            {/* Pillar 3 */}
-            <div className="glass-panel p-8 hover:bg-emerald-500/5 transition-all duration-300 group border border-white/10 hover:border-emerald-500/40 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl -mr-16 -mt-16 pointer-events-none group-hover:bg-emerald-500/20 transition-colors" />
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-6 text-emerald-400 group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(16,185,129,0.25)] border border-emerald-500/30">
-                <ShieldCheck className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-bold mb-3 text-white uppercase tracking-wide group-hover:text-emerald-400 transition-colors">
-                In-Game Pull Claims
-              </h3>
-              <p className="text-zinc-400 text-sm leading-relaxed font-medium">
-                Winners pull-claim rewards directly to their Core or MetaMask wallet from your game UI. No manual distributions, no counterparty risk.
-              </p>
-            </div>
           </div>
         </section>
 
