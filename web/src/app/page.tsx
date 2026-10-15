@@ -3,7 +3,7 @@ import Image from "next/image";
 import RotatingText from "./components/RotatingText";
 import GrantBadge from "./components/GrantBadge";
 import EngineTabs from "./components/EngineTabs";
-import TechDemoSection from "./components/TechDemoSection";
+import TournamentInteractiveDemo from "./components/TournamentInteractiveDemo";
 import FujiNetwork from "./components/FujiNetwork";
 import SecurityAudits from "./components/SecurityAudits";
 import {
@@ -17,6 +17,7 @@ import {
   Zap,
   Rocket,
   Layers,
+  Swords,
 } from "lucide-react";
 import { CUP_ADDRESS, EXPLORER_URL } from "@/lib/ampCup";
 
@@ -79,7 +80,7 @@ export default function Home() {
               href="#demo"
               className="hover:text-brand-cyan transition-colors duration-300 flex items-center gap-1.5"
             >
-              <Zap className="w-3.5 h-3.5" /> Live Duel
+              <Swords className="w-3.5 h-3.5" /> Bracket Demo
             </Link>
             <Link
               href="#payouts"
@@ -220,10 +221,8 @@ export default function Home() {
           <EngineTabs />
         </section>
 
-        {/* Live Technology Demo Section: QuickDraw Reaction Duel */}
-        <div id="demo" className="scroll-mt-24">
-          <TechDemoSection />
-        </div>
+        {/* Interactive Tournament Protocol Demo */}
+        <TournamentInteractiveDemo />
 
         {/* Live Fuji Network Activity */}
         <div id="payouts" className="scroll-mt-24">

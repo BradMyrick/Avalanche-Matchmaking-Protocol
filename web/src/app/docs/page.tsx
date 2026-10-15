@@ -6,70 +6,69 @@ import {
   FileText,
   HelpCircle,
   ArrowRight,
-  Terminal,
   Shield,
-  Users,
-  Zap,
-  Globe,
+  Trophy,
+  Coins,
+  Cpu,
 } from "lucide-react";
 
 export const metadata = {
-  title: "AMP Documentation — Build Multiplayer Games on Avalanche",
+  title: "AMP Documentation — Avalanche Tournament & Match Protocol",
   description:
-    "Everything you need to integrate AMP as your multiplayer protocol: quickstart guides, API reference, contract addresses, and architecture.",
+    "Everything you need to integrate AMP tournament prize pools, verifiable brackets, and in-game prize claims on Avalanche.",
 };
 
 const sections = [
   {
     href: "/docs/quickstart",
     icon: Rocket,
-    title: "Quickstart",
-    desc: "Connect your game to AMP in 5 minutes. Wallet login, queue, match, settle.",
+    title: "Quickstart Guide",
+    desc: "Integrate tournament prize pools and claims into your game in 5 minutes. No backend servers required.",
     tag: "Start here",
-  },
-  {
-    href: "/docs/api",
-    icon: Code2,
-    title: "API Reference",
-    desc: "REST + WebSocket endpoints, EIP-712 typed data, and the embeddable Rust core.",
-    tag: "Reference",
   },
   {
     href: "/docs/contracts",
     icon: FileText,
     title: "Contracts & Addresses",
-    desc: "Deployed addresses on Fuji, ABI highlights, gas costs, and fee configuration.",
+    desc: "Deployed AMPTournamentCup address on Fuji, ABI selectors, EIP-712 attestation domain, and refund safety.",
     tag: "On-chain",
+  },
+  {
+    href: "/docs/api",
+    icon: Code2,
+    title: "Client SDK Reference",
+    desc: "API reference for Unity, Unreal Engine 5, TypeScript, C#, and Rust SDKs + local bracket engine.",
+    tag: "SDKs",
   },
   {
     href: "/docs/faq",
     icon: HelpCircle,
-    title: "FAQ",
-    desc: "Common questions about staking, ratings, disputes, and how AMP handles edge cases.",
+    title: "FAQ & Architecture",
+    desc: "Common questions about sponsor escrow, basis-point fee splits, pull-claims, and engine integration.",
     tag: "Answers",
   },
 ];
 
 const features = [
   {
-    icon: Users,
-    title: "N-Player Matchmaking",
-    desc: "Parties, teams, FFA (4–16), and battle royale (16–64). Glicko-2 skill ratings with anti-boost.",
+    icon: Coins,
+    title: "Non-Custodial Prize Escrow",
+    desc: "Sponsors fund prize pools directly in AVAX or USDC into audited smart contracts on Avalanche.",
+  },
+  {
+    icon: Trophy,
+    title: "Verifiable Brackets",
+    desc: "Single Elimination, Swiss pairings, and Round Robin run locally and settle via EIP-712 attestations.",
+  },
+  {
+    icon: Cpu,
+    title: "Multi-Engine Support",
+    desc: "Drop-in SDKs for Unity (com.amp.sdk), Unreal Engine 5 (AmpUnreal), TypeScript, C#, and Rust.",
   },
   {
     icon: Shield,
-    title: "Trustless Settlement",
-    desc: "K-of-N quorum signatures settle results on Avalanche. No oracle, no operator trust required.",
-  },
-  {
-    icon: Zap,
-    title: "Sub-Second Queue",
-    desc: "100ms in-memory tick with expanding skill windows. Commit-reveal prevents lobby targeting.",
-  },
-  {
-    icon: Globe,
-    title: "Cross-Game Identity",
-    desc: "One wallet, one rating graph. Portable EIP-712 skill attestations that follow the player.",
+    title: "In-Game Pull Claims",
+    desc: "Winning players claim rewards directly to their Core or MetaMask wallet from within your game UI.",
   },
 ];
 
@@ -84,15 +83,14 @@ export default function DocsHub() {
         <div className="text-center mb-16">
           <div className="inline-flex items-center gap-2 rounded-full border border-brand-cyan/30 bg-brand-cyan/5 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-brand-cyan mb-6">
             <BookOpen className="w-3.5 h-3.5" />
-            Documentation
+            Developer Documentation
           </div>
           <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tight mb-4">
-            Build with <span className="text-brand-cyan">AMP</span>
+            Build with <span className="text-brand-cyan">AMP Protocol</span>
           </h1>
           <p className="max-w-2xl mx-auto text-lg text-zinc-400 leading-relaxed">
-            AMP is the multiplayer protocol for games on Avalanche. Players
-            queue by skill, stake to win, and settle results through
-            cryptographic quorum. Integrate in minutes — no backend required.
+            AMP is the decentralized tournament and competitive prize protocol for games on Avalanche.
+            Create cups, automate brackets, and let players claim real prizes directly inside your game engine.
           </p>
         </div>
 
@@ -117,7 +115,7 @@ export default function DocsHub() {
               </h2>
               <p className="text-sm text-zinc-400 leading-relaxed">{s.desc}</p>
               <div className="mt-4 inline-flex items-center gap-1 text-sm text-brand-cyan opacity-0 group-hover:opacity-100 transition-opacity">
-                Read <ArrowRight className="w-4 h-4" />
+                Read Guide <ArrowRight className="w-4 h-4" />
               </div>
             </Link>
           ))}
@@ -126,91 +124,33 @@ export default function DocsHub() {
         {/* What AMP provides */}
         <div className="mb-16">
           <h2 className="text-2xl font-black uppercase tracking-tight text-center mb-8">
-            What AMP gives your game
+            Core Architecture Pillars
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {features.map((f) => (
               <div
                 key={f.title}
-                className="glass-panel rounded-2xl border border-white/10 p-6"
+                className="glass-panel rounded-2xl border border-white/10 p-6 flex flex-col justify-between"
               >
-                <f.icon className="w-8 h-8 text-brand-cyan mb-4" />
-                <h3 className="font-bold text-sm uppercase tracking-wide mb-2">
-                  {f.title}
-                </h3>
-                <p className="text-xs text-zinc-400 leading-relaxed">{f.desc}</p>
+                <div>
+                  <f.icon className="w-8 h-8 text-brand-cyan mb-4" />
+                  <h3 className="font-bold text-sm uppercase tracking-wide mb-2 text-white">
+                    {f.title}
+                  </h3>
+                  <p className="text-xs text-zinc-400 leading-relaxed">{f.desc}</p>
+                </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Architecture at a glance */}
-        <div className="glass-panel rounded-3xl border border-white/10 p-8 mb-16">
-          <h2 className="text-xl font-black uppercase tracking-tight mb-6 flex items-center gap-2">
-            <Terminal className="w-5 h-5 text-brand-cyan" />
-            Architecture at a glance
-          </h2>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-sm">
-            <div>
-              <div className="font-bold text-brand-cyan mb-2 uppercase text-xs tracking-widest">
-                Your Game (Client)
-              </div>
-              <ul className="space-y-1.5 text-zinc-400">
-                <li>• Wallet login (one free EIP-191 signature)</li>
-                <li>• Queue via REST API</li>
-                <li>• Receive match assignments via WebSocket</li>
-                <li>• Report results with EIP-712 signatures</li>
-              </ul>
-            </div>
-            <div>
-              <div className="font-bold text-brand-cyan mb-2 uppercase text-xs tracking-widest">
-                AMP Server (Rust)
-              </div>
-              <ul className="space-y-1.5 text-zinc-400">
-                <li>• Glicko-2 skill ratings, expanding windows</li>
-                <li>• Party/team/FFA/BR lobby formation</li>
-                <li>• K-of-N quorum collection (120s window)</li>
-                <li>• Commit-reveal anti-collusion</li>
-              </ul>
-            </div>
-            <div>
-              <div className="font-bold text-brand-cyan mb-2 uppercase text-xs tracking-widest">
-                Avalanche (On-chain)
-              </div>
-              <ul className="space-y-1.5 text-zinc-400">
-                <li>• Dual-deposit escrow (stake + bond)</li>
-                <li>• Verifier-attested settlement</li>
-                <li>• Pull-only payouts (claimable ledger)</li>
-                <li>• Studio/protocol fee split (≤8%)</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        {/* Embed the core */}
-        <div className="glass-panel rounded-3xl border border-brand-cyan/20 p-8 text-center">
-          <h2 className="text-xl font-black uppercase tracking-tight mb-3">
-            Or embed the matchmaking core directly
-          </h2>
-          <p className="text-sm text-zinc-400 max-w-2xl mx-auto mb-6">
-            Don&apos;t want to run a server? Pull in{" "}
-            <code className="text-brand-cyan">amp-match-core</code> — a
-            zero-dependency Rust crate with the Glicko-2 math, rule engine,
-            and queue algorithms. Your game, your process.
-          </p>
-          <pre className="text-left inline-block bg-black/60 border border-white/10 rounded-2xl px-6 py-4 text-sm font-mono">
-            <code className="text-zinc-300">{`[dependencies]
-amp-match-core = "0.1"`}</code>
-          </pre>
-        </div>
-
-        {/* Footer link back */}
-        <div className="text-center mt-12">
+        {/* Back Link */}
+        <div className="text-center pt-8 border-t border-white/10">
           <Link
             href="/"
             className="text-sm text-zinc-500 hover:text-brand-cyan transition-colors"
           >
-            ← Back to playwithamp.xyz
+            ← Back to Homepage
           </Link>
         </div>
       </div>
