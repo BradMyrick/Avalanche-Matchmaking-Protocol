@@ -14,7 +14,7 @@ const contracts = [
     name: "AMPTournamentCup",
     version: "v1.0 (Live)",
     address: CUP_ADDRESS,
-    desc: "Decentralized tournament prize escrow, EIP-712 verifier attestation, and pull-claim payout router on Avalanche.",
+    desc: "Tournament prize escrow, EIP-712 verifier attestation, and pull-claim payout router on Avalanche. This is the contract — the whole product runs on it.",
     featured: true,
     features: [
       "Native AVAX & ERC-20 Support",
@@ -24,28 +24,14 @@ const contracts = [
       "EIP-712 Verifier Attestation",
     ],
     functions: [
-      { name: "getTournament(uint256)", selector: "0x1a5bd7fc", desc: "Read tournament escrow, state, and winners" },
-      { name: "claimPrize(uint256,uint256)", selector: "0x7b154140", desc: "Winner pulls prize payout to their wallet" },
-      { name: "claimed(uint256,uint256)", selector: "0xa54ab457", desc: "Check if placement prize was claimed" },
       { name: "createTournament(...)", selector: "0x39d87eda", desc: "Sponsor funds prize pool with basis-point payouts" },
+      { name: "createTournamentERC20(...)", selector: "0x529e0cff", desc: "ERC-20 prize variant (fee-on-transfer safe)" },
       { name: "finalizeTournament(...)", selector: "0x8ef13499", desc: "Submit EIP-712 verifier attestation signature" },
+      { name: "claimPrize(uint256,uint256)", selector: "0x7b154140", desc: "Winner pulls prize payout to their wallet" },
+      { name: "cancelTournament(uint256)", selector: "0x32432233", desc: "Refund the sponsor if never finalized" },
+      { name: "getTournament(uint256)", selector: "0x1a5bd7fc", desc: "Read tournament escrow, state, and winners" },
+      { name: "protocolFeeBps()", selector: "0x35659fb8", desc: "Current protocol fee in basis points" },
     ],
-  },
-  {
-    name: "AMPMultiplayer",
-    version: "v2 (N-player Escrow)",
-    address: "0xcabf7b626172fE55d54f03c346563671AbcC77f7",
-    desc: "N-player dual-deposit escrow + K-of-N quorum settlement + prove-your-payout claims for battle royales and lobbies.",
-    featured: false,
-    features: ["2–64 player lobbies", "Stake + reporting bond", "K = ⌊2N/3⌋+1 quorum", "Pull-only payouts"],
-  },
-  {
-    name: "AMPRegistry",
-    version: "v1",
-    address: "0xf6B0eA6c88c574c4BbEAdC186AAfe72C43C2cDc2",
-    desc: "Game registry, escrow holder, verifier whitelisting",
-    featured: false,
-    features: ["Game registration", "Escrow custody", "Verifier management"],
   },
 ];
 
@@ -148,6 +134,16 @@ export default function ContractsPage() {
               )}
             </div>
           ))}
+        </div>
+
+        {/* Retired experiments note */}
+        <div className="glass-panel rounded-2xl border border-white/5 p-5 mb-12">
+          <p className="text-xs text-zinc-500 leading-relaxed">
+            Earlier AMP iterations included an N-player escrow (AMPMultiplayer) and a 1v1
+            match escrow (AMPRegistry/AMPSettlement). Those were experiments and are
+            retired from the product — the contracts remain source-verified on Fuji with
+            no user funds, but integrators should target AMPTournamentCup only.
+          </p>
         </div>
 
         {/* EIP-712 Specification */}

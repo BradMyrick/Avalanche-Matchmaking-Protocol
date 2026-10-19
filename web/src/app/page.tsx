@@ -61,10 +61,9 @@ export default function Home() {
             <RotatingText />
           </h1>
 
-          <p className="text-base sm:text-lg text-zinc-300 mb-5">
-            SDK plus AMPTournamentCup.
+          <p className="text-base sm:text-lg text-zinc-300 mb-2 max-w-2xl">
+            AMP is an open protocol for running Avalanche prize tournaments inside any game.
           </p>
-
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6">
             <Link
               href="/setup"
@@ -89,7 +88,8 @@ export default function Home() {
               Tournament SDKs
             </h2>
             <p className="text-zinc-400">
-              Brackets run in the SDK. Prizes sit in AMPTournamentCup.
+              One SDK per engine. Run the bracket, finalize with a signed result,
+              and let players claim prizes in-game.
             </p>
           </div>
           <EngineTabs />
