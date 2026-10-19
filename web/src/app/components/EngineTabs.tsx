@@ -86,7 +86,7 @@ const cup = Tournament.new({ kind: TournamentState.SingleElimination }, [
 
 // 2. Query & claim escrowed prize pool on Avalanche Fuji
 const client = new AMPTournamentClient({ signer });
-const info = await client.canClaim(tournamentId, playerAddress);
+const info = await client.getClaimablePrize(tournamentId, playerAddress);
 if (info.canClaim) {
   const tx = await client.claimPrize(tournamentId, info.placement);
   console.log("Prize claimed on Avalanche! Hash:", tx.hash);

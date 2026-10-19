@@ -1,5 +1,6 @@
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
+import AgentInstall from "@/app/components/AgentInstall";
 import {
   Rocket,
   Code2,
@@ -13,7 +14,7 @@ import {
 } from "lucide-react";
 
 export const metadata = {
-  title: "AMP Documentation — Avalanche Tournament & Match Protocol",
+  title: "AMP Documentation — Avalanche Tournament Protocol",
   description:
     "Everything you need to integrate AMP tournament prize pools, verifiable brackets, and in-game prize claims on Avalanche.",
 };
@@ -23,28 +24,28 @@ const sections = [
     href: "/docs/quickstart",
     icon: Rocket,
     title: "Quickstart Guide",
-    desc: "SDK and AMPTournamentCup. The library does not need this site.",
+    desc: "Install the SDK for your engine and ship your first funded tournament — five steps, real code, no backend.",
     tag: "Start here",
   },
   {
     href: "/docs/contracts",
     icon: FileText,
     title: "Contracts & Addresses",
-    desc: "Deployed AMPTournamentCup address on Fuji, ABI selectors, EIP-712 attestation domain, and refund safety.",
+    desc: "The deployed AMPTournamentCup address on Fuji, ABI selectors, the EIP-712 attestation domain, and refund safety.",
     tag: "On-chain",
   },
   {
     href: "/docs/api",
     icon: Code2,
-    title: "Client SDK Reference",
-    desc: "API reference for Unity, Unreal Engine 5, TypeScript, C#, and Rust SDKs + local bracket engine.",
+    title: "SDK Reference",
+    desc: "The whole protocol in five calls — create, bracket, finalize, claim — with the exact signatures for every engine.",
     tag: "SDKs",
   },
   {
     href: "/docs/faq",
     icon: HelpCircle,
-    title: "FAQ & Architecture",
-    desc: "Fees, claims, and SDKs.",
+    title: "FAQ",
+    desc: "What AMP is, who holds the money, fees, disputes, refunds, security, and the road to mainnet.",
     tag: "Answers",
   },
 ];
@@ -53,22 +54,22 @@ const features = [
   {
     icon: Coins,
     title: "Non-Custodial Prize Escrow",
-    desc: "Sponsors fund AVAX in the source-verified cup contract.",
+    desc: "Prizes sit in the source-verified cup contract — not in a wallet, not with us — until a winner claims.",
   },
   {
     icon: Trophy,
-    title: "Verifiable Brackets",
-    desc: "Single elimination and Swiss run locally, then settle with EIP-712.",
+    title: "Brackets in the SDK",
+    desc: "Single elimination and round robin run locally in your game, deterministic and unit-testable.",
   },
   {
     icon: Cpu,
-    title: "Multi-Engine Support",
-    desc: "Drop-in SDKs for Unity (com.amp.sdk), Unreal Engine 5 (AmpUnreal), TypeScript, C#, and Rust.",
+    title: "Every Engine",
+    desc: "Unity, Unreal Engine 5, TypeScript, C#, and Rust — same five calls everywhere.",
   },
   {
     icon: Shield,
     title: "In-Game Pull Claims",
-    desc: "Winning players claim rewards directly to their Core or MetaMask wallet from within your game UI.",
+    desc: "Winners claim prizes straight to their Core or MetaMask wallet, from inside your game.",
   },
 ];
 
@@ -85,7 +86,9 @@ export default function DocsHub() {
             Build with <span className="text-brand-cyan">AMP</span>
           </h1>
           <p className="max-w-2xl mx-auto text-zinc-400">
-            SDK and AMPTournamentCup. Local brackets, on-chain prizes.
+            AMP runs real prize tournaments inside your game. Fund a pool with AVAX
+            or a card, run the bracket, finalize with a signed result, and winners
+            claim from the contract. These docs cover the whole path.
           </p>
         </div>
 
@@ -136,8 +139,11 @@ export default function DocsHub() {
           </div>
         </div>
 
+        {/* Agentic install */}
+        <AgentInstall />
+
         {/* Back Link */}
-        <div className="text-center pt-8 border-t border-white/10">
+        <div className="text-center pt-8 mt-16 border-t border-white/10">
           <Link
             href="/"
             className="text-sm text-zinc-500 hover:text-brand-cyan transition-colors"

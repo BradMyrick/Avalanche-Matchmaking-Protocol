@@ -249,7 +249,8 @@ export default function SetupPage() {
             Set Up Your <span className="text-brand-cyan">Cup</span>
           </h1>
           <p className="text-zinc-400">
-            Optional hosted console. Protocol is the SDK and AMPTournamentCup.
+            Create and fund a real tournament cup in three steps — no code required.
+            Building a game? The SDK does all of this programmatically.
           </p>
         </div>
 

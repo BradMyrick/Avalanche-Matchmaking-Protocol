@@ -1,101 +1,88 @@
 import Link from "next/link";
-import { Rocket, Key, Trophy, Coins, Cpu, ShieldCheck } from "lucide-react";
+import { Rocket, Coins, Cpu, Flag, Wallet, Bot } from "lucide-react";
 import { CUP_ADDRESS, EXPLORER_URL } from "@/lib/ampCup";
 import SiteHeader from "@/app/components/SiteHeader";
 import CodeSample from "@/app/components/CodeSample";
+import AgentInstall from "@/app/components/AgentInstall";
 
 export const metadata = {
-  title: "AMP Quickstart — Tournament Protocol Integration",
-  description: "Step-by-step guide to integrate AMP tournament prize pools and claims: Unity, Unreal, and Web.",
+  title: "AMP Quickstart — Run Your First Tournament",
+  description: "Install the AMP SDK, fund a prize pool, run a bracket, finalize results, and let winners claim — in five steps.",
 };
 
 const steps = [
   {
     icon: Cpu,
-    title: "1. Install the SDK For Your Engine",
-    code: `// Unity: Add via Package Manager git URL:
-// https://github.com/BradMyrick/amp-sdk-unity.git?path=com.amp.sdk
+    title: "1. Install the SDK",
+    code: `# Web / Node.js
+npm install @amp/sdk ethers@^6
 
-// Unreal Engine 5: Clone AmpUnreal into your project's Plugins/ folder:
-// git clone https://github.com/BradMyrick/amp-sdk-cpp.git Plugins/AmpUnreal
+# Unity (Package Manager → Add package from git URL)
+https://github.com/BradMyrick/amp-sdk-unity.git
 
-// Web / Node.js: Install via npm:
-npm install @amp/sdk ethers@^6`,
-    note: "The SDK calls Avalanche RPC and AMPTournamentCup. It does not need this site.",
-  },
-  {
-    icon: Trophy,
-    title: "2. Inspect a Tournament Cup",
-    code: `import { AMPTournamentClient } from "@amp/sdk";
-
-// Initialize client pointing to Avalanche Fuji testnet
-const amp = new AMPTournamentClient();
-
-// Query Tournament Cup #1
-const cup = await amp.getTournament(1n);
-
-console.log(\`Sponsor: \${cup.sponsor}\`);
-console.log(\`Prize Pool: \${cup.prizePoolAvax} AVAX\`);
-console.log(\`Payout Split: \${cup.payoutBps.map(b => b / 100 + "%").join(" / ")}\`);`,
-    note: "Reads on-chain state directly via getTournament(uint256) on AMPTournamentCup.sol.",
-  },
-  {
-    icon: ShieldCheck,
-    title: "3. Run Brackets Locally with @amp/sdk",
-    code: `import { Tournament, TournamentState, Outcome } from "@amp/sdk";
-
-// Seed 8 players into a Single Elimination or Swiss bracket
-const entrants = [
-  { id: 1, seed: 1 },
-  { id: 2, seed: 2 },
-  { id: 3, seed: 3 },
-  { id: 4, seed: 4 },
-];
-
-const bracket = Tournament.new({ kind: TournamentState.SingleElimination }, entrants);
-
-// Record match results as games finish
-bracket.record(0, Outcome.A); // Player 1 defeats Player 4
-
-// Get final standings when complete
-const standings = bracket.standings();
-console.log(\`Champion: Player #\${standings[0].playerId}\`);`,
-    note: "Runs in the SDK.",
-  },
-  {
-    icon: Key,
-    title: "4. Settle with EIP-712 Attestation",
-    code: `import { PrivateKeySigner } from "@amp/sdk";
-
-// Verifier signs the final winner placements
-const verifierSigner = new PrivateKeySigner(verifierPrivateKey);
-
-const signature = await amp.signTournamentResult(
-  1n, // tournamentId
-  [winner1Address, winner2Address, winner3Address], // winner addresses
-  verifierSigner
-);
-
-// Finalize on-chain (can be submitted by organizer or verifier)
-await amp.finalizeTournament(1n, [winner1Address, winner2Address, winner3Address], signature);`,
-    note: "Verifies against domain: { name: 'AMPTournamentCup', version: '1', chainId: 43113, verifyingContract: '0x7C743c1C9AE3e7A65d030098F2249B7787d66dfF' }.",
+# Unreal Engine 5 (from your project root)
+git clone https://github.com/BradMyrick/amp-sdk-cpp.git amp-sdk
+mv amp-sdk/AmpUnreal Plugins/AmpUnreal`,
+    note: "Everything talks directly to Avalanche RPC and the AMPTournamentCup contract. There is no AMP backend your game depends on.",
   },
   {
     icon: Coins,
-    title: "5. In-Game Pull-Claim Payouts",
-    code: `// Unity C# In-Game Prize Claim:
-var amp = AmpTournamentManager.Instance;
-var check = await amp.CanClaimAsync(tournamentId: 1, playerWallet);
+    title: "2. Fund a prize pool",
+    code: `import { AMPTournamentClient } from "@amp/sdk";
+import { parseEther } from "ethers";
 
-if (check.CanClaim) {
-    Debug.Log($"You won {check.EstimatedPrizeAvax} AVAX! Claiming...");
-    var tx = await amp.ClaimPrizeAsync(tournamentId: 1, check.Placement);
-    Debug.Log($"Claim confirmed in tx: {tx.Hash}");
+const amp = new AMPTournamentClient().connect(sponsorWallet);
+
+const { tournamentId, txHash } = await amp.createTournament(
+  [6000, 3000, 1000],        // payout split in bps: 60/30/10, must sum to 10000
+  verifierAddress,           // wallet allowed to sign final results
+  deadlineUnix,              // after this, an unfinalized cup can be refunded
+  parseEther("1.0")          // prize pool in AVAX (ERC-20 variant also available)
+);`,
+    note: "The AVAX sits in the contract — not in your wallet, not in ours. Up to 16 paid placements.",
+  },
+  {
+    icon: Flag,
+    title: "3. Run the bracket in your game",
+    code: `import { Tournament, TournamentState, Outcome } from "@amp/sdk";
+
+// Same engine ships in every SDK — pure, deterministic, no network calls
+const bracket = Tournament.new(
+  { kind: TournamentState.SingleElimination },
+  [{ id: 1, seed: 1 }, { id: 2, seed: 2 }, { id: 3, seed: 3 }, { id: 4, seed: 4 }]
+);
+
+bracket.record(0, Outcome.A);        // feed in results as matches finish
+const next = bracket.pending();       // matches still to play
+const standings = bracket.standings();// final placements, sorted`,
+    note: "Pairings, byes, and standings are computed locally. Test it with unit tests — no chain needed until finalize.",
+  },
+  {
+    icon: Bot,
+    title: "4. Finalize with a signed result",
+    code: `// Verifier wallet signs the final placements (EIP-712)
+const verifier = new AMPTournamentClient().connect(verifierWallet);
+const signature = await verifier.signFinalize(
+  tournamentId,
+  [firstPlace, secondPlace, thirdPlace]   // must match the payout split length
+);
+
+// Anyone can submit the signature on-chain — organizer, relayer, or the game server
+await amp.finalizeTournament(tournamentId, [firstPlace, secondPlace, thirdPlace], signature);`,
+    note: "The contract verifies the signature against the verifier address set at creation. Only that key can release prizes.",
+  },
+  {
+    icon: Wallet,
+    title: "5. Winners claim their prize",
+    code: `// TypeScript — in your game UI or web portal
+const prize = await amp.getClaimablePrize(tournamentId, playerAddress);
+if (prize) {
+  await amp.claimPrize(tournamentId, prize.placement); // AVAX lands in the player's wallet
 }
 
-// Unreal Engine 5 Blueprint:
-// Use the "AMP Async Action: Check Can Claim" node -> wire into "AMP Async Action: Claim Prize"!`,
-    note: "Winners call claimPrize from their wallet.",
+// Unity:  await AmpTournamentManager.Instance.ClaimPrizeAsync(tournamentId, placement);
+// Unreal: "AMP Async Action: Check Can Claim" → "AMP Async Action: Claim Prize" nodes`,
+    note: "Pull-payments only: winners call claimPrize themselves — from in-game, or at playwithamp.xyz/claim with just a wallet.",
   },
 ];
 
@@ -119,10 +106,12 @@ export default function QuickstartPage() {
             Quickstart
           </div>
           <h1 className="text-4xl font-black uppercase tracking-tight mb-4">
-            Quickstart
+            Run your first tournament
           </h1>
-          <p className="text-zinc-400">
-            SDK and AMPTournamentCup.
+          <p className="text-zinc-400 max-w-2xl">
+            Five steps: install the SDK, fund a prize pool, run the bracket in your game,
+            finalize with a signed result, and let winners claim. No backend, no API keys —
+            your game talks straight to the contract.
           </p>
         </div>
 
@@ -148,7 +137,7 @@ export default function QuickstartPage() {
 
         {/* Steps */}
         <div className="space-y-8">
-          {steps.map((step, i) => (
+          {steps.map((step) => (
             <div
               key={step.title}
               className="glass-panel rounded-3xl border border-white/10 p-8 relative overflow-hidden"
@@ -173,16 +162,21 @@ export default function QuickstartPage() {
           ))}
         </div>
 
+        {/* Agentic install */}
+        <div className="mt-16 scroll-mt-24" id="agentic">
+          <AgentInstall />
+        </div>
+
         {/* Next Links */}
         <div className="mt-16 pt-8 border-t border-white/10 flex justify-between items-center text-sm">
           <Link href="/docs" className="text-zinc-500 hover:text-white transition-colors">
             ← Overview
           </Link>
           <Link
-            href="/docs/contracts"
+            href="/docs/api"
             className="text-brand-cyan hover:underline font-bold"
           >
-            Contracts & Addresses →
+            Full SDK Reference →
           </Link>
         </div>
       </div>

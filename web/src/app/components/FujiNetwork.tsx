@@ -72,7 +72,8 @@ export default function FujiNetwork() {
                         </div>
                         <h2 className="text-4xl md:text-5xl font-black mb-3 uppercase tracking-tight">Prize Pools</h2>
                         <p className="text-zinc-400">
-                            Escrowed on Fuji. {PROTOCOL_FEE_LABEL} protocol fee.
+                            Every pool below is escrowed in the cup contract on Fuji.
+                            A {PROTOCOL_FEE_LABEL} protocol fee is taken from each payout at claim time.
                         </p>
                     </div>
 

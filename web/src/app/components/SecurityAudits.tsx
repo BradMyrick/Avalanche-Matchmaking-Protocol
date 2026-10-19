@@ -14,7 +14,6 @@ const badges = [
   "Pull-Payment Prize Payouts",
   "ReentrancyGuard",
   "Pausable + Ownable2Step",
-  "TimelockController Governance",
   "Fee-on-Transfer Safe",
   "OZ EIP712 Domain",
 ];

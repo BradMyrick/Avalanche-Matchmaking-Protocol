@@ -174,7 +174,8 @@ export default function TournamentInteractiveDemo() {
             Tournament <span className="text-brand-cyan">Engine</span>
           </h2>
           <p className="text-zinc-400">
-            Local bracket. Then the cup on Fuji.
+            Run a bracket in your browser, record results, and watch standings and
+            prize payouts resolve — the same flow your game will run with the SDK.
           </p>
 
           {/* Toggle Tabs */}
