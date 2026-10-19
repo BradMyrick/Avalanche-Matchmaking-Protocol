@@ -67,15 +67,15 @@ Manifest: [`contracts/deployment-fuji-tournament.json`](contracts/deployment-fuj
 ├── agents/SKILL.md    # AI-agent integration playbook
 ├── migrations/        # Postgres schema for the hosted console
 ├── amp-sdk-* (../)    # sibling SDK repos: TypeScript, Unity, Unreal, C#, Rust
-└── docs/              # design records + legacy notes
+└── docs/              # design records
 ```
 
-> Legacy: `amp-server/` and `amp-match-core/` are the remains of an earlier
-> matchmaking/multiplayer direction, retained for reference. They are not part
-> of the tournament product and not on the integration path. The old
-> `AMPMultiplayer` / `AMPRegistry` / `AMPSettlement` contracts on Fuji are
-> retired experiments (source-verified, no user funds) — target
-> `AMPTournamentCup` only.
+> History note: earlier iterations shipped a ranked-matchmaking server
+> (`amp-server`), a matchmaker core library (`amp-match-core`), and the
+> `AMPMultiplayer` / `AMPRegistry` / `AMPSettlement` contracts. They were
+> removed after the tournament-only pivot — find them in git history. The old
+> contracts remain source-verified on Fuji with no user funds; integrators
+> should target `AMPTournamentCup` only.
 
 ## Security model
 

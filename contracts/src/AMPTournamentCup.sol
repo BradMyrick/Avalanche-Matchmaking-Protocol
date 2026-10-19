@@ -16,14 +16,11 @@ import "openzeppelin-contracts/contracts/utils/Address.sol";
 ///         points per placement), and a verifier attests the final standings via
 ///         an EIP-712 signature. Winners pull-claim their share.
 ///
-///         MVP model for the AMP tournament engine. Standalone — does not touch
-///         the deployed `AMPRegistry` / `AMPSettlement` wagering contracts.
-///
 /// @dev Security model:
-///      - Pull-payment only (Rule 6, anti-MEV): winners call `claimPrize`.
+///      - Pull-payment only (anti-MEV): winners call `claimPrize`.
 ///      - `nonReentrant` + checks-effects-interactions on every state change.
-///      - EIP-712 verifier attestation reuses the AMPSettlement pattern.
-///      - `Ownable2Step` (transferable to the TimelockController post-deploy).
+///      - EIP-712 verifier attestation over typed data.
+///      - `Ownable2Step` (transferable to a TimelockController post-deploy).
 ///      - payoutBps must sum to exactly 10000; placements bounded to MAX_PLACEMENTS.
 contract AMPTournamentCup is Ownable2Step, Pausable, EIP712, ReentrancyGuard {
     using SafeERC20 for IERC20;

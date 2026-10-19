@@ -1,6 +1,6 @@
 # @amp-protocol/contracts — Avalanche Tournament Protocol
 
-Verified, audited-pattern smart contracts powering trustless competitive gaming, sponsor prize pools, and verifiable tournament settlements on Avalanche (C-Chain and Avalanche L1s/Subnets).
+Source-verified smart contracts for sponsor prize pools and verifiable tournament settlement on Avalanche (C-Chain and Avalanche L1s/Subnets).
 
 ---
 
@@ -9,7 +9,6 @@ Verified, audited-pattern smart contracts powering trustless competitive gaming,
 | Contract | Address | Network | Description |
 |:---|:---|:---|:---|
 | **`AMPTournamentCup`** | [`0x7c743c1c9ae3e7a65d030098f2249b7787d66dff`](https://testnet.snowtrace.io/address/0x7c743c1c9ae3e7a65d030098f2249b7787d66dff) | Fuji (ChainID: 43113) | Sponsor prize pools, EIP-712 verified standings, winner pull-claims (AVAX & ERC-20) |
-| **`AMPMultiplayer`** | [`0xcabf7b626172fE55d54f03c346563671AbcC77f7`](https://testnet.snowtrace.io/address/0xcabf7b626172fE55d54f03c346563671AbcC77f7) | Fuji (ChainID: 43113) | N-player dual-deposit escrow, K-of-N quorum settlement |
 
 ---
 
@@ -48,15 +47,6 @@ Verified, audited-pattern smart contracts powering trustless competitive gaming,
 - **Deadline Protection**: If the verifier fails to finalize before `finalizeDeadline`, the sponsor can cancel and reclaim 100% of their deposited funds.
 - **Fee-On-Transfer Safe**: Actual received balance deltas are measured on ERC-20 deposits.
 - **Zero-Address Guards**: All winner and verifier inputs are strictly validated.
-
----
-
-## 2. AMPMultiplayer.sol
-
-For games requiring decentralized, player-staked lobbies (FFA or Battle Royale):
-- **Dual-Deposit Escrow**: Players deposit stake + reporting bond.
-- **K-of-N Quorum Settlement**: Settles when $K = \lfloor 2N/3 \rfloor + 1$ players sign identical placements over EIP-712.
-- **Prove-Your-Payout Claims**: Constant $O(1)$ storage writes during settlement; players pay their own claim gas.
 
 ---
 

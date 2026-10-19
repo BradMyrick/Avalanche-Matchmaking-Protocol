@@ -25,9 +25,7 @@
   ],
   "exports": {
     "./AMPTournamentCup.sol": "./src/AMPTournamentCup.sol",
-    "./AMPMultiplayer.sol": "./src/AMPMultiplayer.sol",
     "./abi/AMPTournamentCup.json": "./abi/AMPTournamentCup.json",
-    "./abi/AMPMultiplayer.json": "./abi/AMPMultiplayer.json",
     "./deployments/fuji": "./deployment-fuji-tournament.json"
   }
 }
