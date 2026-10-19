@@ -1,138 +1,71 @@
 import Link from "next/link";
-import { ChevronDown } from "lucide-react";
-import SiteHeader from "@/app/components/SiteHeader";
-import { PROTOCOL_FEE_LABEL } from "@/lib/ampCup";
+import { HelpCircle, ChevronDown } from "lucide-react";
 
 export const metadata = {
-  title: "AMP FAQ — Tournament Protocol Questions",
-  description: "What AMP is, how cups work, fees, claims, refunds, security, and the road to mainnet — answered thoroughly.",
+  title: "AMP FAQ — Frequently Asked Questions",
+  description: "Answers about AMP matchmaking: staking, ratings, disputes, fees, and how the protocol handles edge cases.",
 };
 
-const groups: { title: string; faqs: { q: string; a: string }[] }[] = [
+const faqs = [
   {
-    title: "Basics",
-    faqs: [
-      {
-        q: "What is AMP, in one paragraph?",
-        a: "AMP is an open protocol for running prize tournaments inside any game, built on Avalanche. A sponsor funds a prize pool into a smart contract (the AMPTournamentCup), your game runs the tournament bracket using an SDK, a verifier wallet cryptographically signs the final standings, and winners claim their prize directly from the contract with their own wallet. There is no custodian: not you, not us — the contract holds the money and pays out only against the verifier's signature.",
-      },
-      {
-        q: "Who is AMP for?",
-        a: "Game studios and organizers who want real stakes — cash-equivalent prizes, community cups, seasonal ladders — without building escrow, payout plumbing, or a payments backend. Also sponsors (DAOs, guilds, brands) who want to fund a verifiable prize pool for someone else's community.",
-      },
-      {
-        q: "What do I actually need to run a tournament?",
-        a: "Three things: (1) AVAX on Fuji testnet for the prize pool and gas, (2) a verifier wallet you control — this is the key that signs final results, and (3) a way to decide results: your game's own match data through the SDK, or the bracket console on this site. Players need any EVM wallet (Core, MetaMask) and a little AVAX for the claim transaction.",
-      },
-      {
-        q: "Do I need to run a server?",
-        a: "No. The SDK talks directly to Avalanche RPC and the cup contract — that's the whole protocol. This website is an optional convenience: a no-code cup launcher, a bracket console, and a claim portal. If you use your own verifier key signing in-game results, you never need us at all.",
-      },
-      {
-        q: "Which engines are supported?",
-        a: "TypeScript/JavaScript (@amp/sdk on npm), Unity, Unreal Engine 5 (Blueprints and C++), C#/.NET, and Rust — plus a plain REST surface on this site for anything else. The bracket engine is deterministic and identical across SDKs, so a result computed in one SDK matches every other.",
-      },
-    ],
+    q: "What is AMP?",
+    a: "AMP (Avalanche Matchmaking Protocol) is a decentralized multiplayer matchmaking layer. Players queue by skill rating, optionally stake cryptocurrency, play their match, and settle the result through cryptographic quorum signatures on Avalanche. No central operator is needed to hold funds or verify outcomes.",
   },
   {
-    title: "Running a tournament",
-    faqs: [
-      {
-        q: "How does a cup work, end to end?",
-        a: "1) Create: the sponsor calls createTournament with a payout split (e.g. 60/30/10), a verifier address, and a finalize deadline, funding it with AVAX or an ERC-20. 2) Play: your game runs the bracket with the SDK — pairings, byes, and standings are computed locally. 3) Finalize: the verifier wallet signs the final placements (EIP-712); anyone submits that signature on-chain before the deadline. 4) Claim: each winner calls claimPrize from their wallet — in-game or at /claim. The pool pays out per the split, minus the protocol fee.",
-      },
-      {
-        q: "What is the verifier, and who should hold that key?",
-        a: "The verifier is the single address authorized to sign final standings — it's set once at cup creation and cannot be changed. Treat it like the prize money itself: it should be an organizer/ops wallet kept in a secret manager, never in a client bundle or a repo. If you're running honest events, the verifier signs whatever the bracket engine computed from real match results.",
-      },
-      {
-        q: "How are payouts split?",
-        a: "You choose, in basis points, at creation: index 0 is 1st place, the split must sum to exactly 100%, and up to 16 paid placements are allowed. Example: [6000, 3000, 1000] pays 60/30/10. Winner-takes-all is [10000].",
-      },
-      {
-        q: "What happens if the tournament never finishes — or the verifier key is lost?",
-        a: "Every cup has a finalize deadline set at creation. If it passes without a finalization, cancelTournament refunds the entire prize pool to the sponsor — callable by the sponsor, or by anyone once the deadline has lapsed. Nobody's funds can be trapped in an abandoned cup. This is also why you should keep the verifier key recoverable (and why the deadline should reflect a realistic event length).",
-      },
-      {
-        q: "Can results be disputed?",
-        a: "On-chain, the contract accepts only the verifier's signature — it deliberately has no opinion about who won. Disputes are an organizer concern, resolved before finalization using your own evidence (match logs, replays, referee rulings). Once finalized, placements are immutable; that's the trade: you get instant, trustless payouts in exchange for finalizing only after you're confident in the standings.",
-      },
-      {
-        q: "What's the refund logic during an event?",
-        a: "Before the deadline and before finalization, the sponsor can cancel and recover the full pool. After finalization there are no refunds — prizes belong to the attested winners, claimable whenever they like (there's no claim deadline).",
-      },
-      {
-        q: "Can players report their own results?",
-        a: "Yes — the hosted console supports player-signed match reports (players sign with their wallets, and both sides confirm) for organizing brackets without custom code. When you integrate the SDK in-game, you'll usually skip that and feed your authoritative match data straight into the bracket engine.",
-      },
-    ],
+    q: "How does matchmaking work?",
+    a: "Players enter a queue with their Glicko-2 skill rating. The matchmaker pairs players within an expanding skill window — tight matches first, fair matches eventually. For N-player lobbies (FFA, battle royale), a commit-reveal phase with a blockhash-seeded shuffle prevents pre-coordinated groups from targeting the same lobby.",
   },
   {
-    title: "Money",
-    faqs: [
-      {
-        q: "What does AMP cost?",
-        a: `A ${PROTOCOL_FEE_LABEL} protocol fee on each prize payout, taken on-chain at claim time (that's protocolFeeBps on the contract — currently 200 bps on Fuji). Plus normal Avalanche gas for the handful of transactions: create, finalize, and each claim. Nothing else — no subscriptions, no listing fees, no cut of your entry fees, because AMP never touches entry fees.`,
-      },
-      {
-        q: "Who holds the prize money?",
-        a: "The AMPTournamentCup contract, for the life of the event. Not the sponsor's wallet, not AMP, not a relayer. Payouts leave only via winner pull-claims or the sponsor refund path — the contract has no other exits.",
-      },
-      {
-        q: "How do winners get paid?",
-        a: "Pull-claim: after finalization, a winner calls claimPrize(tournamentId, placement) from the wallet that was attested as a winner. The contract sends their share immediately. In-game, that's one SDK call; without a game, it's playwithamp.xyz/claim with just a connected wallet.",
-      },
-      {
-        q: "Can I fund cups with a card instead of crypto?",
-        a: "Yes — the cup launcher on this site accepts card payments (PayPal) for the prize pool; a relayer converts the payment into an on-chain funding transaction. Card funding is sandbox-only while AMP is on testnet. Direct AVAX or ERC-20 funding needs no relayer at all.",
-      },
-      {
-        q: "Do players need crypto to participate?",
-        a: "To play, no — entry is your game's concern. To claim a prize, yes: the winner's wallet makes one transaction, which needs gas (a fraction of AVAX). A sponsor can't push prizes on a winner's behalf — pull-claims are a security feature.",
-      },
-    ],
+    q: "What is Glicko-2 and why does it matter?",
+    a: "Glicko-2 is a rating system that tracks both skill (rating) and uncertainty (rating deviation). New players start uncertain and converge quickly. AMP's implementation is order-independent (any permutation of opponents yields bit-identical results, fuzz-gated), making it safe for distributed execution.",
   },
   {
-    title: "Security & trust",
-    faqs: [
-      {
-        q: "What's the security model?",
-        a: "The cup contract is small, source-verified on Snowtrace, and built on OpenZeppelin primitives: reentrancy guards, pull-only payments, pausable, two-step ownership. Attestations are EIP-712 signatures, so browsers, servers, and the contract all compute identical digests. Prize accounting is exact: balances are measured at deposit (fee-on-transfer tokens are handled correctly) and every wei is either paid out or refunded.",
-      },
-      {
-        q: "Has the contract been audited?",
-        a: "Not yet by an external firm. The contract has a Forge test suite (unit + conservation invariants), is source-verified, and an external audit plus timelock governance are prerequisites we've set for ourselves before any mainnet deployment. Until then: treat Fuji as what it is — testnet with no real value at risk.",
-      },
-      {
-        q: "Can AMP rug a cup?",
-        a: "No. The contract has no owner path to prize funds — ownership administers the protocol fee and pause, never payouts. Once a cup is created, its money moves only by the rules set at creation: verifier-signed finalization, winner claims, sponsor refund.",
-      },
-      {
-        q: "Is this gambling?",
-        a: "AMP is prize infrastructure for skill-based competition — brackets where outcomes come from playing. It's not a lottery, casino, or betting protocol, and there's no AMP token. That said, prize competitions can carry legal obligations that vary by jurisdiction and prize size; organizers are responsible for their own events' compliance.",
-      },
-    ],
+    q: "Do I need to stake money to play?",
+    a: "No. Free play is the default — no wallet gas, no transaction, just a free signature to log in. Staked matches (where players deposit AVAX into escrow) are opt-in for competitive modes.",
   },
   {
-    title: "Platform & roadmap",
-    faqs: [
-      {
-        q: "Testnet or mainnet?",
-        a: "Fuji testnet today — every address, balance, and claim on this site is testnet value. Mainnet goes live only after an external audit, timelock governance on the contract, and updated terms. When it does, the addresses change and everything you built against the SDK keeps working by swapping config.",
-      },
-      {
-        q: "Can I deploy the contract myself?",
-        a: "Yes. AMPTournamentCup is Apache-2.0 Solidity with no Avalanche-specific dependencies — deploy it on any EVM chain (including an Avalanche L1) and point the SDKs at your address. You lose the hosted console and card funding, keep everything else.",
-      },
-      {
-        q: "What was removed from AMP? I remember matchmaking and multiplayer escrows.",
-        a: "Earlier iterations included a 1v1 ranked-matchmaking server and an N-player escrow contract. Those were experiments ahead of product clarity; AMP is now focused entirely on tournaments. The old contracts remain source-verified on Fuji with no user funds, but they're not part of the product and not the path forward.",
-      },
-      {
-        q: "Where do I go deeper?",
-        a: "The Quickstart has the full five-step integration with real code, the SDK Reference documents every call across engines, and the repo (github.com/bradmyrick/Avalanche-Matchmaking-Protocol) has the contracts, SDKs, and an agent skill file (SKILL.md) so your AI coding agent can do the integration with you.",
-      },
-    ],
+    q: "How does staked settlement work?",
+    a: "Each player deposits a stake (prize pool) plus a reporting bond. After the match, players sign the result with EIP-712 typed data. When K = ⌊2N/3⌋+1 players submit identical results, the match settles on-chain: stakes pay out per the tier structure, reporting bonds return to signers, and non-signers' bonds are slashed 50/50 to the relayer and rank 1.",
+  },
+  {
+    q: "What happens if someone lies about the result?",
+    a: "Two cases: (1) Both players report different results → the match enters dispute and a bonded verifier resolves it. The dishonest party forfeits their stake, bond, and challenge deposit. (2) A player goes silent → the reporter's result stands after a timeout. Non-signers forfeit their reporting bond.",
+  },
+  {
+    q: "How are ratings protected from smurfing?",
+    a: "Party members get γ-anti-boost recalibration: a lower-rated player's rating gain from a party win is scaled down proportionally to the rating gap. A high-rated player cannot carry a smurf account to free rating.",
+  },
+  {
+    q: "What is a 'reporting bond'?",
+    a: "A small deposit (typically 5% of the stake) held in escrow during the match. You get it back when you submit your signed result. If you disconnect without signing, the bond is slashed. This makes honest reporting incentive-compatible even for losing players.",
+  },
+  {
+    q: "What games can use AMP?",
+    a: "Any game with a deterministic or verifiable outcome. The protocol needs: (1) a clear win/loss/draw result, (2) optionally a transcript hash (deterministic replay hash for anti-cheat), and (3) a client that can sign EIP-712 messages. Board games, card games, strategy games, and competitive shooters are all fits.",
+  },
+  {
+    q: "How do I integrate AMP into my game?",
+    a: "Four API calls and a WebSocket connection. See the Quickstart guide. For Rust game servers, you can also embed the `amp-match-core` crate directly (Glicko-2, queue algorithms, commit-reveal — zero dependencies beyond serde).",
+  },
+  {
+    q: "What are the fees?",
+    a: "The protocol takes a configurable rake (currently 1%) on settled staked matches. Studios that register their game receive a share (currently 20% of the rake). Free play costs nothing. Total fees are capped at 8%.",
+  },
+  {
+    q: "Is AMP live on mainnet?",
+    a: "Not yet. All contracts are deployed and verified on Avalanche Fuji testnet. Mainnet deployment follows an external audit and timelock governance setup. Free-play matchmaking (no funds at risk) is live in production now.",
+  },
+  {
+    q: "What happens if the matchmaker server goes down?",
+    a: "Free-play matches: your ratings are safe (persisted in Postgres). No funds are at risk. Staked matches: funds are in on-chain escrow, not the server. If the server disappears, the grace path allows rank-1 claimants to settle unilaterally after a timeout. The smart contracts are the security boundary, not the server.",
+  },
+  {
+    q: "How does AMP prevent collusion in FFA lobbies?",
+    a: "Commit-reveal: players submit a blinded hash of their identity before the lobby forms. After enough players commit, they reveal their salts. The lobby assignment is then shuffled using the latest Avalanche blockhash as the seed — no one can predict which lobby they'll land in until the block is mined.",
+  },
+  {
+    q: "Can I run my own matchmaker?",
+    a: "Yes. The amp-server is open source (Apache-2.0). You can run it with your own Postgres and register your game's verifiers on the contract. Or embed `amp-match-core` in your game server for the algorithms without the service.",
   },
 ];
 
@@ -141,51 +74,51 @@ export default function FaqPage() {
     <div className="min-h-screen bg-black text-white antialiased">
       <div className="absolute top-0 -left-1/4 w-[150%] h-[300px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <SiteHeader />
-      <div className="relative z-10 max-w-3xl mx-auto px-6 pt-24 pb-16">
-        <div className="mb-10 text-center">
+      <div className="relative z-10 max-w-3xl mx-auto px-6 py-16">
+        <div className="mb-12 text-center">
           <Link href="/docs" className="text-sm text-zinc-500 hover:text-brand-cyan transition-colors">
             ← Docs
           </Link>
-          <h1 className="text-4xl font-black uppercase tracking-tight mt-4 mb-2">
-            Questions
+          <div className="inline-flex items-center gap-2 rounded-full border border-brand-cyan/30 bg-brand-cyan/5 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-brand-cyan mt-6 mb-4">
+            <HelpCircle className="w-3.5 h-3.5" />
+            FAQ
+          </div>
+          <h1 className="text-4xl font-black uppercase tracking-tight mb-4">
+            Frequently Asked <span className="text-brand-cyan">Questions</span>
           </h1>
-          <p className="text-sm text-zinc-500">
-            Everything people actually ask before running a cup.
-          </p>
         </div>
 
-        <div className="space-y-10">
-          {groups.map((group) => (
-            <section key={group.title}>
-              <h2 className="text-xs font-black uppercase tracking-widest text-brand-cyan mb-3 px-1">
-                {group.title}
-              </h2>
-              <div className="space-y-3">
-                {group.faqs.map((faq, i) => (
-                  <details
-                    key={i}
-                    className="glass-panel rounded-2xl border border-white/10 overflow-hidden group"
-                  >
-                    <summary className="flex items-center justify-between cursor-pointer px-6 py-4 hover:bg-white/5 transition-colors list-none">
-                      <span className="font-bold text-sm md:text-base">{faq.q}</span>
-                      <ChevronDown className="w-4 h-4 text-zinc-500 shrink-0 ml-4 group-open:rotate-180 transition-transform" />
-                    </summary>
-                    <div className="px-6 pb-5 pt-0">
-                      <p className="text-sm text-zinc-400 leading-relaxed">{faq.a}</p>
-                    </div>
-                  </details>
-                ))}
+        <div className="space-y-3">
+          {faqs.map((faq, i) => (
+            <details
+              key={i}
+              className="glass-panel rounded-2xl border border-white/10 overflow-hidden group"
+            >
+              <summary className="flex items-center justify-between cursor-pointer px-6 py-4 hover:bg-white/5 transition-colors list-none">
+                <span className="font-bold text-sm md:text-base">{faq.q}</span>
+                <ChevronDown className="w-4 h-4 text-zinc-500 shrink-0 ml-4 group-open:rotate-180 transition-transform" />
+              </summary>
+              <div className="px-6 pb-5 pt-0">
+                <p className="text-sm text-zinc-400 leading-relaxed">{faq.a}</p>
               </div>
-            </section>
+            </details>
           ))}
         </div>
 
         <div className="mt-12 text-center space-y-2">
-          <p className="text-sm text-zinc-500">Ready to integrate?</p>
-          <Link href="/docs/quickstart" className="text-sm text-brand-cyan hover:underline font-bold">
-            Read the Quickstart Guide →
+          <p className="text-sm text-zinc-500">Still have questions?</p>
+          <Link href="/docs/quickstart" className="text-sm text-brand-cyan hover:underline">
+            Read the Quickstart →
           </Link>
+          <br />
+          <a
+            href="https://github.com/BradMyrick/Avalanche-Matchmaking-Protocol"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-zinc-500 hover:text-brand-cyan transition-colors"
+          >
+            Browse the source on GitHub →
+          </a>
         </div>
       </div>
     </div>

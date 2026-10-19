@@ -14,7 +14,9 @@ const badges = [
   "Pull-Payment Prize Payouts",
   "ReentrancyGuard",
   "Pausable + Ownable2Step",
+  "TimelockController Governance",
   "Fee-on-Transfer Safe",
+  "Custodial Key Isolation",
   "OZ EIP712 Domain",
 ];
 
@@ -31,10 +33,12 @@ export default function SecurityAudits() {
             </span>
           </div>
           <h2 className="text-4xl md:text-5xl font-bold mb-4 text-white">
-            Source-verified
+            Security Hardened
           </h2>
-          <p className="text-zinc-400 max-w-2xl mx-auto">
-            Funds move through the contract. Winners pull-claim. Card funding uses the relayer.
+          <p className="text-zinc-400 max-w-2xl mx-auto text-lg">
+            Funds only ever move through the contract — never the operator. Prize pools are escrowed up front,
+            winners pull-claim, and every outcome is EIP-712 attested. The digest is computed identically in
+            Solidity, the browser (ethers), and the isolated Rust relayer.
           </p>
         </div>
 

@@ -1,5 +1,4 @@
-import SiteHeader from "@/app/components/SiteHeader";
-import { PROTOCOL_FEE_LABEL } from "@/lib/ampCup";
+import Link from "next/link";
 
 export default function TermsPage() {
   return (
@@ -7,9 +6,13 @@ export default function TermsPage() {
       <div className="absolute top-0 -left-1/4 w-[150%] h-[500px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 -right-1/4 w-[150%] h-[500px] bg-brand-red/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <SiteHeader />
+      <header className="relative z-10 max-w-3xl mx-auto px-6 pt-10">
+        <Link href="/" className="inline-flex items-center gap-2 text-zinc-400 hover:text-brand-cyan transition-colors text-sm">
+          &larr; Back to AMP
+        </Link>
+      </header>
 
-      <main className="relative z-10 max-w-3xl mx-auto px-6 pt-24 pb-10">
+      <main className="relative z-10 max-w-3xl mx-auto px-6 py-10">
         <h1 className="text-3xl font-black uppercase tracking-tight mb-2">
           Terms &amp; <span className="text-brand-cyan">Disclaimers</span>
         </h1>
@@ -38,9 +41,10 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-bold text-white uppercase tracking-wide mb-2">3. Protocol Fee</h2>
             <p className="text-sm">
-              A {PROTOCOL_FEE_LABEL} protocol fee is taken from each prize payout on AMPTournamentCup and sent to the
-              protocol treasury (<code className="text-brand-cyan">0x95CC…077a</code>). The rate is the contract&rsquo;s
-              protocolFeeBps.
+              A 2% protocol fee is deducted from each prize payout and sent to the protocol treasury wallet
+              (<code className="text-brand-cyan">0x95CC…077a</code>). This fee covers infrastructure costs (database,
+              hosting, relayer operations). Winners receive their prize minus the 2% fee. The fee rate is governed by the
+              contract owner and is publicly verifiable on-chain.
             </p>
           </section>
 
@@ -111,7 +115,7 @@ export default function TermsPage() {
 
         <div className="mt-12 pt-8 border-t border-white/10">
           <p className="text-xs text-zinc-600">
-            © 2026 AMP Tournament Protocol.
+            © 2026 AMP — Avalanche Matchmaking Protocol. Backed by Avalanche Build Games 2026.
           </p>
         </div>
       </main>

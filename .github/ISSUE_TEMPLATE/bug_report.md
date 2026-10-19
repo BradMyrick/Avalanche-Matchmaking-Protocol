@@ -9,7 +9,7 @@ labels: bug
 
 ## Environment
 - AMP version: <!-- e.g. 0.1.0 -->
-- Component: <!-- web / amp-relayer / contracts / amp-sdk-{ts,rust,cpp,csharp,unity} -->
+- Component: <!-- amp-server / amp-relayer / contracts / amp-sdk-{rust,go,cpp,csharp,python,js} -->
 - Chain: <!-- local anvil / Fuji / mainnet -->
 - OS / runtime:
 

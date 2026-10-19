@@ -1,6 +1,7 @@
 //! Relayer configuration — every network/contract value is env-driven with a
-//! documented Fuji default. Repo standard: no network constants without an
-//! env override path (12-factor; deployments differ, code shouldn't).
+//! documented Fuji default, mirroring `amp-server/src/config.rs`. This is the
+//! repo standard: no network constants without an env override path
+//! (12-factor; deployments differ, code shouldn't).
 
 use anyhow::{Context, Result};
 
@@ -12,6 +13,10 @@ pub struct Config {
     pub rpc_url: String,
     /// AMPTournamentCup address (sponsor prize path).
     pub cup_address: String,
+    /// AMPSettlement address (staked-match settlement path).
+    pub settlement_address: String,
+    /// AMPMultiplayer.sol address (v2 N-player escrow + quorum settlement).
+    pub multiplayer_address: Option<String>,
     /// Idle poll cadence between empty job dequeues.
     pub poll_idle_ms: u64,
     /// Backoff after a poll error.
@@ -34,6 +39,14 @@ impl Config {
                 // Deployed + source-verified on Fuji; see
                 // contracts/deployment-fuji-tournament.json
                 "0x7c743c1c9ae3e7a65d030098f2249b7787d66dff",
+            )?,
+            multiplayer_address: std::env::var("AMP_MULTIPLAYER_ADDRESS")
+                .ok()
+                .filter(|a| !a.is_empty()),
+            settlement_address: read_env(
+                "AMP_SETTLEMENT_ADDRESS",
+                // v1 1v1 baseline on Fuji; see contracts/deployment-fuji-v1.json
+                "0x78ec93e66255a74873d20DD62C6595A389272126",
             )?,
             poll_idle_ms: read_env("AMP_POLL_IDLE_MS", "3000")?
                 .parse()

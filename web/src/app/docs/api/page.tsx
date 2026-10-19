@@ -1,36 +1,83 @@
 import Link from "next/link";
-import { Code2, Cpu, Trophy, Workflow } from "lucide-react";
-import SiteHeader from "@/app/components/SiteHeader";
-import CodeSample from "@/app/components/CodeSample";
+import { Code2, Terminal, Webhook, FileJson, Shield, Users } from "lucide-react";
 
 export const metadata = {
-  title: "AMP SDK Reference — The Five Calls",
-  description: "The complete AMP API: five calls run a tournament — createTournament, run the bracket, signFinalize, finalizeTournament, claimPrize.",
+  title: "AMP API Reference — REST, WebSocket & EIP-712",
+  description: "Complete API reference for the AMP matchmaker: REST endpoints, WebSocket events, EIP-712 typed data, and the embeddable Rust core.",
 };
 
-function ApiMethod({
-  signature,
-  returnType,
+function Endpoint({
+  method,
+  path,
+  auth,
+  body,
+  response,
   desc,
-  example,
 }: {
-  signature: string;
-  returnType: string;
+  method: string;
+  path: string;
+  auth?: boolean;
+  body?: string;
+  response?: string;
   desc: string;
-  example: string;
 }) {
+  const methodColor =
+    method === "GET" ? "text-green-400 border-green-400/30 bg-green-400/5" :
+    method === "POST" ? "text-brand-cyan border-brand-cyan/30 bg-brand-cyan/5" :
+    method === "DELETE" ? "text-red-400 border-red-400/30 bg-red-400/5" :
+    "text-yellow-400 border-yellow-400/30 bg-yellow-400/5";
+
   return (
-    <div className="glass-panel rounded-2xl border border-white/10 p-5 mb-5">
-      <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
-        <code className="text-sm font-mono text-brand-cyan font-bold">{signature}</code>
-        <span className="text-xs font-mono px-2.5 py-0.5 rounded border border-yellow-400/30 bg-yellow-400/10 text-yellow-400">
-          {returnType}
+    <div className="glass-panel rounded-2xl border border-white/10 p-5 mb-4">
+      <div className="flex items-center gap-3 mb-2 flex-wrap">
+        <span className={`text-xs font-black font-mono px-2.5 py-1 rounded border ${methodColor}`}>
+          {method}
         </span>
+        <code className="text-sm font-mono text-white">{path}</code>
+        {auth && (
+          <span className="text-[10px] font-bold uppercase tracking-wider text-yellow-400/70 border border-yellow-400/20 rounded-full px-2 py-0.5">
+            Auth
+          </span>
+        )}
       </div>
-      <p className="text-sm text-zinc-300 mb-3">{desc}</p>
-      <div className="bg-black/60 border border-white/10 rounded-xl p-3">
-        <CodeSample code={example} />
+      <p className="text-sm text-zinc-400 mb-3">{desc}</p>
+      {body && (
+        <div className="mb-2">
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1">
+            Body
+          </div>
+          <pre className="bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-zinc-300 overflow-x-auto">
+            <code>{body}</code>
+          </pre>
+        </div>
+      )}
+      {response && (
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1">
+            Response
+          </div>
+          <pre className="bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-zinc-300 overflow-x-auto">
+            <code>{response}</code>
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WsEvent({ type, desc, payload }: { type: string; desc: string; payload: string }) {
+  return (
+    <div className="glass-panel rounded-2xl border border-white/10 p-5 mb-4">
+      <div className="flex items-center gap-3 mb-2">
+        <span className="text-xs font-black font-mono px-2.5 py-1 rounded border text-purple-400 border-purple-400/30 bg-purple-400/5">
+          WS
+        </span>
+        <code className="text-sm font-mono text-white">{type}</code>
       </div>
+      <p className="text-sm text-zinc-400 mb-3">{desc}</p>
+      <pre className="bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-zinc-300 overflow-x-auto">
+        <code>{payload}</code>
+      </pre>
     </div>
   );
 }
@@ -40,172 +87,273 @@ export default function ApiReferencePage() {
     <div className="min-h-screen bg-black text-white antialiased">
       <div className="absolute top-0 -left-1/4 w-[150%] h-[300px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <SiteHeader />
-      <div className="relative z-10 max-w-4xl mx-auto px-6 pt-24 pb-16">
+      <div className="relative z-10 max-w-4xl mx-auto px-6 py-16">
         <div className="mb-12">
           <Link href="/docs" className="text-sm text-zinc-500 hover:text-brand-cyan transition-colors">
             ← Docs
           </Link>
           <div className="inline-flex items-center gap-2 rounded-full border border-brand-cyan/30 bg-brand-cyan/5 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-brand-cyan mt-6 mb-4">
             <Code2 className="w-3.5 h-3.5" />
-            SDK Reference
+            API Reference
           </div>
           <h1 className="text-4xl font-black uppercase tracking-tight mb-4">
-            The whole protocol is <span className="text-brand-cyan">five calls</span>
+            Every Endpoint, <span className="text-brand-cyan">Documented</span>
           </h1>
-          <p className="text-zinc-400 max-w-2xl">
-            This page is the entire integration. You create a cup, run the bracket
-            locally, sign the result, submit it, and winners claim. The same
-            method names exist in TypeScript, Unity, Unreal, C#, and Rust — only
-            the syntax changes.
+          <p className="text-lg text-zinc-400 leading-relaxed">
+            REST for actions, WebSocket for real-time events, EIP-712 for
+            signatures. Base URL:{" "}
+            <code className="text-brand-cyan text-sm">
+              https://amp.playwithamp.xyz
+            </code>
           </p>
         </div>
 
-        {/* Lifecycle map */}
-        <div className="glass-panel rounded-2xl border border-white/10 p-6 mb-12">
-          <div className="flex items-center gap-2 mb-4">
-            <Workflow className="w-5 h-5 text-brand-cyan" />
-            <h2 className="text-sm font-black uppercase tracking-widest text-white">
-              How the pieces fit
-            </h2>
-          </div>
-          <CodeSample
-            code={`sponsor                your game (local)              verifier              winner
-   │                        │                            │                    │
-   ├─ createTournament ──▶  │                            │                    │
-   │   (fund + split +      ├─ Tournament.new ─▶ record ─┤                    │
-   │    verifier +          │   (bracket, off-chain)      ├─ signFinalize      │
-   │    deadline)           │                            │   (EIP-712 sig)     │
-   │                        │                            │        │           │
-   │                        │            anyone ─▶ finalizeTournament        │
-   │                        │                            │        │           │
-   │                        │                            │        └─▶ claimPrize ─▶ AVAX
-   │                        │                            │
-   └─ cancelTournament ◀─ (refund if never finalized, after deadline)`}
-          />
-          <p className="text-xs text-zinc-500 mt-4">
-            On-chain calls are the three in the middle column edges: create, finalize,
-            claim. Everything else is local and free.
-          </p>
-        </div>
-
-        {/* Tournament Client Methods */}
+        {/* Auth section */}
         <h2 className="text-xl font-black uppercase tracking-tight mb-4 flex items-center gap-2">
-          <Trophy className="w-5 h-5 text-brand-cyan" />
-          Cup client — on-chain calls
-        </h2>
-
-        <ApiMethod
-          signature="createTournament(payoutBps, verifierAddress, deadlineUnix, prizePoolAvaxWei)"
-          returnType="Promise&lt;{ tournamentId, txHash }&gt;"
-          desc="Sponsor funds a new prize pool in AVAX. payoutBps (e.g. [6000, 3000, 1000]) sums to exactly 10000, max 16 placements. ERC-20 prizes: createTournamentERC20(token, amount, …)."
-          example={`const { tournamentId } = await amp.createTournament(
-  [6000, 3000, 1000],
-  verifierAddress,
-  deadlineUnix,
-  parseEther("1.0")
-);`}
-        />
-
-        <ApiMethod
-          signature="getTournament(tournamentId)"
-          returnType="Promise&lt;TournamentDetails&gt;"
-          desc="Read everything on-chain about a cup: sponsor, prize pool (prizePoolFormatted), payout split, verifier, winners, state, deadlines. Pure read — no wallet needed."
-          example={`const cup = await amp.getTournament(tournamentId);
-console.log(cup.state, cup.prizePoolFormatted + " AVAX");`}
-        />
-
-        <ApiMethod
-          signature="signFinalize(tournamentId, winners)"
-          returnType="Promise&lt;string&gt;"
-          desc="The verifier signs the final placements (EIP-712). Called with the verifier's wallet connected — this is the only step that requires the verifier key, so it belongs on the server or organizer's machine."
-          example={`const verifier = new AMPTournamentClient().connect(verifierWallet);
-const signature = await verifier.signFinalize(tournamentId, [first, second, third]);`}
-        />
-
-        <ApiMethod
-          signature="finalizeTournament(tournamentId, winners, signature)"
-          returnType="Promise&lt;TransactionReceipt&gt;"
-          desc="Submit the verifier's signature on-chain. Anyone can send this transaction — organizer, game server, relayer. Must happen before the cup's finalize deadline."
-          example={`await amp.finalizeTournament(tournamentId, [first, second, third], signature);`}
-        />
-
-        <ApiMethod
-          signature="getClaimablePrize(tournamentId, walletAddress)"
-          returnType="Promise&lt;ClaimableInfo | null&gt;"
-          desc="Check a wallet for an unclaimed prize. Returns placement, rank, gross/net amounts, and the fee — or null if nothing to claim. Show this in your winner UI."
-          example={`const prize = await amp.getClaimablePrize(tournamentId, player);
-if (prize) console.log(\`You won \${prize.formattedAmount} AVAX (rank \${prize.placementRank})\`);`}
-        />
-
-        <ApiMethod
-          signature="claimPrize(tournamentId, placement)"
-          returnType="Promise&lt;TransactionReceipt&gt;"
-          desc="Winner pulls their prize from the contract into their own wallet. Needs the winner's signature (gas) — never sponsor-side custody."
-          example={`await amp.claimPrize(tournamentId, prize.placement);`}
-        />
-
-        <ApiMethod
-          signature="cancelTournament(tournamentId)"
-          returnType="Promise&lt;TransactionReceipt&gt;"
-          desc="Refund path: sponsor cancels an unfinalized cup; after the finalize deadline anyone can. The full pool returns to the sponsor."
-          example={`await amp.cancelTournament(tournamentId);`}
-        />
-
-        {/* Bracket Engine Methods */}
-        <h2 className="text-xl font-black uppercase tracking-tight mb-4 mt-12 flex items-center gap-2">
-          <Cpu className="w-5 h-5 text-yellow-400" />
-          Bracket engine — local, off-chain
+          <Terminal className="w-5 h-5 text-brand-cyan" />
+          Authentication
         </h2>
         <p className="text-sm text-zinc-400 mb-6">
-          The tournament itself runs inside your game with zero network calls.
-          Deterministic and identical in every SDK, so it unit-tests like any
-          other code.
+          All authenticated endpoints use{" "}
+          <code className="text-brand-cyan">Authorization: Bearer {"<token>"}</code>.
+          Tokens expire after 7 days. Login is a single free EIP-191 signature.
         </p>
 
-        <ApiMethod
-          signature="Tournament.new(format, entrants)"
-          returnType="Tournament&lt;T&gt;"
-          desc="Build a bracket from entrants with seeds. Formats: SingleElimination and RoundRobin (plus Swiss pairing helpers). Handles byes for non-power-of-two fields."
-          example={`const bracket = Tournament.new(
-  { kind: TournamentState.SingleElimination },
-  [{ id: 1, seed: 1 }, { id: 2, seed: 2 }, { id: 3, seed: 3 }, { id: 4, seed: 4 }]
-);`}
+        <Endpoint
+          method="POST"
+          path="/v1/auth/challenge"
+          body={`{ "wallet": "0x..." }`}
+          response={`{ "challenge": "Sign in to AMP Arena\\n\\nThis signature is free...", "expiresAt": "..." }`}
+          desc="Request a sign-in challenge for a wallet. The challenge is human-readable and expires in 5 minutes."
+        />
+        <Endpoint
+          method="POST"
+          path="/v1/auth/verify"
+          body={`{ "wallet": "0x...", "signature": "0x...", "challenge": "Sign in to AMP Arena..." }`}
+          response={`{ "token": "amp_...", "expiresAt": "...", "player": { "wallet": "0x..." } }`}
+          desc="Exchange the EIP-191 signature for a session token. Single-use challenge."
         />
 
-        <ApiMethod
-          signature="bracket.matches() / bracket.pending()"
-          returnType="BracketMatch[] / MatchId[]"
-          desc="All matches, or just the ones still to play. Feed pending() to your matchmaking/queue and record outcomes as games finish."
-          example={`for (const id of bracket.pending()) {
-  const result = await playMatch(id);
-  bracket.record(id, result);
-}`}
+        {/* Queue section */}
+        <h2 className="text-xl font-black uppercase tracking-tight mb-4 mt-10 flex items-center gap-2">
+          <Users className="w-5 h-5 text-brand-cyan" />
+          Queue & Matchmaking
+        </h2>
+        <Endpoint
+          method="GET"
+          path="/v1/games"
+          response={`{ "games": [{ "id": "amp-tactics", "name": "AMP Tactics", "queueDepth": 12 }], "stakingEnabled": false, "chainId": 43113 }`}
+          desc="List available games with live queue depth. No auth required."
+        />
+        <Endpoint
+          method="POST"
+          path="/v1/queue/join"
+          auth
+          body={`{ "gameId": "amp-tactics", "rulesetId": "ranked-1v1" }`}
+          response={`{ "ticketId": "...", "queueDepth": 12, "skillWindow": 350, "rating": 1500 }`}
+          desc="Join a ranked queue. Idempotent — joining twice returns the existing ticket."
+        />
+        <Endpoint
+          method="POST"
+          path="/v1/queue/leave"
+          auth
+          response={`{ "left": true }`}
+          desc="Leave the queue. Always succeeds."
+        />
+        <Endpoint
+          method="GET"
+          path="/v1/queue/status"
+          auth
+          response={`{ "queued": true, "depth": 12, "waitedMs": 45000, "skillWindow": 710 }`}
+          desc="Live queue status. The skill window widens the longer you wait."
         />
 
-        <ApiMethod
-          signature="bracket.record(matchId, outcome)"
-          returnType="void"
-          desc="Record a result: Outcome.A (player 1), Outcome.B (player 2), or Outcome.Draw where the format allows it."
-          example={`bracket.record(0, Outcome.A);`}
+        {/* Match section */}
+        <h2 className="text-xl font-black uppercase tracking-tight mb-4 mt-10 flex items-center gap-2">
+          <FileJson className="w-5 h-5 text-brand-cyan" />
+          Matches
+        </h2>
+        <Endpoint
+          method="POST"
+          path="/v1/matches/{id}/report"
+          auth
+          body={`{ "result": "win", "transcriptHash": "0x...", "signature": "0x..." }`}
+          response={`{ "matchId": "...", "state": "agreed", "outcome": "win_b" }`}
+          desc="Report your match result. Both players must agree. EIP-191 signature required for staked matches."
+        />
+        <Endpoint
+          method="GET"
+          path="/v1/matches/{id}"
+          auth
+          response={`{ "matchId": "...", "state": "live", "you": { "ratingSnapshot": {...} }, "opponent": { "wallet": "0x...", "ratingSnapshot": {...} } }`}
+          desc="Get match details. Participants only."
+        />
+        <Endpoint
+          method="GET"
+          path="/v1/matches/history"
+          auth
+          response={`{ "matches": [{ "matchId": "...", "outcome": "win_b", "state": "agreed" }] }`}
+          desc="Match history for the authenticated player."
         />
 
-        <ApiMethod
-          signature="bracket.standings()"
-          returnType="Standing&lt;T&gt;[]"
-          desc="Sorted final placements once the bracket resolves. The top of this list (matching your payout split length) is exactly what you pass to signFinalize."
-          example={`const standings = bracket.standings();
-const winners = standings.slice(0, 3).map(s => walletOf(s.id));
-const signature = await verifier.signFinalize(tournamentId, winners);`}
+        {/* Multiplayer section */}
+        <h2 className="text-xl font-black uppercase tracking-tight mb-4 mt-10 flex items-center gap-2">
+          <Users className="w-5 h-5 text-brand-cyan" />
+          N-Player Multiplayer
+        </h2>
+        <Endpoint
+          method="POST"
+          path="/v1/parties"
+          auth
+          body={`{ "gameId": "amp-tactics", "rulesetId": "ranked-1v1" }`}
+          response={`{ "partyId": "...", "inviteCode": "AB3D5F", "leader": "0x..." }`}
+          desc="Create a party. Returns a 6-character invite code for members to join."
+        />
+        <Endpoint
+          method="POST"
+          path="/v1/parties/join"
+          auth
+          body={`{ "inviteCode": "AB3D5F" }`}
+          response={`{ "partyId": "...", "members": 3, "state": "open" }`}
+          desc="Join a party by invite code. Max 16 members."
+        />
+        <Endpoint
+          method="POST"
+          path="/v1/multi/commit"
+          auth
+          body={`{ "gameId": "amp-tactics", "commitHash": "0x...", "stakeWei": 1000000000000000, "lobbySize": 8 }`}
+          response={`{ "committed": true, "committedCount": 3, "ready": false }`}
+          desc="Commit a blinded FFA queue entry: keccak256(address ‖ stake ‖ salt). Prevents lobby-targeting collusion."
+        />
+        <Endpoint
+          method="POST"
+          path="/v1/multi/reveal"
+          auth
+          body={`{ "gameId": "amp-tactics", "salt": "my-secret-salt" }`}
+          response={`{ "revealed": true, "revealedCount": 8 }`}
+          desc="Reveal your salt. Lobby forms when enough players reveal."
+        />
+        <Endpoint
+          method="POST"
+          path="/v1/multi/{id}/report"
+          auth
+          body={`{ "ranked": [["0x...", 1], ["0x...", 2]], "transcriptHash": "0x...", "sessionNonce": 42, "signature": "0x..." }`}
+          response={`{ "matchId": "...", "state": "quorum", "concordant": 6, "quorumNeeded": 6 }`}
+          desc="Submit an EIP-712 MultiplayerLadder report. Settlement fires when K = ⌊2N/3⌋+1 concordant reports arrive."
         />
 
-        {/* Back Link */}
-        <div className="mt-16 pt-8 border-t border-white/10 flex justify-between items-center text-sm">
-          <Link href="/docs/contracts" className="text-zinc-500 hover:text-white transition-colors">
-            ← Contracts
-          </Link>
-          <Link href="/docs/faq" className="text-brand-cyan hover:underline font-bold">
-            FAQ →
+        {/* WebSocket section */}
+        <h2 className="text-xl font-black uppercase tracking-tight mb-4 mt-10 flex items-center gap-2">
+          <Webhook className="w-5 h-5 text-brand-cyan" />
+          WebSocket Events
+        </h2>
+        <p className="text-sm text-zinc-400 mb-6">
+          Connect to{" "}
+          <code className="text-brand-cyan">wss://amp.playwithamp.xyz/v1/ws?token=...</code>{" "}
+          for real-time events. Automatic reconnection recommended.
+        </p>
+
+        <WsEvent
+          type="hello"
+          desc="Sent on connection. Confirms your identity."
+          payload={`{ "type": "hello", "data": { "wallet": "0x..." } }`}
+        />
+        <WsEvent
+          type="queue_status"
+          desc="Live queue status while waiting. Pushed every tick."
+          payload={`{ "type": "queue_status", "data": { "depth": 12, "waitedMs": 45000, "skillWindow": 710 } }`}
+        />
+        <WsEvent
+          type="match_found"
+          desc="Your match is ready. Includes opponent card and expiry."
+          payload={`{ "type": "match_found", "data": { "matchId": "...", "opponent": { "wallet": "0x...", "rating": 1520, "region": "na" }, "expiresAt": "..." } }`}
+        />
+        <WsEvent
+          type="match_result"
+          desc="Match settled. Includes personalized rating delta."
+          payload={`{ "type": "match_result", "data": { "matchId": "...", "outcome": "win_b", "won": true, "you": { "ratingBefore": 1500, "ratingAfter": 1552, "deviationAfter": 180 }, "attestation": { ... } } }`}
+        />
+        <WsEvent
+          type="multi_lobby_formed"
+          desc="N-player lobby is ready from revealed commits."
+          payload={`{ "type": "multi_lobby_formed", "data": { "matchId": "...", "lobbySize": 8, "stakeWei": 1000000, "sessionNonce": 42 } }`}
+        />
+        <WsEvent
+          type="multi_result"
+          desc="N-player match settled with rating updates."
+          payload={`{ "type": "multi_result", "data": { "matchId": "...", "outcome": { "ratingBefore": 1500, "ratingAfter": 1552, "delta": 52 } } }`}
+        />
+
+        {/* EIP-712 section */}
+        <h2 className="text-xl font-black uppercase tracking-tight mb-4 mt-10 flex items-center gap-2">
+          <Shield className="w-5 h-5 text-brand-cyan" />
+          EIP-712 Typed Data
+        </h2>
+        <p className="text-sm text-zinc-400 mb-6">
+          Match results and multiplayer ladders are signed with EIP-712 typed
+          data. The domain separator is deterministic across chains.
+        </p>
+
+        <div className="glass-panel rounded-2xl border border-white/10 p-6 mb-4">
+          <div className="text-xs font-black uppercase tracking-widest text-brand-cyan mb-3">
+            Match Result (1v1)
+          </div>
+          <pre className="bg-black/60 border border-white/10 rounded-lg px-4 py-3 text-xs font-mono text-zinc-300 overflow-x-auto">
+            <code>{`Domain: { name: "AMPSettlement", version: "1", chainId: 43113 }
+Type: AsyncResult(uint256 matchId, uint8 outcome, bytes32 transcriptHash)`}</code>
+          </pre>
+        </div>
+
+        <div className="glass-panel rounded-2xl border border-white/10 p-6 mb-4">
+          <div className="text-xs font-black uppercase tracking-widest text-brand-cyan mb-3">
+            Multiplayer Ladder (N-player)
+          </div>
+          <pre className="bg-black/60 border border-white/10 rounded-lg px-4 py-3 text-xs font-mono text-zinc-300 overflow-x-auto">
+            <code>{`Domain: { name: "AMPMultiplayer", version: "1", chainId: 43113 }
+Type: MultiplayerLadder(
+  bytes32 matchId,
+  bytes32 gameId,
+  address[] rankedPlacements,  // rank 1 = winner
+  bytes32 transcriptHash,
+  uint256 sessionNonce
+)`}</code>
+          </pre>
+        </div>
+
+        {/* Rust core */}
+        <h2 className="text-xl font-black uppercase tracking-tight mb-4 mt-10 flex items-center gap-2">
+          <Terminal className="w-5 h-5 text-brand-cyan" />
+          Embeddable Rust Core
+        </h2>
+        <p className="text-sm text-zinc-400 mb-4">
+          Want the algorithms without the service? The core is a pure Rust
+          crate with zero dependencies beyond serde:
+        </p>
+        <div className="glass-panel rounded-2xl border border-white/10 p-6 mb-4">
+          <pre className="bg-black/60 border border-white/10 rounded-lg px-4 py-3 text-xs font-mono text-zinc-300 overflow-x-auto">
+            <code>{`[dependencies]
+amp-match-core = "0.1"
+
+// Glicko-2 field update (order-independent, fuzz-gated)
+use amp_match_core::glicko2_update_vs_many;
+let (r, rd, vol) = glicko2_update_vs_many(1500.0, 350.0, 0.06, &opponents, &scores);
+
+// Lobby shuffle (bias-free Fisher-Yates via blockhash)
+use amp_match_core::shuffle_by_blockhash;
+let shuffled = shuffle_by_blockhash(candidates, &blockhash);
+
+// Anti-collusion commitments
+use amp_match_core::ticket_commit;
+let hash = ticket_commit(&address, stake_wei, &salt);`}</code>
+          </pre>
+        </div>
+
+        <div className="mt-12 text-center">
+          <Link
+            href="/docs/contracts"
+            className="text-sm text-brand-cyan hover:underline"
+          >
+            View deployed contracts & addresses →
           </Link>
         </div>
       </div>

@@ -5,6 +5,9 @@
 FROM rust:1.97 AS builder
 WORKDIR /amp
 COPY Cargo.toml Cargo.lock ./
+# Workspace members (manifest resolution requires all member dirs present).
+COPY amp-match-core/ ./amp-match-core/
+COPY amp-server/ ./amp-server/
 COPY relayer/ ./relayer/
 RUN cargo build --release -p amp-relayer
 

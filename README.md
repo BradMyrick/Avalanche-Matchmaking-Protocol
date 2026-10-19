@@ -1,107 +1,224 @@
-# AMP — Tournament Protocol on Avalanche
+# AMP — Avalanche Matchmaking Protocol
 
-### Real prize tournaments for any game — fund a pool, run the bracket, winners claim on-chain.
+### Ranked matchmaking for multiplayer games, with verifiable settlement on Avalanche.
 
-AMP is an open protocol for running prize tournaments inside games. A sponsor
-funds a prize pool in AVAX (or ERC-20) into the **AMPTournamentCup** contract,
-the game runs the tournament bracket with an SDK, a verifier wallet signs the
-final standings (EIP-712), and winners pull-claim their prize directly from
-the contract. No custodian, no backend your game depends on.
+> **Archived — finished state (`v0.2.0`).** This repository is preserved as
+> the completed matchmaking build that **placed top-20 in Avalanche Build
+> Games 2026** (awarded a $15,000 grant). The hosted deployment
+> (playwithamp.xyz) is offline. A later tournament-only rework shipped after
+> this release and has since been retired; its record — and every other era
+> of this project — is preserved in git history (`feat/path-a-tournament-only`
+> and the commits after the `v0.2.0` tag on `main`). Nothing was deleted:
+> this tree restores the exact `v0.2.0` release, fully self-hostable (see
+> [Run it](#run-it)). Successor work by the same builder: **PeekPeak**, an
+> autonomous keeper engine for Avalanche.
 
-**Try it:** [playwithamp.xyz](https://playwithamp.xyz) → host a cup, watch a
-bracket, claim a prize (Fuji testnet).
+AMP is a multiplayer matchmaking protocol. Players log in with one wallet
+signature (no gas), enter a skill-rated queue, get matched, and report the
+result. Every settled match updates a Glicko-2 rating and — when it matters —
+is attested with an EIP-712 signature and settled on-chain through escrow
+contracts on Avalanche, with the protocol taking a fee in basis points.
 
-## The whole protocol in five steps
+**Not hosted.** This is the final archived tree — run it yourself with the
+instructions under [Run it](#run-it).
 
-```ts
-import { AMPTournamentClient, Tournament, TournamentState, Outcome } from "@amp/sdk";
+---
 
-// 1. Sponsor funds the pool: split 60/30/10, 7-day finalize deadline, 1 AVAX
-const amp = new AMPTournamentClient().connect(sponsorWallet);
-const { tournamentId } = await amp.createTournament(
-  [6000, 3000, 1000], verifierAddress, deadlineUnix, parseEther("1.0")
-);
+## The architecture
 
-// 2. The game runs the bracket — local, deterministic, unit-testable
-const bracket = Tournament.new({ kind: TournamentState.SingleElimination }, entrants);
-for (const id of bracket.pending()) bracket.record(id, playMatch(id));
+The invariant that shapes everything: **matchmaking is hot mutable state,
+settlement is cold verifiable state.** The queue runs in memory at a 100ms
+tick; the money and attestations live on-chain.
 
-// 3. The verifier signs the final standings
-const signature = await verifierClient.signFinalize(tournamentId, winnerAddresses);
-
-// 4. Anyone submits the signature on-chain
-await amp.finalizeTournament(tournamentId, winnerAddresses, signature);
-
-// 5. Winners pull-claim — in-game or at playwithamp.xyz/claim
-const prize = await amp.getClaimablePrize(tournamentId, playerAddress);
-if (prize) await amp.claimPrize(tournamentId, prize.placement);
+```
+web/ (Next.js)                    amp-server (Rust)                    contracts/ (Solidity)
+  /arena — QuickDraw game          HTTP/WS gateway (axum)                AMPRegistry + AMPSettlement
+  /arena/multi — parties,          amp-match-core (pure lib:               ├─ staked matches: escrow,
+    commit-reveal, ladder            Glicko-2, rules, queue,                verifier-attested payouts,
+  /docs — self-contained            parties, commitments)                  bps rake, dispute arbitration
+  /setup /cup /claim —           EIP-191 challenge-response            AMPMultiplayer (v2)
+    tournaments (kept working)    EIP-712 outcome attestation             ├─ N-player dual-deposit
+        │                         K-of-N quorum collector                 │  escrow + reporting bonds
+        ▼                         commit-reveal anti-collusion            ├─ K=⌊2N/3⌋+1 quorum settle
+  amp-server API / WS             lobby formation + blockhash shuffle     ├─ prove-your-payout claims
+        │                         rating pipeline (γ-anti-boost)          └─ studio/protocol fee split
+        ▼                                  │                             AMPTournamentCup (untouched)
+  one EIP-191 signature                   ▼                                └─ sponsor prize cups
+                                  Postgres (Neon) ◀── relayer_jobs ── relayer (Rust, custody)
+                                  players, ratings, queue,             drains jobs, submits txs:
+                                  matches, reports, parties,           fund | finalize | settle_match
+                                  commits, multi-matches, ladders      settle_multi (on-chain quorum)
 ```
 
-Full walkthrough: [Quickstart](https://playwithamp.xyz/docs/quickstart) ·
-[SDK Reference](https://playwithamp.xyz/docs/api) ·
-[FAQ](https://playwithamp.xyz/docs/faq)
+**Components:**
 
-## Building with an AI agent?
+- **`amp-server/` (Rust)** — the matchmaker. Axum HTTP/WS gateway over an
+  in-memory `MatchQueue`; wallet-bound EIP-191 challenge login; Glicko-2
+  ratings; expanding skill window (tight matches early, any match
+  eventually); two-player outcome reconciliation with dispute + timeout
+  defaults; EIP-712 `AsyncResult` attestations.
+- **`amp-match-core/` (Rust, zero-dep)** — the embeddable heart: Glicko-2,
+  composable rules (skill/region/language/latency), the bucketed queue.
+  Studios can embed it without running anything else.
+- **`relayer/` (Rust)** — the only process holding a funded key. Drains
+  `relayer_jobs` from Postgres and submits on Fuji: tournament
+  fund/finalize + match `settle_match`.
+- **`contracts/` (Foundry)** — `AMPRegistry` + `AMPSettlement` (staked
+  matches, verifier-gated payouts, studio/protocol fee-split router, arbiter
+  disputes) and `AMPTournamentCup` (sponsor prize pools) — all deployed on
+  Fuji. Manifests: `contracts/deployment-fuji-v1.json` (v1 1v1 baseline,
+  operator-owned) and `contracts/deployment-fuji.json` (legacy, timelocked).
+- **`web/` (Next.js)** — `/arena` player client (login → queue → match →
+  report → rating) plus the tournament product surface (`/setup`, `/manage`,
+  `/cup`, `/claim`).
+- **`migrations/`** — one Postgres schema for everything.
 
-AMP ships as a skill file. Point your coding agent at
-[`agents/SKILL.md`](agents/SKILL.md) (or grab it at
-[playwithamp.xyz/download/SKILL.md](https://playwithamp.xyz/download/SKILL.md))
-and it can run the entire integration: installs per engine, the five-step
-flow, security rules, test templates, and a definition of done.
-
-## Deployed contract (Fuji testnet)
+## Deployed contracts (Fuji)
 
 | Contract | Address | Role |
 |:---|:---|:---|
-| `AMPTournamentCup` | [`0x7C743c1C9AE3e7A65d030098F2249B7787d66dfF`](https://testnet.snowtrace.io/address/0x7C743c1C9AE3e7A65d030098F2249B7787d66dfF) | Prize escrow: sponsor funds, verifier attests, winners pull-claim |
+| `AMPRegistry` (v1) | [`0xf6B0eA6c88c574c4BbEAdC186AAfe72C43C2cDc2`](https://testnet.snowtrace.io/address/0xf6B0eA6c88c574c4BbEAdC186AAfe72C43C2cDc2) | Escrow, game registry, fee-split config — game 0: ASYNC_VERIFIER, native AVAX |
+| `AMPSettlement` (v1) | [`0x78ec93e66255a74873d20DD62C6595A389272126`](https://testnet.snowtrace.io/address/0x78ec93e66255a74873d20DD62C6595A389272126) | Settlement: verifier-attested + RT hash-agree, fee-split router (≤800 bps total) |
+| `AMPTournamentCup` | [`0x7c743c1c9ae3e7a65d030098f2249b7787d66dff`](https://testnet.snowtrace.io/address/0x7c743c1c9ae3e7a65d030098f2249b7787d66dff) | Sponsor prize pools, EIP-712 finalization, pull-claims (unchanged) |
+| `AMPMultiplayer` (v2) | [`0xcabf7b626172fE55d54f03c346563671AbcC77f7`](https://testnet.snowtrace.io/address/0xcabf7b626172fE55d54f03c346563671AbcC77f7) | N-player escrow, K-of-N quorum settlement, prove-your-payout claims |
 
-Protocol fee: 2% (200 bps) per payout, read live via `protocolFeeBps()`.
-Manifest: [`contracts/deployment-fuji-tournament.json`](contracts/deployment-fuji-tournament.json).
+## The player flow
+
+1. **Login** — connect wallet, sign one challenge. No transaction, no gas.
+2. **Queue** — pick a game + ruleset, see live queue depth and your rating.
+   Leave anytime.
+3. **Match found** — WebSocket push with opponent card (rating, region).
+4. **Play, report** — both players submit `win/loss/draw`.
+5. **Result** — instant: rating update + (if configured) an EIP-712
+   attestation. Staked matches: escrow settles on-chain, winners claim.
+
+Trust rules for reports: both agree → settled. Conflict → disputed,
+operator arbitrates. Opponent silent past the deadline → reporter's result
+stands. Nobody reports → cancelled, ratings untouched.
+
+## v2: N-player multiplayer (shipped)
+
+v2 extends AMP from 1v1 to parties, teams, FFA lobbies (4–16), and battle
+royale (16–64) with dual-deposit escrow (stake + reporting bond), K-of-N
+quorum settlement (`K = ⌊2N/3⌋+1`), early-exit death certificates,
+commit-reveal anti-collusion queueing, and payout profiles. The design
+record — decisions, invariants, and deliberate spec deviations — lives in
+[`docs/design/n-player-v2.md`](docs/design/n-player-v2.md).
+
+**What shipped at v0.2.0:** the `AMPMultiplayer` contract (deployed, sourcify-verified,
+91 forge tests + conservation fuzz gates), the full amp-server N-player
+pipeline (party sessions, commit-reveal, quorum collector, rating pipeline
+with γ-anti-boost, lobby formation, multi sweep), the `/arena/multi`
+frontend with party invite codes and interactive ladder reporting, and the
+`QuickDraw` reaction-duel demo game (real bot opponents, 230–380ms
+realistic reaction times). The relayer's `settle_multi` job submits to the
+live contract. Self-contained developer docs live in [`docs/`](docs/).
+
+## The three hard problems — and what ships for each
+
+**Cold-start liquidity.** Empty lobbies kill peer-to-peer matchmaking, so
+AMP ships (1) **practice-bot fill** — wait past the threshold
+(`AMP_BOT_AFTER_MS`, default 45s) and the house opponent offers an instant
+unrated match, so a solo player is never stranded; (2) **prime-time queue
+windows** (`AMP_QUEUE_WINDOWS_JSON`) that concentrate concurrent players
+into scheduled blocks; (3) a **free-first funnel** — gasless login, free
+ranked play — the widest possible top of the ladder.
+
+**Oracle-free outcome attestation.** Every result report can be **signed by
+the player's own wallet** (EIP-191 over `AMP_REPORT:v1:{matchId}:{result}`)
+— non-repudiable evidence that makes settlement possible without trusting
+the operator. Signed reports are *required* for staked matches. Players may
+also submit **transcript hashes**; matching hashes strengthen agreement,
+mismatched hashes force a dispute even when claims align. On-chain,
+`AMPSettlement` supports `RT_HASH_AGREE` mode where the two player
+submissions settle escrow directly — no verifier signature needed — with
+verifier-attested `ASYNC_VERIFIER` mode as the high-stakes path.
+
+**Fee vs. value.** A bare rake gets bypassed; AMP's rake (bps, taken only
+on staked settlement) funds the ladder players can't self-host: one wallet
+= one cross-game rating graph, portable EIP-712 skill attestations,
+Glicko-2 matchmaking quality, griefing arbitration, escrowed prize cups,
+and an embeddable core library (`amp-match-core`) for studios that want the
+algorithms without running the service.
+
+## Run it
+
+### Database (Neon Postgres)
+Set `DATABASE_URL` to the **pooled** connection string (the `-pooler`
+hostname). Apply migrations: `cd web && npm run db:migrate`.
+
+### amp-server (the matchmaker)
+```bash
+cd amp-server && cp .env.example .env   # set DATABASE_URL at minimum
+cargo run --release                      # :8080 — free-play mode without a verifier key
+```
+Set `AMP_VERIFIER_KEY` to enable EIP-712 attestations; add
+`AMP_SETTLEMENT_ADDRESS` + `AMP_STAKING_ENABLED=1` for staked settlement.
+
+### web
+```bash
+cd web && npm install
+NEXT_PUBLIC_AMP_SERVER_URL=http://localhost:8080 npm run dev
+```
+
+### relayer (custody — run separately, never on Vercel)
+```bash
+cd relayer && cargo run --release
+# DATABASE_URL + AMP_RELAYER_KEY (funded Fuji EOA)
+```
+
+### contracts
+```bash
+cd contracts && forge test -vvv
+```
 
 ## Repo layout
 
 ```
-├── contracts/         # Foundry: AMPTournamentCup (Forge tests + invariants)
-├── web/               # playwithamp.xyz — cup launcher, bracket console, claim portal, docs
-├── relayer/           # custody relayer: card-funded cups (PayPal → on-chain funding)
-├── agents/SKILL.md    # AI-agent integration playbook
-├── migrations/        # Postgres schema for the hosted console
-├── amp-sdk-* (../)    # sibling SDK repos: TypeScript, Unity, Unreal, C#, Rust
-└── docs/              # design records
+├── amp-server/        # Rust matchmaker: HTTP/WS, auth, queue, ratings, attestations
+├── amp-match-core/    # embeddable Glicko-2 + rules + queue library (serde-only)
+├── relayer/           # Rust custody relayer (job queue → sign → submit)
+├── contracts/         # Foundry: Registry/Settlement + TournamentCup (Fuji)
+├── web/               # Next.js: /arena player client + tournament product
+├── migrations/        # Postgres schema
+└── docs/              # docs.page source · docs/legacy/ = pre-pivot design docs
 ```
-
-> History note: earlier iterations shipped a ranked-matchmaking server
-> (`amp-server`), a matchmaker core library (`amp-match-core`), and the
-> `AMPMultiplayer` / `AMPRegistry` / `AMPSettlement` contracts. They were
-> removed after the tournament-only pivot — find them in git history. The old
-> contracts remain source-verified on Fuji with no user funds; integrators
-> should target `AMPTournamentCup` only.
 
 ## Security model
 
-- **Pull-payments only** — prizes move when winners call `claimPrize`; the
-  contract has no push path to player funds.
-- **Refund safety** — every cup has a finalize deadline; unfinalized cups are
-  sponsor-refundable, so funds can never be trapped in an abandoned event.
-- **EIP-712 attestations** — identical digests in Solidity, Rust, and the
-  browser; the verifier key is the only key that can release prizes.
-- **Exact accounting** — deposits measured on-chain (fee-on-transfer safe);
-  Forge unit tests + conservation invariants; source-verified on Snowtrace.
-- **Road to mainnet** — external audit + timelock governance are prerequisites
-  before any mainnet deployment. Fuji only until then.
+- **Pull-payments only** on both settlement paths; no push transfers.
+- **Relayer key isolation** — the funded key exists only in the relayer env.
+- **Verifier attestations** — EIP-712 digests computed identically in
+  Solidity, Rust (hand-rolled, test-verified recovery), and the browser.
+- **Wallet-bound, single-use challenges**; session tokens stored hashed.
+- **Idempotent reports** — first report per player stands (`ON CONFLICT`).
+- Contracts: `ReentrancyGuard` + `Pausable` + `Ownable2Step`, value
+  conservation fuzz-tested, timelock governance on economic parameters.
 
-## Run the pieces
+### P0 audit remediation — verified closed
 
-```bash
-# contracts (Foundry)
-cd contracts && forge test
+The 2026-07 audit spec (`SECURITY_REMEDIATION.md`, preserved in git
+history) is fully remediated and was removed from the tree:
 
-# web (Next.js)
-cd web && npm install && npm run dev
+| Item | Resolution |
+|---|---|
+| C1 payout tampering | Relayer jobs carry `{tournamentId}` only; winners independently re-derived in Rust (`relayer/src/bracket.rs`) with a 36-case TS-engine parity corpus, cross-checked against the web's derivation before signing |
+| C2 double funding | PayPal orders gated by `funding_intents` idempotency; amounts verified server-side |
+| C3 organizer spoofing | Bearer `manage_token` (constant-time compare) on bracket/finalize/init; token required on init upsert |
+| H1 report forgery/replay | EIP-191 signature recovery + `report_nonces` single-use on `/report` |
+| Abuse limits | Upstash sliding-window rate limits (5/30/60 per min) + 64KB body caps + array-length caps on every write route |
+| L2/L3 job leakage | `GET /api/job/[id]` returns status fields only; row provisioning moved into the relayer |
 
-# relayer (custody — card funding; never co-deploy with web)
-cd relayer && cargo run --release
-```
+
+## Postscript
+
+AMP shipped as v0.2.0 (2026-09-07) — ranked matchmaking, N-player
+multiplayer, and tournament cups — and placed top-20 in Avalanche Build
+Games 2026 ($15,000 grant). A later rework narrowed the protocol to
+tournaments only and ran at playwithamp.xyz; both the rework and the site
+are now retired. This tree is the final state: the v0.2.0 matchmaking
+release, self-hostable, with the full record — the tournament era and the
+2026-07 security-audit remediation included — preserved in git history.
 
 ## License
 

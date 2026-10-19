@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], display: "swap" });
-
 export const metadata: Metadata = {
-  title: "AMP — Tournament Protocol",
-  description: "Run real prize tournaments in any game: fund an AVAX prize pool on Avalanche, run the bracket, and winners claim on-chain.",
+  title: "AMP - Verifiable Tournament Engine on Avalanche",
+  description:
+    "Run trustless tournaments with escrowed prize pools, instant payouts, and tamper-proof results. Any game. Any engine. Any community. Settle champions on Avalanche.",
   icons: {
     apple: "/amp-icon.png",
   },
@@ -19,7 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} antialiased`}>
+      <body className="antialiased">
         {children}
       </body>
     </html>

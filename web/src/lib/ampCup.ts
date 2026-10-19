@@ -11,7 +11,7 @@ import { ethers } from "ethers";
  */
 export const CUP_ADDRESS =
   process.env.NEXT_PUBLIC_AMP_CUP_ADDRESS ||
-  "0x7C743c1C9AE3e7A65d030098F2249B7787d66dfF";
+  "0x7c743c1c9ae3e7a65d030098f2249b7787d66dff";
 export const FUJI_CHAIN_ID = Number(
   process.env.NEXT_PUBLIC_AMP_CHAIN_ID || "43113",
 );
@@ -21,10 +21,6 @@ export const FUJI_RPC =
 /** Block explorer base (no trailing slash) for user-facing links. */
 export const EXPLORER_URL =
   process.env.NEXT_PUBLIC_AMP_EXPLORER_URL || "https://testnet.snowtrace.io";
-
-/** Deployed Fuji AMPTournamentCup.protocolFeeBps. 200 = 2%. */
-export const PROTOCOL_FEE_BPS = 200;
-export const PROTOCOL_FEE_LABEL = `${PROTOCOL_FEE_BPS / 100}%`;
 
 export const AMPCUP_ABI = [
   "function createTournament(uint16[] payoutBps, address verifier, uint64 finalizeDeadline) payable returns (uint256)",

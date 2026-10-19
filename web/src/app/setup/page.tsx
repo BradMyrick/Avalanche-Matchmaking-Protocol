@@ -16,6 +16,8 @@ import {
   Check,
   ExternalLink,
   Sparkles,
+  ArrowLeft,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   CUP_ADDRESS, EXPLORER_URL,
@@ -23,10 +25,8 @@ import {
   connectWallet,
   signFinalize,
   AMPCUP_ABI,
-  PROTOCOL_FEE_LABEL,
 } from "@/lib/ampCup";
-import SiteHeader from "@/app/components/SiteHeader";
-import { parseAddressList } from "@/lib/wallet";
+import { generateWallets, parseAddressList, type GeneratedWallet } from "@/lib/wallet";
 import { InfoTip } from "@/app/components/InfoTip";
 
 type Currency = "USD" | "AVAX";
@@ -241,16 +241,23 @@ export default function SetupPage() {
       <div className="absolute top-0 -left-1/4 w-[150%] h-[500px] bg-brand-cyan/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 -right-1/4 w-[150%] h-[500px] bg-brand-red/10 blur-[120px] rounded-full pointer-events-none" />
 
-      <SiteHeader />
+      <header className="relative z-10 max-w-5xl mx-auto px-6 pt-10">
+        <Link href="/" className="inline-flex items-center gap-2 text-zinc-400 hover:text-brand-cyan transition-colors text-sm">
+          <ArrowLeft className="w-4 h-4" /> Back to AMP
+        </Link>
+      </header>
 
-      <main className="relative z-10 max-w-3xl mx-auto px-6 pt-20 pb-12">
-        <div className="text-center mb-8">
+      <main className="relative z-10 max-w-3xl mx-auto px-6 py-12">
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-cyan/10 border border-brand-cyan/30 mb-4">
+            <Sparkles className="w-3 h-3 text-brand-cyan" />
+            <span className="text-xs font-bold text-brand-cyan tracking-widest uppercase">Launch a Tournament</span>
+          </div>
           <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tight mb-3">
             Set Up Your <span className="text-brand-cyan">Cup</span>
           </h1>
-          <p className="text-zinc-400">
-            Create and fund a real tournament cup in three steps — no code required.
-            Building a game? The SDK does all of this programmatically.
+          <p className="text-zinc-400 text-lg">
+            Prize pool, payout split, winner wallets — fund with card or wallet. Winners claim instantly on Avalanche.
           </p>
         </div>
 
@@ -324,7 +331,7 @@ export default function SetupPage() {
                       ))}
                     </div>
                     <p className="text-[11px] text-zinc-500 mt-3">
-                      Winners claim from their own wallet.
+                      Share each wallet&rsquo;s private key with its winner. They import it in any wallet and call <code className="text-brand-cyan">claimPrize</code> on the contract to receive their payout.
                     </p>
                   </div>
 
@@ -360,7 +367,8 @@ export default function SetupPage() {
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xs uppercase tracking-wider text-zinc-500">Tournament type</span>
                   <InfoTip>
-                    Instant: name the winner wallets. Bracket: single elimination, scored from the organizer console.
+                    <strong className="text-white">Instant payout:</strong> winners are paid immediately after funding. You provide the winner wallets upfront — no bracket to manage.<br/><br/>
+                    <strong className="text-white">Run a bracket:</strong> players compete in a single-elimination bracket. You record results from the organizer console; winners are determined by match outcomes.
                   </InfoTip>
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-4">
@@ -370,7 +378,8 @@ export default function SetupPage() {
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xs uppercase tracking-wider text-zinc-500">Payment method</span>
                   <InfoTip>
-                    Card: the relayer funds the cup. AVAX: your wallet funds the contract.
+                    <strong className="text-white">USD (PayPal):</strong> pay with a credit/debit card. AMP&rsquo;s custodial relayer funds the on-chain prize pool for you — no wallet or crypto needed.<br/><br/>
+                    <strong className="text-white">AVAX (Wallet):</strong> pay directly with AVAX from your Avalanche wallet. You fund the prize pool yourself on-chain.
                   </InfoTip>
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-4">
@@ -435,7 +444,7 @@ export default function SetupPage() {
                   <Row label="Prize" value={`${amount} ${currency}`} />
                   <Row label="Split" value={preset.label} />
                   <Row label="Winners" value={`${placements} wallet${placements > 1 ? "s" : ""}`} />
-                  <Row label="Protocol fee" value={`${PROTOCOL_FEE_LABEL} of each payout`} />
+                  <Row label="Protocol fee" value="2% on payouts" />
                 </div>
 
                 {busy && (

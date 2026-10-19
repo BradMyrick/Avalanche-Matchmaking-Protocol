@@ -1,97 +1,37 @@
-# @amp-protocol/contracts — Avalanche Tournament Protocol
+# AMP Protocol Smart Contracts - MVP Implementation
 
-Source-verified smart contracts for sponsor prize pools and verifiable tournament settlement on Avalanche (C-Chain and Avalanche L1s/Subnets).
+## Architecture & Implementation Steps
+The AMP Registry and Settlement contracts have been finalized for the MVP, which focuses specifically on the turn-based `ASYNC_REPLAY` flow.
 
----
+### 1. AMPRegistry.sol (Escrow & Matching)
+- **`createMatch` & `joinMatch`**: Players are successfully matched and escrowed. The registry strictly checks that `msg.value` matches the `minStake` requirement for native AVAX games.
+- **`settleMatch`**: A single point of exit for escrowed funds, restricted by the `onlySettlement` modifier. Iterates through recipients to handle direct value transfers and accounts for a protocol fee.
+- **`getGameVerifiers`**: Added to cleanly return dynamic arrays within structs, circumnavigating a well-known Solidity getter limitation.
 
-## Deployed Contracts (Avalanche Fuji Testnet)
+### 2. AMPSettlement.sol (Verification & Payout)
+- **`submitAsyncResult`**: Integrated directly with `@openzeppelin/contracts/utils/cryptography/ECDSA.sol` to perform signature recovery. The `structHash` encapsulates the outcome so verifiers can produce replay-protected claims.
+- **ECDSA & MessageHashUtils**: Relies on EIP-191 signatures (`\x19Ethereum Signed Message:\n32`) so the system is standard-compliant and secure.
+- **`_payout`**: Distributes payouts based on the enumerator outcome. Specifically distributes proportional splits for Draws, total pools to Winners, and full refunds for Cancelled outcomes. Protocol fees are diverted to the registry.
 
-| Contract | Address | Network | Description |
-|:---|:---|:---|:---|
-| **`AMPTournamentCup`** | [`0x7c743c1c9ae3e7a65d030098f2249b7787d66dff`](https://testnet.snowtrace.io/address/0x7c743c1c9ae3e7a65d030098f2249b7787d66dff) | Fuji (ChainID: 43113) | Sponsor prize pools, EIP-712 verified standings, winner pull-claims (AVAX & ERC-20) |
+## Security Considerations Taken
+1. **Reentrancy Protection**: Used the `nonReentrant` custom modifier on functions that handle external state manipulation or payout triggers, particularly `settleMatch` and `withdrawFees`. Standard `Checks-Effects-Interactions` pattern was strictly adhered to.
+2. **Access Control**: Implemented strict `onlySettlement` and `onlyOwner` modifiers. `AMPSettlement` calculates the economics but holds no funds directly, segregating risk. Only an authorized verifier (validated by the ECDSA check) can settle open matches.
+3. **Array Getter Workaround**: Explicit getter (`getGameVerifiers`) implemented for struct arrays to ensure no mapping decode issues trigger unanticipated VM errors. 
+4. **Stack Depth Optimization**: Enforced `via_ir` EVM compilation in `foundry.toml` to prevent `stack too deep` issues without breaking logical flow or abstracting too many variables to memory.
 
----
+## Local MVP Deployment (Anvil)
+For the MVP, we run everything against a local **Anvil** node. The deployed addresses are for the local environment only and will not be found on Snowtrace.
 
-## 1. AMPTournamentCup.sol
-
-`AMPTournamentCup` is the primary tournament escrow contract. It allows sponsors, DAOs, guilds, or game studios to fund automated prize cups with native AVAX or ERC-20 tokens (e.g. USDC).
-
-### Workflow
-
-```
-┌─────────────────┐       ┌────────────────────┐       ┌─────────────────┐
-│ 1. Sponsor Funds│       │ 2. Game / Bracket  │       │ 3. Winners Claim│
-│ createTournament│ ────> │   finalizeTournament│ ────> │   claimPrize    │
-│ (AVAX or ERC20) │       │ (EIP-712 Attested) │       │  (Pull-Payment) │
-└─────────────────┘       └────────────────────┘       └─────────────────┘
-```
-
-1. **Funding & Configuration (`createTournament` / `createTournamentERC20`)**:
-   - The sponsor deposits the prize pool.
-   - Sets a payout split in basis points (e.g. `[7000, 3000]` for 70% 1st, 30% 2nd). Must sum to 10,000 bps.
-   - Designates an authorized `verifier` address (the tournament coordinator or server key).
-   - Sets a `finalizeDeadline` timestamp after which funds can be refunded if the tournament is abandoned.
-2. **Attestation (`finalizeTournament`)**:
-   - Once matches finish, the verifier signs an EIP-712 typed data message:
-     ```solidity
-     keccak256("TournamentResult(uint256 tournamentId,address[] winners)")
-     ```
-   - Anyone (or an automated bot) can submit the transaction with the verifier's signature.
-3. **Winner Claims (`claimPrize`)**:
-   - Winners pull-claim their prize directly to their wallet.
-   - Anti-MEV pull-payment model: avoids failing push-transfers and reentrancy vectors.
-
-### Safety Invariants
-
-- **Pull-Payments Only**: Zero external calls during finalization.
-- **Deadline Protection**: If the verifier fails to finalize before `finalizeDeadline`, the sponsor can cancel and reclaim 100% of their deposited funds.
-- **Fee-On-Transfer Safe**: Actual received balance deltas are measured on ERC-20 deposits.
-- **Zero-Address Guards**: All winner and verifier inputs are strictly validated.
-
----
-
-## Installing & Importing
-
-### Via NPM
+### 1. Start Anvil
 ```bash
-npm install @amp-protocol/contracts
+anvil
 ```
 
-Import ABIs or Solidity sources directly:
-```solidity
-import "@amp-protocol/contracts/AMPTournamentCup.sol";
-```
-
-### Via Foundry
+### 2. Run Deployment Script
+From the `contracts/` directory, in a new terminal window:
 ```bash
-forge install BradMyrick/Avalanche-Matchmaking-Protocol
+export PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+forge script script/Deploy.s.sol --rpc-url http://localhost:8545 --broadcast
 ```
 
----
-
-## Deploying to an Avalanche L1 (Subnet)
-
-You can deploy `AMPTournamentCup` to any custom Avalanche L1 in under 60 seconds:
-
-```bash
-export RPC_URL="https://your-avalanche-l1-rpc.xyz"
-export PRIVATE_KEY="0x..."
-export FEE_RECIPIENT="0x..."
-
-forge script script/DeployTournamentCup.s.sol \
-  --rpc-url $RPC_URL \
-  --broadcast \
-  --skip-simulation
-```
-
-> **Note on Avalanche EVM**: Use `--skip-simulation` with Foundry on Avalanche C-Chain / L1s because pending block simulation can fail on certain subnet nodes.
-
----
-
-## Running Contract Tests
-
-```bash
-forge test -vvv
-```
-
-All 16 unit and invariant test suites for `AMPTournamentCup` execute and pass in milliseconds.
+*Note the output addresses for the Registry and Settlement. These will be used by the `amp-server` module.*
